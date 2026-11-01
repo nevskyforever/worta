@@ -143,7 +143,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   if (!snapshot.manifest) throw new BrowserReplayError('metadata_history_incomplete')
   const anchor = snapshot.manifest.anchor
   if (snapshot.manifest.phase !== 'received' || snapshot.rows.length !== anchor.registry.current_cursor || !snapshot.rows.length) throw new BrowserReplayError('metadata_history_incomplete')
-  if (terminalContent && snapshot.manifest.contract_version !== 5) throw new BrowserReplayError('unsupported_content_cohort')
+  if (terminalContent && snapshot.manifest.contract_version !== 5 && snapshot.manifest.contract_version !== 6) throw new BrowserReplayError('unsupported_content_cohort')
   // Authenticate the entire account history before the first owner commit.
   if (terminalContent) await lease!.use(amk => assertReplayHistoryAdmissible(snapshot, scope, true, true, amk))
   else await assertReplayHistoryAdmissible(snapshot, scope, structural, initialNotes)

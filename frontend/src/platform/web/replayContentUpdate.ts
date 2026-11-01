@@ -27,7 +27,7 @@ export async function applyReplayContentUpdate(port: MetadataPort, scope: Browse
   check()
   let snapshot = await port.read(); check()
   const manifest = snapshot.manifest, row = snapshot.rows[sequence - 1]
-  if (!Number.isSafeInteger(sequence) || !manifest || manifest.contract_version !== 5 || manifest.phase !== 'received'
+  if (!Number.isSafeInteger(sequence) || !manifest || (manifest.contract_version !== 5 && manifest.contract_version !== 6) || manifest.phase !== 'received'
     || !row || row.server_sequence !== sequence || row.protocol_version !== 3
     || !['received', 'content_note_proven'].includes(row.state)
     || (row.state === 'received' ? manifest.applied_cursor !== sequence - 1 : manifest.applied_cursor !== sequence))

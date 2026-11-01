@@ -76,7 +76,7 @@ try {
     const error = await page.evaluate(async ({ scope, kind }) => {
       const original = IDBObjectStore.prototype.put
       IDBObjectStore.prototype.put = function (value, ...args) {
-        if (this.name === 'replayManifest' && value.record_version === 5) { if (kind === 'quota') throw new DOMException('fixture', 'QuotaExceededError'); this.transaction.abort(); throw new DOMException('fixture', 'AbortError') }
+        if (this.name === 'replayManifest' && value.record_version === 6) { if (kind === 'quota') throw new DOMException('fixture', 'QuotaExceededError'); this.transaction.abort(); throw new DOMException('fixture', 'AbortError') }
         return original.call(this, value, ...args)
       }
       try { const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts'); const store = await openBrowserReplayStorage(scope, new AbortController().signal, () => true); await store.close(); return null }
@@ -89,10 +89,10 @@ try {
   assert.equal(await openCurrent(page, scope), 'corrupt_record'); assert.deepEqual(await cache(page), bad)
   await replace(page, 'worta-web-replay', { ownerHeads: v2.rows.ownerHeads }); checks.push('corrupt-v2-migration-no-cleanup')
   assert.equal(await openCurrent(page, scope), null)
-  const v3 = structuredClone(v2); v3.version = 5; v3.rows.replayManifest = v3.rows.replayManifest.map(row => ({ ...row, record_version: 5, contract_version: 5, applied_cursor: row.metadata_cursor, source_seeds: [] }))
-  assert.deepEqual(await cache(page), v3); checks.push('v2-v4-exact-wire-and-real-owner-proof-preservation')
+  const v3 = structuredClone(v2); v3.version = 6; v3.rows.replayManifest = v3.rows.replayManifest.map(row => ({ ...row, record_version: 6, contract_version: 6, applied_cursor: row.metadata_cursor, source_seeds: [] }))
+  assert.deepEqual(await cache(page), v3); checks.push('v2-v6-exact-wire-and-real-owner-proof-preservation')
   const oldFailure = await page.evaluate(async ({ scope, url }) => { try { const { openBrowserReplayStorage } = await import(/* @vite-ignore */ url); const store = await openBrowserReplayStorage(scope, new AbortController().signal, () => true); await store.close(); return null } catch (e) { return e.code } }, { scope, url: frozen.storage })
-  assert.equal(oldFailure, 'unsupported_version'); assert.deepEqual(await cache(page), v3); checks.push('genuine-v2-client-refuses-v4')
+  assert.equal(oldFailure, 'unsupported_version'); assert.deepEqual(await cache(page), v3); checks.push('genuine-v2-client-refuses-v6')
   await login(page, 'StructuralMigration'); phase = 'owner'
   assert.equal((await page.evaluate(() => reader.applyCloudAccountMetadata(new AbortController().signal))).ownerProofs, 1)
   assert.deepEqual(await cache(page), v3); checks.push('metadata-only-restart-reauthentication-after-migration')
@@ -132,7 +132,7 @@ try {
     window.fetch = async (...args) => {
       const response = await original(...args), url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href)
       if (url.pathname === '/api/v2/sync/encrypted/capabilities' && ++modes === 4) {
-        const open = indexedDB.open('worta-web-replay', 5); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
+        const open = indexedDB.open('worta-web-replay', 6); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
         const tx = db.transaction(['ownerHeads', 'inbox'], 'readwrite'), heads = tx.objectStore('ownerHeads').getAll(), rows = tx.objectStore('inbox').getAll()
         heads.onsuccess = () => { const h = heads.result.find(head => head.owner_kind === 'stage'); window.repairHead = structuredClone(h); h.history[0].wire_digest = '0'.repeat(64); tx.objectStore('ownerHeads').put(h) }
         rows.onsuccess = () => { const row = rows.result.find(row => row.event_id === repairHead.history[0].event_id); window.repairRow = structuredClone(row); row.stage_proof.wire_digest = '0'.repeat(64); tx.objectStore('inbox').put(row) }
@@ -185,7 +185,7 @@ try {
     let db
     try {
       await keys.unlockWithPassphrase(identity.local_account_id, 'encryption-password')
-      const open = indexedDB.open('worta-web-replay', 5); await new Promise(resolve => { open.onsuccess = resolve }); db = open.result
+      const open = indexedDB.open('worta-web-replay', 6); await new Promise(resolve => { open.onsuccess = resolve }); db = open.result
       const scope = { canonicalUserId: context.userId, accountId: identity.local_account_id, deviceId: identity.device_id }
       const current = () => auth.isCurrent(context) && !!keys.leaseForAccount(scope.accountId)?.isCurrent()
       const transaction = (input, _stores, mode, schedule) => {

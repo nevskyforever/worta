@@ -158,10 +158,10 @@ describe('Online-Only ciphertext receiver, without apply proofs', () => {
   it('strictly validates stored manifest versions, identity, phase and technical fields', async () => {
     await run()
     const original = state.manifest!
-    expect(validateReplayManifest(original, scope)).toEqual(original)
+    expect(validateReplayManifest(original, scope, 5)).toEqual(original)
     for (const invalid of [{ ...original, record_version: 3 }, { ...original, account_id: crypto.randomUUID() }, { ...original, content: 'PLAINTEXT' },
       { ...original, receive_cursor: 4 }, { ...original, ciphertext_bytes: -1 }, { ...original, revision: Number.MAX_SAFE_INTEGER + 1 }]) {
-      expect(() => validateReplayManifest(invalid, scope)).toThrow()
+      expect(() => validateReplayManifest(invalid, scope, 5)).toThrow()
     }
   })
 })

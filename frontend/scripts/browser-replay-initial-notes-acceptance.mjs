@@ -52,7 +52,7 @@ async function cache(page, database = 'worta-web-replay') {
 const apply = page => page.evaluate(async () => { try { return await reader.applyCloudInitialNotes(new AbortController().signal) } catch (error) { return { error: error.code ?? error.message } } })
 async function putRow(page, store, row) {
   await page.evaluate(async ({ store, row }) => {
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     try { await new Promise((resolve, reject) => {
@@ -63,7 +63,7 @@ async function putRow(page, store, row) {
 }
 async function deleteInbox(page, row) {
   await page.evaluate(async row => {
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     try { await new Promise((resolve, reject) => {
@@ -79,7 +79,7 @@ async function opened(page, projects) {
     const { runBrowserTransaction } = await import('/src/platform/web/persistence.ts')
     const identity = reader.currentIdentity, scope = { accountId: identity.local_account_id, deviceId: identity.device_id,
       canonicalUserId: reader.auth.requireContext().userId }
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     const transaction = (_scope, stores, mode, schedule) => runBrowserTransaction(db, stores, mode, (tx, result, abort) => schedule(tx, result, abort))
@@ -190,7 +190,7 @@ try {
   assert.ok(!result.error, JSON.stringify(result))
   assert.equal(result.projectOpened, false)
   const after = await cache(page)
-  assert.equal(after.version, 5)
+  assert.equal(after.version, 6)
   assert.equal(after.rows.inbox.filter(row => row.state === 'note_proven').length, 3)
   assert.equal(after.rows.inbox.filter(row => row.state === 'applied').length, 2)
   assert.equal(after.rows.inbox.filter(row => row.state === 'stage_proven').length, 1)

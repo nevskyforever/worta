@@ -1,5 +1,31 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-01 — Resolution2 replay v6, Slice 1 (local implementation)
+
+Starting `0b66eb877d17eaf5b2c276201a5d44042d199acd`. The separate
+`worta-web-replay` database upgrades to native version 6 atomically. Its
+versionchange validates every account using the appropriate historical
+inventory/manifest rules before changing only manifest record and contract
+versions. Ciphertext, seeds, owner proofs and all other records remain intact.
+Frozen v5 readers reject the v6 database; unknown versions and malformed data
+fail closed. Existing bounded Content replay accepts v6 with its original
+admission checks; no new owner composition is enabled. No developer IndexedDB
+v12, server protocol or capability gate was changed.
+
+Real Chromium tests cover two accounts, corruption in the second account,
+abort and quota after the first manifest write, rollback and restart, pinned v4
+and v5 migration, old-client refusal and exact record preservation. An isolated
+PostgreSQL 16 / HTTP / Chromium test produces real v5 Note owner proofs and
+source seeds and compares every stored record after upgrade. Focused replay,
+historical migration, Metadata, Structural, Note and Content tests, typecheck,
+build and quick checks passed. Full frontend Vitest passed 4,345 tests with
+four workers and Node 26 experimental webstorage disabled; independent CI
+remains pending.
+This slice does not implement Resolution composition or authorize a reader:
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`,
+Registration CLOSED, PUBLIC RELEASE BLOCKED. Progress remains **89.36%**.
+Next: the separately scoped genuine Content conflict owner composition slice.
+
 ## 2026-11-01 — Resolution2 replay compatibility design
 
 Starting `1e589629a1bf37d7a053f552d06bef38949a3d0a`; the prior uncommitted

@@ -84,7 +84,7 @@ try {
     const failure = await page.evaluate(async ({ identity, kind, user }) => {
       const original = IDBObjectStore.prototype.put
       IDBObjectStore.prototype.put = function (value, ...args) {
-        if (this.name === 'replayManifest' && value.record_version === 5) {
+        if (this.name === 'replayManifest' && value.record_version === 6) {
           if (kind === 'quota') throw new DOMException('fixture', 'QuotaExceededError')
           this.transaction.abort(); throw new DOMException('fixture', 'AbortError')
         }
@@ -97,13 +97,13 @@ try {
       finally { IDBObjectStore.prototype.put = original }
     }, { identity, kind, user: v3.rows.identities[0].canonical_user_id })
     assert.equal(failure, kind === 'quota' ? 'quota_exceeded' : 'storage_failed')
-    assert.deepEqual(await cache(page), v3); checks.push(`v3-v4-${kind}-migration-rollback`)
+    assert.deepEqual(await cache(page), v3); checks.push(`v3-v6-${kind}-migration-rollback`)
   }
   assert.equal((await page.evaluate(() => reader.receiveCloudAccountHistory(new AbortController().signal))).ownerProofs, 0)
-  const before = await cache(page); assert.equal(before.version, 5)
-  const migrated = structuredClone(v3); migrated.version = 5
-  migrated.rows.replayManifest = migrated.rows.replayManifest.map(value => ({ ...value, record_version: 5, contract_version: 5, source_seeds: [] }))
-  assert.deepEqual(before, migrated); checks.push('genuine-v3-to-v4-migration-preserves-all-ciphertext')
+  const before = await cache(page); assert.equal(before.version, 6)
+  const migrated = structuredClone(v3); migrated.version = 6
+  migrated.rows.replayManifest = migrated.rows.replayManifest.map(value => ({ ...value, record_version: 6, contract_version: 6, source_seeds: [] }))
+  assert.deepEqual(before, migrated); checks.push('genuine-v3-to-v6-migration-preserves-all-ciphertext')
   phase = 'seed'
   for (const kind of ['quota', 'abort']) {
     const failure = await page.evaluate(async ({ project, kind }) => {
@@ -123,7 +123,7 @@ try {
   assert.deepEqual(first, { kind: 'encrypted_note_source_seed', status: 'seeded', projectOpened: false,
     ready: false, declarationAllowed: false, writerAuthorized: false })
   const seeded = await cache(page), manifest = seeded.rows.replayManifest[0]
-  assert.equal(seeded.version, 5); assert.equal(seeded.rows.localProjects.length, 1)
+  assert.equal(seeded.version, 6); assert.equal(seeded.rows.localProjects.length, 1)
   assert.equal(seeded.rows.localNotes.length, 0); assert.equal(seeded.rows.legacyNoteHistory.length, 0)
   assert.equal(manifest.source_seeds.length, 1); assert.equal(manifest.source_seeds[0].initial_event_count, 2)
   assert.equal(manifest.source_seeds[0].initial_max_server_sequence, 2)
@@ -148,7 +148,7 @@ try {
       const store = await openBrowserReplayStorage(scope, new AbortController().signal, () => true); await store.close(); return null }
     catch (error) { return error.code }
   }, { scope: { accountId: identity.local_account_id, deviceId: identity.device_id, canonicalUserId: both.rows.identities[0].canonical_user_id }, url: frozen.storage })
-  assert.equal(old, 'unsupported_version'); assert.deepEqual(await cache(page), both); checks.push('genuine-v3-client-refuses-v4')
+  assert.equal(old, 'unsupported_version'); assert.deepEqual(await cache(page), both); checks.push('genuine-v3-client-refuses-v6')
   assert.ok(requests.every(request => request.method === 'GET'), JSON.stringify(requests.filter(request => request.method !== 'GET')))
   checks.push('reader-only-http-no-ack-push-capability')
   await context.close(); page = await launch(); await login(page)

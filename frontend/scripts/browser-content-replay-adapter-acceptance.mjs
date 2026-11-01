@@ -34,7 +34,7 @@ try {
   await page.evaluate(async f => {
     const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
     const store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true); await store.close()
-    const open = indexedDB.open('worta-web-replay', 5)
+    const open = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
     const db = open.result, tx = db.transaction([...db.objectStoreNames], 'readonly')
     const schema = [...db.objectStoreNames].map(name => { const s = tx.objectStore(name); return { name, keyPath: s.keyPath,
@@ -75,13 +75,13 @@ try {
   const failed = await page.evaluate(async f => {
     const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
     const put = IDBObjectStore.prototype.put
-    IDBObjectStore.prototype.put = function(value, ...args) { if (this.name === 'replayManifest' && value.record_version === 5) throw new DOMException('test quota', 'QuotaExceededError'); return put.call(this, value, ...args) }
+    IDBObjectStore.prototype.put = function(value, ...args) { if (this.name === 'replayManifest' && value.record_version === 6) throw new DOMException('test quota', 'QuotaExceededError'); return put.call(this, value, ...args) }
     try { await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true); return false } catch { return true }
     finally { IDBObjectStore.prototype.put = put }
   }, fixture)
   assert.equal(failed, true)
   const before = await attach(page)
-  assert.equal(before.manifest.record_version, 5)
+  assert.equal(before.manifest.record_version, 6)
   assert.deepEqual(before.rows, fixture.stores.inbox)
   assert.deepEqual(before.noteHistory, fixture.stores.legacyNoteHistory)
   assert.deepEqual(before.sources, fixture.stores.localProjects)
@@ -123,7 +123,7 @@ try {
       else if (kind === 'transport') { name = 'legacyNoteHistory'; row = structuredClone(snapshot.noteHistory.find(r => r.record_kind === 'candidate' && r.record_version === 2)); row.transport_proof.proof_digest = '0'.repeat(64) }
       else { name = 'inbox'; row = structuredClone(snapshot.rows[2]); if (kind === 'ciphertext') { const wire = JSON.parse(row.wire_item); wire.object.ciphertext = 'AA'; row.wire_item = JSON.stringify(wire) } else row.content_note_proof.header.parent_event_id = crypto.randomUUID() }
       const original = name === 'localProjects' ? snapshot.sources[0] : name === 'localNotes' ? snapshot.notes[0] : name === 'inbox' ? snapshot.rows[2] : snapshot.noteHistory.find(r => r.record_kind === 'candidate' && r.record_version === 2)
-      const open = indexedDB.open('worta-web-replay', 5)
+      const open = indexedDB.open('worta-web-replay', 6)
       await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
       const put = async value => { const tx = db.transaction(name, 'readwrite'); tx.objectStore(name).put(value); await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) }) }
       let rejected = false

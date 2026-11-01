@@ -40,7 +40,7 @@ const apply = page => page.evaluate(async () => {
 })
 async function cache(page) {
   return page.evaluate(async () => {
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result, rows = {}
     try { await new Promise((resolve, reject) => {
@@ -52,7 +52,7 @@ async function cache(page) {
 }
 async function putRow(page, store, row) {
   await page.evaluate(async ({ store, row }) => {
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     try { await new Promise((resolve, reject) => {
@@ -67,7 +67,7 @@ async function opened(page, projects) {
     const { runBrowserTransaction } = await import('/src/platform/web/persistence.ts')
     const identity = reader.currentIdentity, scope = { accountId: identity.local_account_id, deviceId: identity.device_id,
       canonicalUserId: reader.auth.requireContext().userId }
-    const request = indexedDB.open('worta-web-replay', 5)
+    const request = indexedDB.open('worta-web-replay', 6)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     const transaction = (_scope, stores, mode, schedule) => runBrowserTransaction(db, stores, mode, (tx, result, abort) => schedule(tx, result, abort))
@@ -134,7 +134,7 @@ try {
   assert.ok(!result.error, JSON.stringify(result))
   assert.equal(result.projectOpened, false)
   const after = await cache(page)
-  assert.equal(after.version, 5)
+  assert.equal(after.version, 6)
   assert.equal(after.rows.replayManifest[0].applied_cursor, fixture.count)
   assert.equal(after.rows.inbox.filter(row => row.state === 'note_proven').length, 9)
   assert.equal(after.rows.legacyNoteHistory.length, 12)

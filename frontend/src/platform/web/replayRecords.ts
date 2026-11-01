@@ -15,7 +15,7 @@ export interface ReplaySourceSeedReference {
   initial_event_count: number; initial_max_server_sequence: number
 }
 export interface ReplayManifest {
-  record_version: 1 | 2 | 3 | 4 | 5; contract_version: 1 | 2 | 3 | 4 | 5; account_id: string; canonical_user_id: string; device_id: string
+  record_version: 1 | 2 | 3 | 4 | 5 | 6; contract_version: 1 | 2 | 3 | 4 | 5 | 6; account_id: string; canonical_user_id: string; device_id: string
   generation: string; anchor: ReplayAnchor; receive_cursor: number; ciphertext_bytes: number
   phase: 'receiving' | 'received'; revision: number
   metadata_cursor?: number
@@ -37,7 +37,7 @@ export function replayAnchor(registry: unknown, transport: unknown): ReplayAncho
   return anchor
 }
 
-export function validateReplayManifest(value: unknown, scope: BrowserSyncScope, version: 1 | 2 | 3 | 4 | 5 = 5): ReplayManifest {
+export function validateReplayManifest(value: unknown, scope: BrowserSyncScope, version: 1 | 2 | 3 | 4 | 5 | 6 = 6): ReplayManifest {
   try {
     if (!replayExact(value, ['record_version', 'contract_version', 'account_id', 'canonical_user_id', 'device_id', 'generation', 'anchor', 'receive_cursor', 'ciphertext_bytes', 'phase', 'revision', ...(version >= 2 ? ['metadata_cursor'] : []), ...(version >= 3 ? ['applied_cursor'] : []), ...(version >= 4 ? ['source_seeds'] : [])])
       || value.record_version !== version || value.contract_version !== version || value.account_id !== scope.accountId

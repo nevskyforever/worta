@@ -1,5 +1,16 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-01 — replay v6 migration, Slice 1
+
+Local implementation atomically validates and upgrades replay v5 to v6, with
+historical upgrades and pinned old-client refusal. Chromium covers rollback,
+multiple accounts, corrupt inventory, restart and record preservation; a
+separate PostgreSQL/HTTP test exercises real v5 seeds and owner proofs. This
+is storage migration only; conflict/Resolution owner composition and reader
+capability remain future slices. Independent CI remains pending. Progress
+**89.36%**; `ready=false`, `declarationAllowed=false`, `writerAuthorized=false`,
+Registration CLOSED, PUBLIC RELEASE BLOCKED.
+
 Актуальный продуктовый порядок из шести пользовательских этапов утверждён в
 [checkpoint](../WORTA_CHECKPOINT.md#worta-60--утверждённый-упрощённый-план-завершения-mvp).
 Ниже сохранены технические срезы и их исторические статусы. Матрица функций и

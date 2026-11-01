@@ -20,7 +20,7 @@ import { REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame, replayUuid,
 import type { ReplaySourceSeedReference } from './replayRecords'
 
 export const REPLAY_DATABASE_NAME = 'worta-web-replay'
-export const REPLAY_DATABASE_VERSION = 5
+export const REPLAY_DATABASE_VERSION = 6
 type Schema = readonly [string, string | string[], ReadonlyArray<readonly [string, string | string[], boolean]>]
 const schema: readonly Schema[] = [
   ['identities', 'canonical_user_id', [['local_account_id', 'local_account_id', true], ['device_id', 'device_id', true]]],
@@ -68,8 +68,8 @@ function openDatabase(signal: AbortSignal, current: () => boolean): Promise<IDBD
     request.onerror = () => stop(request.error)
     request.onupgradeneeded = event => {
       try {
-        if (failed || signal.aborted || !current() || ![0, 1, 2, 3, 4].includes(event.oldVersion)) throw new BrowserPersistenceError('unsupported_version')
-        if (event.oldVersion === 1 || event.oldVersion === 2 || event.oldVersion === 3 || event.oldVersion === 4) {
+        if (failed || signal.aborted || !current() || ![0, 1, 2, 3, 4, 5].includes(event.oldVersion)) throw new BrowserPersistenceError('unsupported_version')
+        if (event.oldVersion === 1 || event.oldVersion === 2 || event.oldVersion === 3 || event.oldVersion === 4 || event.oldVersion === 5) {
           validateSchema(request.result, request.transaction!)
           migrateReplay(request.transaction!, names, () => { if (signal.aborted || !current()) throw new BrowserPersistenceError('closed') }, stop, event.oldVersion)
           return
@@ -268,7 +268,7 @@ class BrowserReplayStorage {
         tx.objectStore('identities').put({ record_version: 1, canonical_user_id: s.canonicalUserId, local_account_id: s.accountId, device_id: s.deviceId })
         tx.objectStore('accountBindings').put({ record_version: 1, local_account_id: s.accountId, canonical_user_id: s.canonicalUserId })
         tx.objectStore('cursors').put({ record_version: 1, account_id: s.accountId, device_id: s.deviceId, pull_cursor: 0, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1 })
-        const manifest: ReplayManifest = { record_version: 5, contract_version: 5, metadata_cursor: 0, applied_cursor: 0, source_seeds: [], account_id: s.accountId, canonical_user_id: s.canonicalUserId, device_id: s.deviceId,
+        const manifest: ReplayManifest = { record_version: 6, contract_version: 6, metadata_cursor: 0, applied_cursor: 0, source_seeds: [], account_id: s.accountId, canonical_user_id: s.canonicalUserId, device_id: s.deviceId,
           generation: crypto.randomUUID(), anchor, receive_cursor: 0, ciphertext_bytes: 0, phase: 'receiving', revision: 1 }
         tx.objectStore('replayManifest').put(manifest); result(undefined)
       } catch (error) { abort(error) }

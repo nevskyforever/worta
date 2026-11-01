@@ -93,7 +93,7 @@ const range = (account: string) => IDBKeyRange.bound([account], [account, []])
 
 /** Complete account snapshot, with structural joins only. Crypto is owned by the existing family certificates. */
 export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, check: () => void,
-  result: (snapshot: ReplaySnapshot) => void, abort: (error: unknown) => void, version: 1 | 2 | 3 | 4 | 5 = 5): void {
+  result: (snapshot: ReplaySnapshot) => void, abort: (error: unknown) => void, version: 1 | 2 | 3 | 4 | 5 | 6 = 6): void {
   const bound = range(s.accountId), rows: BrowserInboxRecord[] = []
   const identity = tx.objectStore('identities').get(s.canonicalUserId), alias = tx.objectStore('identities').index('local_account_id').get(s.accountId)
   const binding = tx.objectStore('accountBindings').get(s.accountId), cursors = tx.objectStore('cursors').getAll(bound)
@@ -241,7 +241,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
 }
 
 /** Versionchange has no HTTP/crypto and never invents bindings, heads or applied outcomes. */
-export function migrateReplay(tx: IDBTransaction, names: readonly string[], check: () => void, abort: (error: unknown) => void, version: 1 | 2 | 3 | 4): void {
+export function migrateReplay(tx: IDBTransaction, names: readonly string[], check: () => void, abort: (error: unknown) => void, version: 1 | 2 | 3 | 4 | 5): void {
   const all = new Map<string, unknown[]>(); let remaining = names.length, bytes = 0
   const validate = () => {
     try {
@@ -261,7 +261,7 @@ export function migrateReplay(tx: IDBTransaction, names: readonly string[], chec
       const updates: ReplayManifest[] = []
       for (const scope of scopes) scheduleReplaySnapshot(tx, scope, check, snapshot => {
         try {
-          if (snapshot.manifest) updates.push({ ...snapshot.manifest, record_version: 5, contract_version: 5, metadata_cursor: snapshot.manifest.metadata_cursor ?? 0,
+          if (snapshot.manifest) updates.push({ ...snapshot.manifest, record_version: 6, contract_version: 6, metadata_cursor: snapshot.manifest.metadata_cursor ?? 0,
             applied_cursor: snapshot.manifest.applied_cursor ?? snapshot.manifest.metadata_cursor ?? 0, source_seeds: snapshot.manifest.source_seeds ?? [] })
           if (--pending) return
           check()

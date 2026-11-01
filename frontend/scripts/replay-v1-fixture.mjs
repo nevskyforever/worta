@@ -9,7 +9,7 @@ async function replayClientFixture(revision, modules, entry) {
   try {
     for (const name of modules) {
       const original = execFileSync('git', ['show', revision + ':frontend/src/platform/web/' + name], { cwd: root, encoding: 'utf8' })
-      const source = original.replace(/from '\.\/([^']+)'/g, (match, module) => modules.includes(module + '.ts') ? match : `from '../../src/platform/web/${module}'`)
+      const source = original.replace(/(from |import\()'\.\/([^']+)'/g, (match, prefix, module) => modules.includes(module + '.ts') ? match : `${prefix}'../../src/platform/web/${module}'`)
       await writeFile(join(directory, name), source)
     }
     return { url: `/scripts/${directory.slice(root.length + 1)}/${entry}`, storage: `/scripts/${directory.slice(root.length + 1)}/replayStorage.ts`, close: () => rm(directory, { recursive: true, force: true }) }
@@ -21,3 +21,9 @@ export const replayV2Fixture = () => replayClientFixture('3cb31ff63546d8be388013
   ['cloudAccountSession.ts', 'replayReceiver.ts', 'replayStorage.ts', 'replayRecords.ts', 'replayInventory.ts', 'replayMetadata.ts'], 'cloudAccountSession.ts')
 export const replayV3Fixture = () => replayClientFixture('57abfbc785c9e8c849e2b6fbc9f78208ab7b47a8',
   ['replayStorage.ts', 'replayRecords.ts', 'replayInventory.ts', 'replayMetadata.ts'], 'replayStorage.ts')
+export const replayV4Fixture = () => replayClientFixture('7f29c55b9b943a9087eafbe81a8b05836a8e5ced',
+  ['replayStorage.ts', 'replayRecords.ts', 'replayInventory.ts', 'replayMetadata.ts'], 'replayStorage.ts')
+export const replayV5Fixture = () => replayClientFixture('0b66eb877d17eaf5b2c276201a5d44042d199acd',
+  ['replayStorage.ts', 'replayRecords.ts', 'replayInventory.ts', 'replayMetadata.ts'], 'replayStorage.ts')
+export const replayV5SessionFixture = () => replayClientFixture('0b66eb877d17eaf5b2c276201a5d44042d199acd',
+  ['cloudAccountSession.ts', 'replayReceiver.ts', 'replayStorage.ts', 'replayRecords.ts', 'replayInventory.ts', 'replayMetadata.ts', 'replaySourceSeed.ts', 'replayContentUpdate.ts'], 'cloudAccountSession.ts')

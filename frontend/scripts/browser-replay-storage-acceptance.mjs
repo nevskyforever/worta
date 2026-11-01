@@ -136,7 +136,7 @@ try {
     for (const [name, anchor] of [['rollback', rollback], ['lineage', drift]]) {
       try { await rt.store.start(anchor); codes[name] = null } catch (e) { codes[name] = e.code }
     }
-    const open = indexedDB.open('worta-web-replay', 5)
+    const open = indexedDB.open('worta-web-replay', 6)
     await new Promise(resolve => { open.onsuccess = resolve })
     const db = open.result
     const replace = row => new Promise((resolve, reject) => {
@@ -174,7 +174,7 @@ try {
   }, fixture.scope)
   assert.equal(identityMismatch, 'corrupt_record'); checks.push('account-identity-binding')
   const version = await page.evaluate(async () => {
-    const open = indexedDB.open('worta-web-replay', 6)
+    const open = indexedDB.open('worta-web-replay', 7)
     await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
     const db = open.result; db.close()
     try { await rt.module.openBrowserReplayStorage(rt.scope, new AbortController().signal, () => true); return null } catch (e) { return e.code }
