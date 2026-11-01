@@ -84,7 +84,7 @@ const router = createRouter({
 
 router.afterEach((route) => {
   const pageTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
-  document.title = pageTitle ? `${pageTitle} · nfprogress` : 'nfprogress'
+  document.title = pageTitle ? `${pageTitle} · WORTA` : 'WORTA'
 })
 
 export default router

@@ -49,9 +49,10 @@ function styleMap(): string[] {
     ...MAMMOTH_HIGHLIGHTS.map(([wordColor, cssColor]) => `highlight[color='${wordColor}'] => mark[style='background-color: ${cssColor}']`),
   ]
 }
-function preserveWordTextFormatting(document: any): any {
-  const visit = (node: any): any => {
-    if (!node || typeof node !== 'object') return node
+function preserveWordTextFormatting(document: unknown): unknown {
+  const visit = (value: unknown): unknown => {
+    if (!value || typeof value !== 'object') return value
+    const node = value as Record<string, unknown>
     const children = Array.isArray(node.children) ? node.children.map(visit) : node.children
     if (node.type !== 'run') return { ...node, children }
     const font = supportedFont(node.font)
