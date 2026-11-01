@@ -10,6 +10,7 @@ import NotificationStack from '@/components/ui/NotificationStack.vue'
 import UpdatePrompt from '@/components/ui/UpdatePrompt.vue'
 import AppShell from '@/layouts/AppShell.vue'
 import { isWorkspaceWindow } from '@/platform/workspaceWindows'
+import { skipE2eLegalGate } from '@/platform/e2eLegalGate'
 import { currentPlatform, supportsUpdateChecks } from '@/platform/runtime'
 import { useCloudSessionStore } from '@/stores/cloudSession'
 import { isSupportedLanguage, useLocaleStore } from '@/stores/locale'
@@ -68,7 +69,7 @@ async function bootstrapApplication(): Promise<void> {
   try {
     const settings = await settingsApi.get()
     await applyBackendPreferences(settings)
-    bootstrapState.value = settings.values.user_agreement === true ? 'ready' : 'agreement'
+    bootstrapState.value = settings.values.user_agreement === true || skipE2eLegalGate() ? 'ready' : 'agreement'
     if (bootstrapState.value === 'ready') startAutomaticUpdateChecks()
   } catch (error) {
     await locale.initialize()

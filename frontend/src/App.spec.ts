@@ -8,6 +8,7 @@ import { useLocaleStore } from '@/stores/locale'
 import { useMotionStore } from '@/stores/motion'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useThemeStore } from '@/stores/theme'
+import * as e2eLegalGate from '@/platform/e2eLegalGate'
 import type { SettingsResponse } from '@/types/content'
 
 import App from './App.vue'
@@ -108,6 +109,17 @@ describe('App bootstrap', () => {
 
     expect(wrapper.find('[data-testid="agreement-gate"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(false)
+  })
+
+  it('opens the test workspace without changing the agreement state', async () => {
+    const settings = settingsResponse({ language: 'ru', user_agreement: false })
+    vi.mocked(settingsApi.get).mockResolvedValue(settings)
+    vi.spyOn(e2eLegalGate, 'skipE2eLegalGate').mockReturnValue(true)
+    const { wrapper } = mountApp()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agreement-gate"]').exists()).toBe(false)
+    expect(settings.values.user_agreement).toBe(false)
   })
 
   it('keeps the app blocked after a bootstrap error and retries safely', async () => {

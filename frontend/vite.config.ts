@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from 'node:url'
 import vue from '@vitejs/plugin-vue'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vitest/config'
+import { enableE2eLegalGateSkip } from './scripts/e2eLegalGate.ts'
 
 function syncMindMapAssets(): Plugin {
   const source = fileURLToPath(new URL('../mindmap_assets/', import.meta.url))
@@ -31,7 +32,10 @@ function syncMindMapAssets(): Plugin {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
+  define: {
+    __WORTA_E2E_SKIP_LEGAL_GATE__: JSON.stringify(enableE2eLegalGateSkip(command, mode, process.env)),
+  },
   plugins: [syncMindMapAssets(), vue()],
   resolve: {
     alias: {
@@ -52,4 +56,4 @@ export default defineConfig({
     css: true,
     restoreMocks: true,
   },
-})
+}))
