@@ -14,6 +14,7 @@ from nfprogress.core.sqlite import (
 )
 from nfprogress.core.sqlite.connection import open_database
 from nfprogress.core.sqlite.ordering import OrderInvariantError
+from nfprogress.core.sqlite.schema import CURRENT_SCHEMA_VERSION
 from nfprogress.core.storage import PickleRepository
 from nfprogress.sqlite_verify import verify
 
@@ -48,7 +49,7 @@ def test_empty_database_and_idempotent_migrations(tmp_path):
     first = open_database(tmp_path)
     first.close()
     second = open_database(tmp_path)
-    assert second.execute('SELECT schema_version FROM schema_info').fetchone()[0] == 6
+    assert second.execute('SELECT schema_version FROM schema_info').fetchone()[0] == CURRENT_SCHEMA_VERSION
     assert second.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='projects'").fetchone()
     assert second.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='project_order'").fetchone()
     second.close()

@@ -5378,6 +5378,136 @@ mod tests {
     }
 
     #[test]
+    fn headless_disk_profile_reopens_projects_notes_and_maps_after_failed_write() {
+        let root = lifecycle_database_root("desktop-acceptance");
+        fs::create_dir(&root).unwrap();
+        let path = root.join("nfprogress.db");
+        let mut db = super::sqlite::open_database(&path).unwrap();
+        super::initialize_fresh_desktop_database(&db, &root).unwrap();
+        let project = super::ProjectRecord {
+            id: "acceptance-project".into(),
+            name: "Книга".into(),
+            goal: Some(1000.0),
+            infinite: false,
+            unit: "symbols".into(),
+            status: "активен".into(),
+            created_at: None,
+            updated_at: None,
+            payload: serde_json::json!({"id":"acceptance-project","name":"Книга"}),
+        };
+        super::ProjectsRepository::new(&mut db)
+            .insert_project(&project)
+            .unwrap();
+        super::create_note_in_connection(&mut db, &project.id, None, "note-1").unwrap();
+        super::update_note_in_connection(
+            &mut db,
+            &project.id,
+            "note-1",
+            &serde_json::json!({"title":"Идея","content":"Сохранённый текст"}),
+            None,
+        )
+        .unwrap();
+        let map = serde_json::json!({"nodeData":{"id":"map","topic":"Книга","children":[]},"freeNodes":[{"id":"node-1","topic":"Узел","children":[],"nfprogressNote":true}]});
+        let normalized = super::mindmap::normalize(map.clone()).unwrap();
+        let command = super::MapCommand {
+            project_id: project.id.clone(),
+            stage_id: None,
+            data: map,
+            expected_heads: None,
+        };
+        super::save_map_in_connection(&mut db, &command, &normalized).unwrap();
+        let before: String = db
+            .query_row(
+                "SELECT payload_json FROM notes WHERE id='note-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(super::update_note_in_connection(
+            &mut db,
+            &project.id,
+            "note-1",
+            &serde_json::json!({"content":"не сохранять","invalid":true}),
+            None
+        )
+        .is_err());
+        db.execute_batch("CREATE TRIGGER acceptance_fail_note BEFORE UPDATE ON notes BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END;").unwrap();
+        assert!(super::update_note_in_connection(
+            &mut db,
+            &project.id,
+            "note-1",
+            &serde_json::json!({"content":"не сохранять"}),
+            None
+        )
+        .is_err());
+        db.execute_batch("DROP TRIGGER acceptance_fail_note;")
+            .unwrap();
+        drop(db);
+
+        let mut db = super::sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            super::ProjectsRepository::new(&mut db)
+                .get_project(&project.id)
+                .unwrap()
+                .unwrap()
+                .name,
+            "Книга"
+        );
+        let after: String = db
+            .query_row(
+                "SELECT payload_json FROM notes WHERE id='note-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, after);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&after).unwrap()["content"],
+            "Сохранённый текст"
+        );
+        let loaded = super::map_response_in_connection(&mut db, project.id.clone(), None).unwrap();
+        assert_eq!(loaded["data"]["freeNodes"][0]["topic"], "Узел");
+        db.execute(
+            "INSERT INTO notes(id,project_id,payload_json) VALUES('damaged',?1,'null')",
+            [&project.id],
+        )
+        .unwrap();
+        assert!(super::update_note_in_connection(
+            &mut db,
+            &project.id,
+            "damaged",
+            &serde_json::json!({"content":"replacement"}),
+            None,
+        )
+        .is_err());
+        drop(db);
+        let db = super::sqlite::open_database(&path).unwrap();
+        let damaged: String = db
+            .query_row(
+                "SELECT payload_json FROM notes WHERE id='damaged'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let intact: String = db
+            .query_row(
+                "SELECT payload_json FROM notes WHERE id='note-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(damaged, "null");
+        assert_eq!(intact, before);
+        assert_eq!(
+            db.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
+                .unwrap(),
+            "ok"
+        );
+        drop(db);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn fresh_desktop_database_becomes_native_authoritative() {
         let connection = Connection::open_in_memory().unwrap();
         super::sqlite::apply_migrations(&connection).unwrap();
