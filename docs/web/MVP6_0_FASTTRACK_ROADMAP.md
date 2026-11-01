@@ -15,6 +15,31 @@ metadata. LOCAL-FIRST is still mandatory for Codex development and acceptance;
 it does not require offline-first runtime behavior in Web.
 
 
+## 2026-11-01 — Resolution2 replay compatibility design
+
+[Design contract](WEB_ONLINE_RESOLUTION2_REPLAY_CONTRACT.md): propose replay v6
+with atomic validation/preservation of v5 and honest old-client refusal, then
+separate bounded peer conflict, Resolution owner and full capability slices.
+Key/store compatibility and genuine peer-only conflict provenance remain
+implementation acceptance gates. No capability, reader readiness, schema or
+production implementation is activated. Progress **89.36%**, `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`, Registration CLOSED and
+PUBLIC RELEASE BLOCKED remain.
+
+## 2026-11-01 — valid Resolution2 composition STOP
+
+One legitimate production choice of a version after concurrent Content Note
+edits needs the existing Resolution2 owner. Replay v5 admits neither that conflict
+history nor the owner's inbox10/ResolutionProof1 and corresponding Resolution4,
+Head2 and GroupTransition2 durable evidence. A dispatcher-only change cannot
+establish safe restart. Reader implementation is STOP pending a separate scoped
+replay-record/atomic-proof/upgrade and admission contract; no new capability or
+schema was authorized here. Protected-server browser/restart acceptance for
+this cohort is NOT RUN, since the current recipient gate cannot be truthfully
+declared ready and test-only capability substitution is prohibited. See the
+checkpoint for the precise evidence and limitations. All negative readiness
+flags, closed registration/release and **89.36%** remain.
+
 ## 2026-10-31 — forward dependency audit outcome A
 
 The [production writer audit](C21_FORWARD_METADATA_DEPENDENCY_AUDIT.md)

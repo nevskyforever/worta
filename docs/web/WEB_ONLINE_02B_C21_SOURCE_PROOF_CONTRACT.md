@@ -1,6 +1,8 @@
 # WEB.ONLINE.02B — C21 Online-Only source/proof contract
 
 **Status: DESIGN COMPLETE; reconciled against baseline `96ada25b` below. Bounded replay is implemented through v5 and 03K.02A; complete project opening and positive readiness remain blocked.**
+For the proposed, unimplemented Resolution2 replay-v6 compatibility boundary,
+see [Resolution2 replay contract](WEB_ONLINE_RESOLUTION2_REPLAY_CONTRACT.md).
 The original design review used clean `6.0` baseline
 `57abb27ed712378a836ba654bc3c1c107ac804d5`, 2026-10-28, and introduced no
 production code or migration. Subsequent explicitly authorized implementation
