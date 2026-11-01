@@ -12,6 +12,19 @@ The application is built with Nuitka for:
 * macOS Apple Silicon;
 * macOS Intel.
 
+## Product name and release process
+
+* The official product name is `worta`, always lowercase in user-facing names,
+  window titles, installers, releases, and other product references.
+* Existing internal identifiers may be retained when changing them would break
+  compatibility with user data or updates.
+* Build macOS Apple Silicon and Intel releases on the owner’s Mac using the
+  existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
+* Use the existing signing, update, and publication mechanisms. Do not create
+  new release mechanisms without separate approval.
+* GitHub Releases is the primary source of published installers. Update
+  `worta.ru` using its existing process.
+
 ## General working rules
 
 * Perform only the task specified by the user.

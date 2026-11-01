@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "WORTA",
+        "title": "worta",
         "width": 1280,
         "height": 820,
         "minWidth": 820,
@@ -36,7 +36,7 @@
     "category": "Productivity",
     "copyright": "Copyright nfprogress contributors",
     "shortDescription": "Трекер прогресса для писателей",
-    "longDescription": "WORTA помогает писателям планировать проекты, записывать прогресс и сохранять творческий ритм.",
+    "longDescription": "worta помогает писателям планировать проекты, записывать прогресс и сохранять творческий ритм.",
     "externalBin": [
       "binaries/nfprogress-backend"
     ],
