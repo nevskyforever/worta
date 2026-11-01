@@ -1,4 +1,5 @@
 import { verifyStoredContentNoteProof } from './contentNoteProof'
+import { verifyStoredContentConflictProof } from './contentNoteConflictProof'
 import { replayNoteOutcome } from './replayInventory'
 import type { AccountMasterKey } from '@/crypto'
 import type { BrowserSyncScope } from './syncDurability'
@@ -29,14 +30,21 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
     const proof = replayNoteOutcome(row)
     const seed = snapshot.manifest?.source_seeds?.find(value => value.project_id === proof.header.project_id)
     const initial = row.server_sequence <= (seed?.initial_max_server_sequence ?? 0)
-    if (!seed || proof.outcome !== 'applied' || (initial ? proof.mutation !== 'create' || proof.header.revision !== 1
-      : !['update', 'delete'].includes(proof.mutation) || proof.header.revision < 2)) throw new BrowserReplayError('note_proof_reauthentication_failed')
+    const contentGenesis = snapshot.manifest?.contract_version === 6 && row.state === 'content_note_proven'
+      && !initial && proof.mutation === 'create' && proof.header.revision === 1 && proof.header.parent_event_id === null
+    if (!seed || proof.outcome !== 'applied' || (!contentGenesis && (initial ? proof.mutation !== 'create' || proof.header.revision !== 1
+      : !['update', 'delete'].includes(proof.mutation) || proof.header.revision < 2))) throw new BrowserReplayError('note_proof_reauthentication_failed')
     if (row.state === 'content_note_proven') await verifyStoredContentNoteProof(scope, amk, row, snapshot.noteHistory ?? [])
     else await verifyStoredNoteProof(scope, amk, row)
     const candidate = snapshot.noteHistory?.find((record): record is BrowserNoteCandidate => record.record_kind === 'candidate' && record.event_id === row.event_id)
     if (!candidate || candidate.record_version !== (row.state === 'content_note_proven' ? 2 : 1) || candidate.origin !== 'peer'
       || await noteProofDigest(candidate.projection) !== proof.local_note_digest) throw new BrowserReplayError('note_proof_reauthentication_failed')
     await openHistoryCandidate(scope, candidate, amk)
+    sequences.add(row.server_sequence)
+  }
+  for (const row of snapshot.rows) if (row.state === 'content_note_conflict_preserved') {
+    if (!current() || snapshot.manifest?.contract_version !== 6) throw new BrowserReplayError('note_proof_reauthentication_failed')
+    await verifyStoredContentConflictProof(scope, amk, row, snapshot.noteHistory ?? [], snapshot.rows)
     sequences.add(row.server_sequence)
   }
   if (!current()) throw new BrowserReplayError('session_closed')

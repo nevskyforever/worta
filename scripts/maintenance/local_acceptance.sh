@@ -171,6 +171,7 @@ backend_checks() {
     tests/test_web_replay_structural.py \
     tests/test_web_replay_source_seed.py \
     tests/test_web_replay_ordered_content.py \
+    tests/test_web_replay_native_content_conflict.py \
     tests/test_cloud_encrypted_schema.py \
     tests/test_cloud_encrypted_sync.py \
     tests/test_cloud_encrypted_sync_v2.py \
@@ -193,6 +194,7 @@ frontend_checks() {
     src/platform/web/replayStructural.spec.ts \
     src/platform/web/replayContentUpdate.spec.ts \
     src/platform/web/replayOrderedContent.spec.ts \
+    src/platform/web/replayConflictTransition.spec.ts \
     src/platform/web/replayHistoryAdmissibility.spec.ts \
     src/platform/web/replaySourceSeed.spec.ts \
     src/platform/web/stageApply.spec.ts \
@@ -277,6 +279,11 @@ frontend_checks() {
     return "$status"
   }
   WORTA_CONTENT_CHROMIUM=1 npm exec vitest run src/platform/web/replayContentUpdate.spec.ts || {
+    local status=$?
+    cleanup_vite
+    return "$status"
+  }
+  WORTA_CONFLICT_CHROMIUM=1 npm exec vitest run src/platform/web/replayOrderedContent.spec.ts || {
     local status=$?
     cleanup_vite
     return "$status"

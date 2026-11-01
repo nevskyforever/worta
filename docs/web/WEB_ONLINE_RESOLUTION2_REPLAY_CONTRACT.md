@@ -1,6 +1,31 @@
 # WEB.ONLINE.02B — Resolution2 replay compatibility contract
 
-**DESIGN ONLY — no implementation, migration, capability or release grant.**
+## Owner-approved Content genesis amendment — implementation in progress
+
+The owner approved a second, distinct source cohort: a production codec8
+Content `create` with revision 1 and a null parent, followed by two concurrent
+peer Content updates referencing that exact event. In this bounded cohort those
+three events are consecutive and terminal in the pinned full account history;
+the implementation rejects other orderings rather than filtering events. The account, Note identity,
+route, bootstrap and authenticated Metadata/Stage dependencies remain bound by
+the existing owners. The original Legacy bootstrap cohort remains separately
+validated and is not reinterpreted as Content genesis. A Content genesis is a
+post-bootstrap event, not an invented member of the Legacy bootstrap count.
+
+The local implementation keeps the existing replay v6 physical schema. It
+must join the real Content proof and candidate for genesis, both subsequent
+owner outcomes and the actual peer conflict group; reauthenticate the complete
+history after restart and commit each outcome and coverage atomically. Mixed
+routes, inconsistent parents, unsupported families and partial histories fail
+closed. Pinned older clients must refuse incompatible stored records without
+writing. No Desktop writer routing, capability, ACK, project publication or
+release permission is changed. Local two-device production-writer and Chromium
+acceptance passes through an isolated test transport, including restart,
+abort, duplicate, original wire preservation, corrupt proof/ciphertext,
+out-of-order input and pinned v5 refusal. Normal gated server-to-browser
+acceptance and independent CI remain pending; no release claim is made.
+
+**Compatibility contract — no capability or release grant.**
 Baseline `1e589629a1bf37d7a053f552d06bef38949a3d0a`. This integrates the
 preceding uncommitted STOP evidence in checkpoint/roadmap; its server/browser
 acceptance remains NOT RUN. Server remains authoritative, clients do E2EE;
@@ -10,7 +35,8 @@ CLOSED and PUBLIC RELEASE BLOCKED. Progress remains **89.36%**.
 ## 1. Exact first cohort and existing authority
 
 One account and active connected project, one live Note with a genuine accepted
-Legacy base, two concurrent ordinary Content Note updates from two distinct
+Legacy base or the separately authenticated post-bootstrap Content genesis
+described above, two concurrent ordinary Content Note updates from two distinct
 peer devices to that same causal base, then one peer-authored codec8 Content
 `choose_version` Resolution2 selecting one of those two verified tips. The
 browser is a third distinct device; every event is already in the ordinary v3
@@ -172,7 +198,7 @@ it does not replace an actual full-capability recipient acceptance.
 | Slice | Minimum change | Required acceptance and boundary |
 | --- | --- | --- |
 | 1. v6 migration only | Frozen v5 validator and atomic versionchange; no new owner records or dispatch | Real Chromium v1–v5 profiles, multiple accounts, byte preservation, abort/quota/restart, pinned old-client refusal, malformed/unknown refusal; no ACK, PUT, project result or data migration outside replay DB |
-| 2. Conflict owner bridge | One verified peer/peer branch cohort using actual Content owner and actual conflict outcome, exact pre/post account inventory | Genuine native production writer branches through encrypted server; source/CAS, original wire, restart, missing parent/metadata, forks and mixed-family refusal; if existing owner requires fabricated local-author evidence, STOP and revise contract |
+| 2. Conflict owner bridge | One verified peer/peer branch cohort using actual Content owner and actual conflict outcome, exact pre/post account inventory; accept the distinct Content genesis amendment above | Genuine native production writer branches and local encrypted transport, actual browser owner proofs, source/CAS, original wire, restart, missing parent/metadata, forks and mixed-family refusal; normal gated server-to-browser pull remains Slice 4 acceptance. If existing owner requires fabricated local-author evidence, STOP and revise contract |
 | 3. Resolution owner bridge | One peer `choose_version` only, real Resolution planner/apply and v6 transaction adapter | Native writer builds choice after two genuine peer edits; PostgreSQL16 + real protected HTTP + Chromium, actual recipient eligibility, full atomic output/inbox/proofs, interruption before/after commit, duplicate/restart, lost response, altered wire/key/group/parent, revocation/quota and no visible project on failure; verify all existing reader/gate negative cases |
 | 4. Reader qualification | Independently close each applicable readiness blocker using actual production owners and all required histories, then separately review lifecycle | Eligible real browser declares only after demonstrated full frozen ordinary1/Resolution2 contract and real server gate; unready recipients remain rejected; declaration is never writer permission |
 | 5. Full read publication | Separately cover all account/project families, stable source and UI lifecycle | Real two-client end-to-end/restart and negative validation before complete project opening; no writer or public release implied |

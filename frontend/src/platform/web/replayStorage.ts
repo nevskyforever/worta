@@ -216,12 +216,19 @@ class BrowserReplayStorage {
     return applyReplayContentUpdate(this.ownerPort(), this.scope, sequence, this.signal,
       () => { try { this.check(); return true } catch { return false } }, auth, bindings, keys).finally(() => { unAuth(); unKey() })
   }
-  applyOrderedContentUpdate(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+  async applyOrderedContentUpdate(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
     const stop = () => { void this.close() }
     const unAuth = auth.onInvalidated(stop), unKey = keys.onInvalidated(stop)
-    return composeReplayOrderedContent(this.ownerPort(), this.scope, this.signal,
-      () => { try { this.check(); return true } catch { return false } }, auth, bindings, keys)
-      .finally(() => { unAuth(); unKey() })
+    try {
+      const snapshot = await this.read(), projects = new Set(snapshot.rows.filter(row => JSON.parse(row.wire_item).event.entity_type === 'note')
+        .map(row => JSON.parse(row.wire_item).event.project_id as string))
+      for (const projectId of projects) if (!snapshot.bindings.some(binding => binding.project_id === projectId)) {
+        await this.seedNoteSource(projectId, auth, bindings, keys)
+        await this.admitInitialNoteBinding(projectId, auth, keys)
+      }
+      return await composeReplayOrderedContent(this.ownerPort(), this.scope, this.signal,
+        () => { try { this.check(); return true } catch { return false } }, auth, bindings, keys)
+    } finally { unAuth(); unKey() }
   }
   private ownerPort(): MetadataPort {
     return { read: () => this.read(), transaction: (expected, sequence, server) => async (scope, _stores, mode, schedule) => {
@@ -237,7 +244,7 @@ class BrowserReplayStorage {
               const finish = (after: ReplaySnapshot) => {
                 try { assertReplayOwnerTransition(before, after, sequence, value); result(value) } catch (error) { abort(error) }
               }
-              if (value === 'applied') {
+              if (value === 'applied' || value === 'conflict_preserved') {
                 const manifest = before.manifest!
                 if (manifest.revision === Number.MAX_SAFE_INTEGER) fail()
                 const row = tx.objectStore('inbox').get([this.scope.accountId, sequence])

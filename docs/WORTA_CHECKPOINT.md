@@ -1,5 +1,35 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-01 — Content genesis / Conflict owner bridge (local implementation)
+
+Starting `817f037a6a408d6745fff19260db681cc8968f99`. The owner-approved
+[contract amendment](web/WEB_ONLINE_RESOLUTION2_REPLAY_CONTRACT.md) adds a
+separate post-bootstrap Content genesis: revision 1, null parent, followed by
+two peer updates to that exact event. The earlier Legacy cohort remains distinct.
+Replay v6 uses its existing stores and actual Content owner proofs; it validates
+the account inventory and conflict group, commits owner outcome and coverage
+atomically, and reauthenticates the retained history on reopen. No Desktop writer
+routing, server protocol, database version, capability or project publication is
+changed.
+
+The local headless acceptance creates a real plain Content genesis and two
+concurrent edits through production Rust writers in two independent SQLite
+files, then transfers their original encrypted records through an isolated test
+transport to Chromium and real IndexedDB. Both native devices preserve the
+conflict; the browser owner authenticates and preserves both branches. The test
+compares original wire/ciphertext and reopens after abort and after commit;
+duplicate delivery, altered ciphertext/proof, incorrect ordering and the pinned
+v5 open refusal fail safely. The transport is test-only: this is not an ordinary
+server-to-browser end-to-end acceptance and does not declare browser reader
+capability. PostgreSQL 16 gate and v6 migration regressions passed separately.
+
+Technical slice 2 **LOCAL COMPLETE**, independent CI acceptance pending.
+Slice 1 is locally complete; slice 3 Resolution owner bridge, slice 4 Reader
+qualification and slice 5 Full read publication remain pending. Product stage
+2/6 and historical progress **89.36%** remain. `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`, Registration CLOSED and
+PUBLIC RELEASE BLOCKED. Normal server pull awaits Reader qualification.
+
 ## 2026-11-01 — Resolution2 replay v6, Slice 1 (local implementation)
 
 Starting `0b66eb877d17eaf5b2c276201a5d44042d199acd`. The separate

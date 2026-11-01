@@ -29,7 +29,7 @@ export interface ReplayInitialNoteResult extends Omit<ReplayStructuralResult, 'k
   readonly kind: 'initial_legacy_notes_applied'; readonly noteProofs: number
 }
 export interface ReplayOrderedContentResult extends Omit<ReplayInitialNoteResult, 'kind'> {
-  readonly kind: 'bounded_ordered_content_update_applied'; readonly contentProofs: 1
+  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved'; readonly contentProofs: 1 | 2 | 3
 }
 export interface MetadataPort {
   read(): Promise<ReplaySnapshot>
@@ -43,10 +43,45 @@ export async function assertReplayHistoryAdmissible(snapshot: ReplaySnapshot, sc
     || snapshot.rows.length !== snapshot.manifest.anchor.registry.current_cursor || !snapshot.rows.length)
     throw new BrowserReplayError('metadata_history_incomplete')
   const anchor = snapshot.manifest.anchor
+  const last = snapshot.rows.slice(-2)
+  let contentGenesisSequence: number | undefined
+  const peerConflict = !!terminalContentAmk && snapshot.manifest.contract_version === 6 && last.length === 2
+    && last.every(value => { const event = JSON.parse(value.wire_item).event; return event.entity_type === 'note' && event.operation === 'event' })
+  if (peerConflict) {
+    const [first, second] = last as [typeof snapshot.rows[number], typeof snapshot.rows[number]]
+    const a = JSON.parse(first.wire_item).event as V3Descriptor, b = JSON.parse(second.wire_item).event as V3Descriptor
+    const parents = snapshot.rows.slice(0, -2).filter(value => { const event = JSON.parse(value.wire_item).event; return event.entity_type === 'note' && event.project_id === a.project_id && event.entity_id === a.entity_id })
+    const base = parents.at(-1)
+    if (!base || a.project_id !== b.project_id || a.entity_id !== b.entity_id || a.device_id === b.device_id
+      || a.device_id === scope.deviceId || b.device_id === scope.deviceId || a.revision !== b.revision
+      || a.deleted_at !== null || b.deleted_at !== null || first.protocol_version !== 3 || second.protocol_version !== 3
+      || !['received', 'content_note_proven'].includes(first.state) || !['received', 'content_note_conflict_preserved'].includes(second.state))
+      throw new BrowserReplayError('unsupported_content_cohort')
+    const baseEvent = JSON.parse(base.wire_item).event as V3Descriptor
+    const contentGenesis = baseEvent.operation === 'event'
+    const seed = snapshot.manifest.source_seeds?.find(value => value.project_id === baseEvent.project_id)
+    if (contentGenesis && (parents.length !== 1 || !seed || base.server_sequence <= seed.initial_max_server_sequence
+      || base.server_sequence !== snapshot.rows.length - 2 || baseEvent.revision !== 1
+      || baseEvent.device_id === scope.deviceId || !['received', 'content_note_proven'].includes(base.state)))
+      throw new BrowserReplayError('unsupported_content_cohort')
+    if (contentGenesis) contentGenesisSequence = base.server_sequence
+    const parent = await openNoteTransport(scope, terminalContentAmk!, 3, base.wire_item, contentGenesis ? 'content_note_v1' : 'legacy')
+    const one = await openNoteTransport(scope, terminalContentAmk!, 3, first.wire_item, 'content_note_v1')
+    const two = await openNoteTransport(scope, terminalContentAmk!, 3, second.wire_item, 'content_note_v1')
+    if (contentGenesis && (parent.content?.event.mutation !== 'create' || parent.plaintext.header.revision !== 1 || parent.plaintext.header.parent_event_id !== null)
+      || one.content?.event.mutation !== 'update' || two.content?.event.mutation !== 'update'
+      || one.plaintext.header.parent_event_id !== parent.plaintext.header.event_id
+      || two.plaintext.header.parent_event_id !== parent.plaintext.header.event_id
+      || one.plaintext.header.revision !== parent.plaintext.header.revision + 1
+      || two.plaintext.header.revision !== parent.plaintext.header.revision + 1)
+      throw new BrowserReplayError('unsupported_content_cohort')
+  }
   for (const [index, row] of snapshot.rows.entries()) {
     const event = JSON.parse(row.wire_item).event as V3Descriptor
     if (row.server_sequence !== index + 1 || event.server_sequence !== row.server_sequence)
       throw new BrowserReplayError('history_gap')
+    if (peerConflict && index >= snapshot.rows.length - 2) continue
+    if (row.server_sequence === contentGenesisSequence) continue
     const terminal = terminalContentAmk && row.server_sequence === snapshot.rows.length
       && event.entity_type === 'note' && event.operation === 'event'
     if (terminal) {
@@ -121,7 +156,7 @@ export async function reauthenticateReplayOwners(scope: BrowserSyncScope, snapsh
   }
   let authenticated = 0
   for (const row of snapshot.rows) if (row.state !== 'received') {
-    if (!(row.state === 'note_proven' || row.state === 'content_note_proven' ? notes.has(row.server_sequence) : certificates.get(row.state)?.has(row.server_sequence)))
+    if (!(row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' ? notes.has(row.server_sequence) : certificates.get(row.state)?.has(row.server_sequence)))
       throw new BrowserReplayError(structural ? 'structural_proof_reauthentication_failed' : 'metadata_proof_reauthentication_failed')
     authenticated++
   }
@@ -142,6 +177,12 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   let snapshot = await port.read(); check()
   if (!snapshot.manifest) throw new BrowserReplayError('metadata_history_incomplete')
   const anchor = snapshot.manifest.anchor
+  const peerConflict = terminalContent && snapshot.manifest.contract_version === 6 && snapshot.rows.slice(-2).length === 2
+    && snapshot.rows.slice(-2).every(row => { const event = JSON.parse(row.wire_item).event; return event.entity_type === 'note' && event.operation === 'event' })
+  const contentGenesis = peerConflict && snapshot.rows.length >= 3 && (() => {
+    const event = JSON.parse(snapshot.rows[snapshot.rows.length - 3]!.wire_item).event
+    return event.entity_type === 'note' && event.operation === 'event' && event.revision === 1
+  })()
   if (snapshot.manifest.phase !== 'received' || snapshot.rows.length !== anchor.registry.current_cursor || !snapshot.rows.length) throw new BrowserReplayError('metadata_history_incomplete')
   if (terminalContent && snapshot.manifest.contract_version !== 5 && snapshot.manifest.contract_version !== 6) throw new BrowserReplayError('unsupported_content_cohort')
   // Authenticate the entire account history before the first owner commit.
@@ -174,7 +215,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   }
   await reauthenticate()
   for (const row of snapshot.rows) {
-    if (terminalContent && row.server_sequence === snapshot.rows.length) break
+    if (terminalContent && row.server_sequence >= snapshot.rows.length - (contentGenesis ? 2 : peerConflict ? 1 : 0)) break
     if (row.state !== 'received') continue // Only after actual owner proof reauthentication above.
     check()
     const reference = JSON.parse(row.wire_item).event as V3Descriptor
@@ -210,12 +251,14 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   }
   if (terminalContent) {
     const sequence = snapshot.rows.length
-    if (snapshot.manifest!.applied_cursor !== sequence - 1 && snapshot.manifest!.applied_cursor !== sequence)
-      throw new BrowserReplayError('content_prefix_incomplete')
     const { applyReplayContentUpdate } = await import('./replayContentUpdate')
-    await applyReplayContentUpdate(port, scope, sequence, signal, current, auth, bindings, keys)
-    snapshot = await port.read(); check()
-    if (snapshot.manifest!.applied_cursor !== sequence || snapshot.rows[sequence - 1]?.state !== 'content_note_proven')
+    for (const target of contentGenesis ? [sequence - 2, sequence - 1, sequence] : peerConflict ? [sequence - 1, sequence] : [sequence]) {
+      if (snapshot.manifest!.applied_cursor! < target - 1) throw new BrowserReplayError('content_prefix_incomplete')
+      if (snapshot.manifest!.applied_cursor! > target) continue
+      await applyReplayContentUpdate(port, scope, target, signal, current, auth, bindings, keys)
+      snapshot = await port.read(); check()
+    }
+    if (snapshot.manifest!.applied_cursor !== sequence || snapshot.rows[sequence - 1]?.state !== (peerConflict ? 'content_note_conflict_preserved' : 'content_note_proven'))
       throw new BrowserReplayError('content_not_applied')
   }
   await reauthenticate(); await server()
@@ -227,8 +270,8 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   const result = { cursor: snapshot.manifest!.receive_cursor, generation: snapshot.manifest!.generation,
     ownerProofs: snapshot.manifest!.applied_cursor!, projects: snapshot.owners.filter(head => head.owner_kind === 'project_metadata').length,
     projectOpened: false as const, ready: false as const, declarationAllowed: false as const, writerAuthorized: false as const }
-  if (terminalContent) return { ...result, kind: 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
-    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: 1 }
+  if (terminalContent) return { ...result, kind: peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
+    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: contentGenesis ? 3 : peerConflict ? 2 : 1 }
   return initialNotes ? { ...result, kind: 'initial_legacy_notes_applied', metadataProofs, stageProofs, stageOrderProofs,
     noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length }
     : structural ? { ...result, kind: 'structural_owners_applied', metadataProofs, stageProofs, stageOrderProofs }

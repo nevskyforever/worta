@@ -29,7 +29,8 @@ export async function applyReplayContentUpdate(port: MetadataPort, scope: Browse
   const manifest = snapshot.manifest, row = snapshot.rows[sequence - 1]
   if (!Number.isSafeInteger(sequence) || !manifest || (manifest.contract_version !== 5 && manifest.contract_version !== 6) || manifest.phase !== 'received'
     || !row || row.server_sequence !== sequence || row.protocol_version !== 3
-    || !['received', 'content_note_proven'].includes(row.state)
+    || !['received', 'content_note_proven', 'content_note_conflict_preserved'].includes(row.state)
+    || row.state === 'content_note_conflict_preserved' && manifest.contract_version !== 6
     || (row.state === 'received' ? manifest.applied_cursor !== sequence - 1 : manifest.applied_cursor !== sequence))
     throw new BrowserReplayError('unsupported_content_cohort')
   const event = JSON.parse(row.wire_item).event
@@ -38,7 +39,9 @@ export async function applyReplayContentUpdate(port: MetadataPort, scope: Browse
     return e.project_id === event.project_id && e.entity_type === 'note' && e.entity_id === event.entity_id
   }).at(-1)
   if (event.entity_type !== 'note' || event.operation !== 'event' || event.device_id === scope.deviceId
-    || !previous || previous.state !== 'note_proven' || previous.note_proof.mutation === 'delete')
+    || !(manifest.contract_version === 6 && !previous && event.revision === 1
+      || previous && (previous.state === 'note_proven' && previous.note_proof.mutation !== 'delete'
+      || manifest.contract_version === 6 && previous.state === 'content_note_proven' && ['create', 'update'].includes(previous.content_note_proof.mutation))))
     throw new BrowserReplayError('unsupported_content_cohort')
   const anchor = manifest.anchor
   const server = async () => {
@@ -77,14 +80,14 @@ export async function applyReplayContentUpdate(port: MetadataPort, scope: Browse
       await reauthenticateReplayOwners(scope, snapshot, amk, current, true, verified)
     }); check()
     // Existing owner also verifies fresh Metadata/Stage dependency certificates.
-    for (const applied of snapshot.rows.filter(value => value.state === 'content_note_proven')) {
+    for (const applied of snapshot.rows.filter(value => value.state === 'content_note_proven' || value.state === 'content_note_conflict_preserved')) {
       await owner().prepare(scope, applied.server_sequence); check()
     }
   }
   await server(); await authenticate()
   const runtime = owner(), token = await runtime.prepare(scope, sequence); check()
   const status = await runtime.commit(token); check()
-  if (!['applied', 'already_applied'].includes(status)) throw new BrowserReplayError('content_not_applied')
+  if (!['applied', 'already_applied', 'conflict_preserved'].includes(status)) throw new BrowserReplayError('content_not_applied')
   snapshot = await port.read(); check()
   await authenticate(); await server()
   if (!replaySame(await port.read(), snapshot)) throw new BrowserReplayError('metadata_inventory_changed')

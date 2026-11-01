@@ -1104,6 +1104,44 @@ mod tests {
         );
     }
     #[test]
+    fn active_content_migration_keeps_project_html_edits_on_legacy_writer() {
+        for _ in 0..2 {
+            let (mut db, path, scope) = setup();
+            begin(&mut db, &scope, "C1", NOW).unwrap();
+            db.execute("UPDATE cloud_content_note_migrations SET activated=1", [])
+                .unwrap();
+            let mut n = source("legacy-html");
+            n["content_format"] = json!("html");
+            let snapshot = n.to_string();
+            let tx = db.transaction().unwrap();
+            let intent = notes::prepare_unsealed_note_intent(
+                &tx,
+                notes::PrepareNoteIntent {
+                    project_id: "C1",
+                    entity_id: "legacy-html",
+                    operation: notes::NoteSyncOperation::Upsert,
+                    updated_at: NOW,
+                    deleted_at: None,
+                    snapshot_json: &snapshot,
+                    state_updated_at: NOW,
+                },
+            )
+            .unwrap();
+            assert!(intent.is_some());
+            assert_eq!(
+                tx.query_row("SELECT COUNT(*) FROM cloud_content_note_writer_events", [], |row| row.get::<_, i64>(0)).unwrap(),
+                0
+            );
+            tx.commit().unwrap();
+            assert_eq!(
+                notes::list_unsealed_note_sync_intents(&mut db, 8, false).unwrap().len(),
+                1
+            );
+            drop(db);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    #[test]
     fn local_only_project_never_acquires_authority() {
         let (mut db, _, scope) = setup();
         assert_eq!(

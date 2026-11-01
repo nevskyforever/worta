@@ -1,5 +1,19 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-01 — Content genesis and Conflict owner bridge
+
+Technical slice 2 is **LOCAL COMPLETE**, pending independent CI acceptance.
+The owner-approved Content genesis cohort retains the existing v6 schema and
+composes real Content owner proofs and peer conflict outcomes. A local isolated
+transport carries genuine encrypted histories from two production Rust writers
+and SQLite files into Chromium/IndexedDB, including abort/restart, exact wire
+preservation, duplicate and corruption checks. This is not an ordinary
+server-to-browser end-to-end test; server reader qualification remains slice 4.
+Slice 1 is locally complete, and slices 3 Resolution owner bridge, 4 Reader
+qualification and 5 Full read publication remain pending. Product stage **2/6**,
+historical progress **89.36%**, negative readiness flags and closed
+registration/public release remain unchanged.
+
 ## 2026-11-01 — replay v6 migration, Slice 1
 
 Local implementation atomically validates and upgrades replay v5 to v6, with

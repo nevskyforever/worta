@@ -68,6 +68,8 @@ on:
       - 'tests/test_web_replay_structural.py'
       - 'tests/test_web_replay_source_seed.py'
       - 'tests/test_web_replay_ordered_content.py'
+      - 'tests/test_web_replay_native_content_conflict.py'
+      - 'frontend/scripts/browser-replay-conflict-local.mjs'
       - 'tests/test_c18_content_action_integration.py'
       - 'frontend/src/**'
       - 'frontend/src-tauri/**'
@@ -194,6 +196,8 @@ on:
       - 'tests/test_web_replay_structural.py'
       - 'tests/test_web_replay_source_seed.py'
       - 'tests/test_web_replay_ordered_content.py'
+      - 'tests/test_web_replay_native_content_conflict.py'
+      - 'frontend/scripts/browser-replay-conflict-local.mjs'
       - 'tests/test_c18_content_action_integration.py'
       - 'frontend/src/**'
       - 'frontend/src-tauri/**'
@@ -299,6 +303,7 @@ jobs:
               tests/test_web_replay_structural.py
               tests/test_web_replay_source_seed.py
               tests/test_web_replay_ordered_content.py
+              tests/test_web_replay_native_content_conflict.py
               tests/test_cloud_c18_content_note_acceptance.py
               tests/test_cloud_c18_map_gate.py
               tests/test_cloud_c18_map_acceptance.py
@@ -821,7 +826,8 @@ jobs:
       - name: Verify encrypted local Web Documents contracts
         env:
           WORTA_CONTENT_CHROMIUM: "1"
-        run: npm test -- --run src/platform/web/localDocuments.spec.ts src/platform/web/localAuthority.spec.ts src/cloud/documentCodec.spec.ts src/platform/web/replayReceiver.spec.ts src/platform/web/replayStructural.spec.ts src/platform/web/replayContentUpdate.spec.ts src/platform/web/replayOrderedContent.spec.ts src/platform/web/replayHistoryAdmissibility.spec.ts src/platform/web/replaySourceSeed.spec.ts --maxWorkers=1
+          WORTA_CONFLICT_CHROMIUM: "1"
+        run: npm test -- --run src/platform/web/localDocuments.spec.ts src/platform/web/localAuthority.spec.ts src/cloud/documentCodec.spec.ts src/platform/web/replayReceiver.spec.ts src/platform/web/replayStructural.spec.ts src/platform/web/replayContentUpdate.spec.ts src/platform/web/replayOrderedContent.spec.ts src/platform/web/replayConflictTransition.spec.ts src/platform/web/replayHistoryAdmissibility.spec.ts src/platform/web/replaySourceSeed.spec.ts --maxWorkers=1
         working-directory: frontend
       - name: Verify encrypted Web Documents and v11 to v12 migration in Chromium
         working-directory: frontend
