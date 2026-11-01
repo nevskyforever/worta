@@ -6,7 +6,7 @@ This is a Python desktop application with a PySide6 GUI for writers to track the
 > The PySide6 interface is legacy and is not used by the application. Do not add
 > or change PySide6 UI behavior unless the user explicitly requests legacy-interface work.
 
-The application is built with Nuitka for:
+Production Desktop targets:
 
 * Windows;
 * macOS Apple Silicon;
@@ -18,6 +18,10 @@ The application is built with Nuitka for:
   window titles, installers, releases, and other product references.
 * Existing internal identifiers may be retained when changing them would break
   compatibility with user data or updates.
+* Production Desktop is Python-free: Vue/TypeScript, Tauri/Rust, and SQLite.
+  Do not package or start a Python runtime, FastAPI sidecar, or Nuitka payload
+  in normal Desktop operation. Python may be used for the cloud server and
+  explicit migration or development tools outside the normal Desktop runtime.
 * Build macOS Apple Silicon and Intel releases on the owner’s Mac using the
   existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
 * Use the existing signing, update, and publication mechanisms. Do not create
