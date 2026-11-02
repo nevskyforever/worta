@@ -1092,7 +1092,7 @@ jobs:
           set -euo pipefail
           verified="$RUNNER_TEMP/published-release"
           mkdir -p "$verified/github"
-          for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
+          for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
             curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
             gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verified/github"
             cmp "$verified/$name" "$verified/github/$name"
@@ -1109,7 +1109,12 @@ jobs:
             cmp release-assets/update_manifest_worta.json "$verified/update_manifest.json"
           fi
           jq -e --arg version "$APP_VERSION" '.version == $version and .platforms["windows-x86_64"].url == ("https://worta.ru/app/nfprogress-windows-x86_64-" + $version + "-setup.exe") and (.platforms["windows-x86_64"].signature | length > 0)' "$verified/latest.json" >/dev/null
-          jq -e --arg version "$APP_VERSION" '[.releases[] | select(.version == $version and .status == "available") | .platform] | sort == ["macos-arm", "macos-intel", "windows"]' "$verified/releases.json" >/dev/null
+          [[ "$(jq -r '.platforms["windows-x86_64"].signature' "$verified/latest.json")" == "$(tr -d '\r\n' < "$verified/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig")" ]]
+          jq -e --arg version "$APP_VERSION" '
+            (.releases | length == 3) and
+            ([.releases[] | select(.version == $version and .status == "available") | .platform] | sort == ["macos-arm", "macos-intel", "windows"]) and
+            (all(.releases[]; .url == ("https://worta.ru/app/" + (if .platform == "windows" then "nfprogress-windows-x86_64-" + $version + "-setup.exe" elif .platform == "macos-arm" then "nfprogress-mac-arm-" + $version + ".zip" else "nfprogress-mac-intel-" + $version + ".zip" end))))
+          ' "$verified/releases.json" >/dev/null
           jq -e --arg version "$APP_VERSION" '.windows.version == $version and .macos_arm.version == $version and .macos_intel.version == $version' "$verified/update_manifest.json" >/dev/null
 
       # ------------------------------------------------------------
