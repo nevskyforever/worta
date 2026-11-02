@@ -70,7 +70,8 @@ export interface EditedDeadlineOptions {
 }
 
 export function automaticEditedDeadline(options: EditedDeadlineOptions): string | null {
-  if (options.recalculate || options.todayGoal === null || options.previousDailyGoal === null) {
+  if (options.recalculate || options.todayGoal === null || options.previousDailyGoal === null
+    || options.todayGoal >= options.goal) {
     return automaticDeadline(options.goal, options.total, options.dailyGoal, options.today)
   }
   if (options.dailyGoal <= 0 || !Number.isFinite(options.goal)) return null
@@ -82,7 +83,7 @@ export function automaticEditedDeadline(options: EditedDeadlineOptions): string 
 }
 
 export function automaticDeadlineAfterGoalChange(options: Omit<EditedDeadlineOptions, 'previousDailyGoal'>): string | null {
-  if (options.recalculate || options.todayGoal === null) {
+  if (options.recalculate || options.todayGoal === null || options.todayGoal >= options.goal) {
     return automaticDeadline(options.goal, options.total, options.dailyGoal, options.today)
   }
   if (options.dailyGoal <= 0 || !Number.isFinite(options.goal)) return null
