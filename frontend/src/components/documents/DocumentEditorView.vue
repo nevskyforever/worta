@@ -92,6 +92,7 @@ let positionSaveTimer: number | undefined
 let positionRestoreTimer: number | undefined
 let hasRestoredEditorPosition = false
 const linked = computed(() => Boolean(documentState.value?.docx_path))
+const showWordBindingPanel = computed(() => canLinkWord && (!linked.value || documentState.value?.sync_state !== 'synced'))
 const textSymbols = computed(() => countTextSymbols(editorContent.value))
 const textUnits = computed(() => projectEntity.value
   ? convertProjectUnit(textSymbols.value, 'symbols', projectEntity.value.unit)
@@ -478,7 +479,7 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
       </div>
 
     </header>
-    <LocalWordBindingPanel v-if="canLinkWord" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" @reattach="linkWord" @copy="exportWord" @decision="decideLocalFile" @cancel="status=''" />
+    <LocalWordBindingPanel v-if="showWordBindingPanel" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" @reattach="linkWord" @decision="decideLocalFile" @cancel="status=''" />
     <div class="document-editor-view__workspace">
       <div ref="editorShell" class="document-editor-view__editor-shell">
         <NFDocumentEditor

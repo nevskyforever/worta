@@ -658,9 +658,7 @@ jobs:
 
           base_url="https://nfproject.ru/app"
 
-          downloaded=0
-
-          for arch in arm; do
+          for arch in arm intel; do
             file="nfprogress-mac-${arch}-${APP_VERSION}.zip"
             asset_path="release-assets/${file}"
 
@@ -672,17 +670,13 @@ jobs:
               "${base_url}/${file}"
             then
               unzip -t "$asset_path"
-
-              downloaded=$((downloaded + 1))
+              python3 scripts/verify-tauri-artifact.py "$asset_path" "$GITHUB_SHA"
             else
               rm -f "$asset_path"
-
-              echo \
-                "macOS ${arch} build is unavailable; continuing without it."
+              echo "Required macOS ${arch} build is unavailable." >&2
+              exit 1
             fi
           done
-
-          echo "Downloaded macOS builds: ${downloaded}"
 
 
       # ------------------------------------------------------------
@@ -696,41 +690,25 @@ jobs:
 
           installer="release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
 
-          build_count=0
+          test -s "$installer"
+          test -s "${installer}.sig"
+          test -s release-assets/latest.json
+          test -s release-assets/SHA256SUMS.txt
 
-          if [[ -s "$installer" ]]; then
-            test -s "${installer}.sig"
-            test -s release-assets/latest.json
-            test -s release-assets/SHA256SUMS.txt
+          jq \
+            -e \
+            --arg version "$APP_VERSION" \
+            '.version == $version and (.platforms["windows-x86_64"].signature | length > 0)' \
+            release-assets/latest.json \
+            >/dev/null
 
-            jq \
-              -e \
-              --arg version "$APP_VERSION" \
-              '.version == $version and (.platforms["windows-x86_64"].signature | length > 0)' \
-              release-assets/latest.json \
-              >/dev/null
-
-            build_count=$((build_count + 1))
-          fi
-
-          for mac_asset in release-assets/nfprogress-mac-*.zip; do
-            [[ -e "$mac_asset" ]] || continue
-
+          for arch in arm intel; do
+            mac_asset="release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip"
             test -s "$mac_asset"
-
-            build_count=$((build_count + 1))
+            python3 scripts/verify-tauri-artifact.py "$mac_asset" "$GITHUB_SHA"
           done
 
-          if (( build_count == 0 )); then
-            echo \
-              "No valid release builds were found." \
-              >&2
-
-            exit 1
-          fi
-
-          echo \
-            "Validated release builds: ${build_count}"
+          echo "Validated Windows x64, macOS ARM, and macOS Intel release builds."
 
       # ------------------------------------------------------------
       # GitHub Release
@@ -794,7 +772,7 @@ jobs:
             gh release edit \
               "$tag" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "nfprogress ${APP_VERSION}" \
+              --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
 
@@ -811,7 +789,7 @@ jobs:
               "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "nfprogress ${APP_VERSION}" \
+              --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
           fi

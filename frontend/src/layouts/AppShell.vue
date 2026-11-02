@@ -340,7 +340,7 @@ async function selectLanguage(event: Event): Promise<void> {
 
 watchEffect(() => {
   const sourceTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
-  document.title = sourceTitle ? `${t(sourceTitle)} · nfprogress` : 'nfprogress'
+  document.title = sourceTitle ? `${t(sourceTitle)} · worta` : 'worta'
 })
 </script>
 
@@ -350,10 +350,10 @@ watchEffect(() => {
   <div ref="appShell" class="app-shell" :class="{ 'app-shell--sidebar-collapsed': sidebarCollapsed }">
     <aside class="sidebar" :aria-label="t('Основная навигация')">
       <div class="sidebar-header">
-        <RouterLink class="brand" to="/projects" aria-label="nfprogress — проекты">
+        <RouterLink class="brand" to="/projects" aria-label="worta — проекты">
           <img class="brand-mark" :src="appIcon" alt="" />
           <span>
-            <strong>nfprogress</strong>
+            <strong>worta</strong>
             <small>{{ t('Пространство писателя') }}</small>
           </span>
         </RouterLink>

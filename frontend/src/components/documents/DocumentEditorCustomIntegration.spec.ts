@@ -291,7 +291,7 @@ describe('DocumentEditorView custom editor integration', () => {
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
 
-    const keepButton = wrapper.findAll('[role="alertdialog"] button').find((button) => button.text() === 'Оставить nfprogress')
+    const keepButton = wrapper.findAll('[role="alertdialog"] button').find((button) => button.text() === 'Оставить worta')
     expect(keepButton).toBeDefined()
     await keepButton!.trigger('click')
     await flushPromises()

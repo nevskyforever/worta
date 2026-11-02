@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "nfprogress",
-  "version": "5.3.9",
+  "productName": "worta",
+  "version": "5.3.11",
   "identifier": "app.nfprogress.tracker",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -16,7 +16,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "nfprogress",
+        "title": "worta",
         "width": 1280,
         "height": 820,
         "minWidth": 820,
@@ -36,7 +36,7 @@
     "category": "Productivity",
     "copyright": "Copyright nfprogress contributors",
     "shortDescription": "Трекер прогресса для писателей",
-    "longDescription": "nfprogress помогает писателям планировать проекты, записывать прогресс и сохранять творческий ритм.",
+    "longDescription": "worta помогает писателям планировать проекты, записывать прогресс и сохранять творческий ритм.",
     "icon": [
       "../../Icon-256.png",
       "../../appicon.icns",

@@ -45,6 +45,8 @@ def test_runtime_package_version_matches_canonical_engine_version():
 
     assert sync_versions.read_engine_version() == engine.version
     assert config['version'] == engine.version
+    assert config['productName'] == 'worta'
+    assert config['identifier'] == 'app.nfprogress.tracker'
     assert cargo['package']['version'] == engine.version
     assert 'version: env!("CARGO_PKG_VERSION").to_string()' in (
         tauri_dir / 'src' / 'lib.rs'

@@ -202,8 +202,10 @@ defineExpose({ focus, getEditor, getJSON, getScrollContainer, getSelection, setC
 
 .nf-document-editor__viewport {
   box-sizing: border-box;
+  flex: 1 1 auto;
   width: 100%;
   min-width: 0;
+  min-height: 0;
   padding: var(--nf-space-5);
   overflow: auto;
   scrollbar-gutter: stable;

@@ -111,6 +111,10 @@ _HELP_ARTICLE_SOURCES = {
 
 TRANSLATION_OVERRIDES = {
     "en": {
+        'Закрытое тестирование. Задайте пароль для созданного администратором аккаунта.': 'Closed testing. Set a password for the account created by an administrator.',
+        'Не удалось принять приглашение. Проверьте ссылку и повторите попытку.': 'Could not accept the invitation. Check the link and try again.',
+        'Пароль создан. Аккаунт готов к входу в тестовый Web-клиент.': 'Password created. The account is ready to sign in to the test web client.',
+        'Создать пароль': 'Create password',
         "Абзац": "Paragraph",
         "Горизонтальная линия": "Horizontal rule",
         "Панель форматирования": "Formatting toolbar",
@@ -440,6 +444,10 @@ TRANSLATION_OVERRIDES = {
         "Редакторский проход": "Editing Pass",
     },
     "es": {
+        'Закрытое тестирование. Задайте пароль для созданного администратором аккаунта.': 'Pruebas cerradas. Establece una contraseña para la cuenta creada por un administrador.',
+        'Не удалось принять приглашение. Проверьте ссылку и повторите попытку.': 'No se pudo aceptar la invitación. Comprueba el enlace e inténtalo de nuevo.',
+        'Пароль создан. Аккаунт готов к входу в тестовый Web-клиент.': 'Contraseña creada. La cuenta está lista para iniciar sesión en el cliente web de prueba.',
+        'Создать пароль': 'Crear contraseña',
         "Абзац": "Párrafo",
         "Горизонтальная линия": "Línea horizontal",
         "Панель форматирования": "Barra de formato",
@@ -770,6 +778,10 @@ TRANSLATION_OVERRIDES = {
         "Редакторский проход": "Pase de edición",
     },
     "de": {
+        'Закрытое тестирование. Задайте пароль для созданного администратором аккаунта.': 'Geschlossener Test. Lege ein Passwort für das vom Administrator erstellte Konto fest.',
+        'Не удалось принять приглашение. Проверьте ссылку и повторите попытку.': 'Die Einladung konnte nicht angenommen werden. Prüfe den Link und versuche es erneut.',
+        'Пароль создан. Аккаунт готов к входу в тестовый Web-клиент.': 'Das Passwort wurde erstellt. Das Konto ist für die Anmeldung am Test-Webclient bereit.',
+        'Создать пароль': 'Passwort erstellen',
         "Абзац": "Absatz",
         "Горизонтальная линия": "Horizontale Linie",
         "Панель форматирования": "Formatierungsleiste",
@@ -1101,6 +1113,10 @@ TRANSLATION_OVERRIDES = {
         "Редакторский проход": "Überarbeitungsdurchgang",
     },
     "fr": {
+        'Закрытое тестирование. Задайте пароль для созданного администратором аккаунта.': 'Test fermé. Définissez un mot de passe pour le compte créé par un administrateur.',
+        'Не удалось принять приглашение. Проверьте ссылку и повторите попытку.': 'Impossible d’accepter l’invitation. Vérifiez le lien et réessayez.',
+        'Пароль создан. Аккаунт готов к входу в тестовый Web-клиент.': 'Mot de passe créé. Le compte est prêt pour la connexion au client Web de test.',
+        'Создать пароль': 'Créer un mot de passe',
         "Абзац": "Paragraphe",
         "Горизонтальная линия": "Ligne horizontale",
         "Панель форматирования": "Barre de mise en forme",
@@ -1433,6 +1449,10 @@ TRANSLATION_OVERRIDES = {
         "Редакторский проход": "Passe de révision",
     },
     "pt_BR": {
+        'Закрытое тестирование. Задайте пароль для созданного администратором аккаунта.': 'Teste fechado. Defina uma senha para a conta criada por um administrador.',
+        'Не удалось принять приглашение. Проверьте ссылку и повторите попытку.': 'Não foi possível aceitar o convite. Verifique o link e tente novamente.',
+        'Пароль создан. Аккаунт готов к входу в тестовый Web-клиент.': 'Senha criada. A conta está pronta para entrar no cliente Web de teste.',
+        'Создать пароль': 'Criar senha',
         "Абзац": "Parágrafo",
         "Горизонтальная линия": "Linha horizontal",
         "Панель форматирования": "Barra de formatação",

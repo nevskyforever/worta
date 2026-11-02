@@ -22,7 +22,7 @@ case "$TARGET" in
 esac
 
 FRONTEND_DIR="$(cd -- "$FRONTEND_DIR" && pwd -P)"
-APP_PATH="$FRONTEND_DIR/src-tauri/target/$TARGET/release/bundle/macos/nfprogress.app"
+APP_PATH="$FRONTEND_DIR/src-tauri/target/$TARGET/release/bundle/macos/worta.app"
 node "$ROOT_DIR/scripts/sync-tauri-versions.mjs" --frontend-dir "$FRONTEND_DIR"
 VERSION="$(node "$ROOT_DIR/scripts/sync-tauri-versions.mjs" --version-only)"
 OUTPUT_PATH="${2:-$FRONTEND_DIR/src-tauri/target/$TARGET/release/bundle/dmg/nfprogress-$VERSION-$TARGET.dmg}"
@@ -42,9 +42,9 @@ mkdir -p "$(dirname "$OUTPUT_PATH")"
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nfprogress-tauri-dmg.XXXXXX")"
 trap 'rm -rf -- "$STAGING_DIR"' EXIT
 
-ditto "$APP_PATH" "$STAGING_DIR/nfprogress.app"
+ditto "$APP_PATH" "$STAGING_DIR/worta.app"
 ln -s /Applications "$STAGING_DIR/Applications"
-hdiutil create -volname "nfprogress" -srcfolder "$STAGING_DIR" -ov -format UDZO "$OUTPUT_PATH"
+hdiutil create -volname "worta" -srcfolder "$STAGING_DIR" -ov -format UDZO "$OUTPUT_PATH"
 hdiutil verify "$OUTPUT_PATH"
 
 echo "$OUTPUT_PATH"

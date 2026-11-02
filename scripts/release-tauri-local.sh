@@ -44,7 +44,7 @@ fi
 
 python3 "$ROOT_DIR/scripts/verify-tauri-artifact.py" "$ARTIFACT_PATH" "$SOURCE_REVISION"
 
-APP_PATH="$ROOT_DIR/.tauri-build-workspaces/$ARCH/frontend/src-tauri/target/$TARGET/release/bundle/macos/nfprogress.app"
+APP_PATH="$ROOT_DIR/.tauri-build-workspaces/$ARCH/frontend/src-tauri/target/$TARGET/release/bundle/macos/worta.app"
 DMG_PATH="$BUILD_DIR/$ARTIFACT_PREFIX-$VERSION.dmg"
 if [ ! -d "$APP_PATH" ] || [ ! -f "$DMG_PATH" ]; then
   echo "Release qualification requires the retained app and DMG: $APP_PATH; $DMG_PATH" >&2

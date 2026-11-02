@@ -1,16 +1,40 @@
 ## About the project
 
-This is a Python desktop application with a PySide6 GUI for writers to track their writing progress, with optional gamification features.
+This is a desktop application for writers to track their writing progress, with optional gamification features. Production Desktop uses Vue/TypeScript, Tauri/Rust, and SQLite.
 
 > **Current UI:** the user-facing interface is implemented in Vue (`frontend/`).
 > The PySide6 interface is legacy and is not used by the application. Do not add
 > or change PySide6 UI behavior unless the user explicitly requests legacy-interface work.
 
-The application is built with Nuitka for:
+Production Desktop targets:
 
 * Windows;
 * macOS Apple Silicon;
 * macOS Intel.
+
+## Release signing policy (owner-approved)
+
+* Until the owner explicitly changes this policy, worta Desktop releases are intentionally distributed without Apple Developer ID signing/notarization or Microsoft Authenticode signing. This is expected and is not a release blocker.
+* Do not wait for certificates, purchase signing services, add mandatory signing steps, or change existing build, updater, and publication workflows solely to obtain platform signatures.
+* This exception applies only to platform installer/app signing. Preserve existing cryptographic updater signatures and integrity checks, installer validation, backward compatibility, and data-migration acceptance requirements. Never bypass or disable those protections.
+* Test that installers launch, data remains intact, and updates work where applicable. Report platform warnings for unsigned apps accurately.
+
+## Product name and release process
+
+* The official product name is `worta`, always lowercase in user-facing names,
+  window titles, installers, releases, and other product references.
+* Existing internal identifiers may be retained when changing them would break
+  compatibility with user data or updates.
+* Production Desktop is Python-free: Vue/TypeScript, Tauri/Rust, and SQLite.
+  Do not package or start a Python runtime, FastAPI sidecar, or Nuitka payload
+  in normal Desktop operation. Python may be used for the cloud server and
+  explicit migration or development tools outside the normal Desktop runtime.
+* Build macOS Apple Silicon and Intel releases on the owner’s Mac using the
+  existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
+* Use the existing signing, update, and publication mechanisms. Do not create
+  new release mechanisms without separate approval.
+* GitHub Releases is the primary source of published installers. Update
+  `worta.ru` using its existing process.
 
 ## General working rules
 

@@ -112,7 +112,7 @@ onBeforeUnmount(() => {
       aria-live="polite"
     >
       <img class="application-bootstrap__mark" :src="appIcon" alt="" />
-      <p>{{ t('Запускаем nfprogress…') }}</p>
+      <p>{{ t('Запускаем nfprogress…').replace(/nfprogress/gi, 'worta') }}</p>
     </div>
 
     <div
@@ -121,7 +121,7 @@ onBeforeUnmount(() => {
       role="alert"
     >
       <img class="application-bootstrap__mark" :src="appIcon" alt="" />
-      <h1>{{ t('Не удалось открыть nfprogress') }}</h1>
+      <h1>{{ t('Не удалось открыть nfprogress').replace(/nfprogress/gi, 'worta') }}</h1>
       <p>{{ bootstrapError ?? t('Не удалось подключиться к приложению.') }}</p>
       <button class="nf-button" type="button" @click="bootstrapApplication">
         {{ t('Повторить') }}

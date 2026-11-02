@@ -45,7 +45,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-ditto "$APP_PATH" "$STAGING_DIR/nfprogress.app"
+ditto "$APP_PATH" "$STAGING_DIR/worta.app"
 if [ -n "$HELPER_PATH" ]; then
   # Keep the separately signed helper inside the notarized container.  A bare
   # helper copied beside the DMG would be signed but would not be covered by
@@ -55,7 +55,7 @@ fi
 ln -s /Applications "$STAGING_DIR/Applications"
 mkdir -p "$(dirname -- "$DMG_PATH")"
 rm -f -- "$DMG_PATH"
-hdiutil create -volname "nfprogress" -srcfolder "$STAGING_DIR" \
+hdiutil create -volname "worta" -srcfolder "$STAGING_DIR" \
   -ov -format UDZO "$DMG_PATH"
 
 # The DMG is the downloadable macOS artifact. The app and optional helper are

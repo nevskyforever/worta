@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/platform/runtime', () => ({ currentPlatform: vi.fn(() => 'tauri') }))
+vi.mock('@/platform/desktopCloud', () => ({ desktopCloudEnabled: () => true }))
 vi.mock('@/services/localNoteWrites', () => ({ onLocalNoteWrite: vi.fn().mockResolvedValue(() => {}) }))
 
 import type { CurrentUserCryptoRecord } from '@/api/accountCrypto'

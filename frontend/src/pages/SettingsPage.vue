@@ -15,6 +15,7 @@ import { apiErrorMessage } from '@/api/client'
 import { settingsApi } from '@/api/settings'
 import DeveloperModeDialog from '@/components/developer/DeveloperModeDialog.vue'
 import CloudSyncSettingsCard from '@/components/settings/CloudSyncSettingsCard.vue'
+import { desktopCloudEnabled } from '@/platform/desktopCloud'
 import BrowserCloudAccountCard from '@/components/settings/BrowserCloudAccountCard.vue'
 import DiagnosticsCard from '@/components/settings/DiagnosticsCard.vue'
 import SettingToggle from '@/components/settings/SettingToggle.vue'
@@ -260,7 +261,7 @@ onBeforeUnmount(() => controller.abort())
           </aside>
 
           <div class="settings-groups">
-            <CloudSyncSettingsCard v-if="isDesktop" />
+            <CloudSyncSettingsCard v-if="isDesktop && desktopCloudEnabled()" />
             <BrowserCloudAccountCard v-if="isTestWeb" />
             <DiagnosticsCard v-if="isDesktop" />
 
@@ -441,14 +442,14 @@ onBeforeUnmount(() => controller.abort())
             </footer>
 
             <div class="settings-app-meta">
-              <span>{{ t('Версия nfprogress') }} {{ response?.version || '—' }}</span>
+              <span>{{ t('Версия nfprogress').replace(/nfprogress/gi, 'worta') }} {{ response?.version || '—' }}</span>
               <span>{{ t('Автор') }}: nevskyforever / nfproject</span>
               <a
                 class="nf-button nf-button--secondary settings-repository-link"
                 href="https://github.com/nevskyforever/nfprogress"
                 target="_blank"
                 rel="noopener noreferrer"
-                :aria-label="t('Открыть репозиторий nfprogress на GitHub')"
+                :aria-label="t('Открыть репозиторий nfprogress на GitHub').replace(/nfprogress/gi, 'worta')"
               >
                 <IonIcon :icon="logoGithub" aria-hidden="true" />
               </a>

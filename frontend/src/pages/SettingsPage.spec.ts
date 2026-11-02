@@ -188,8 +188,8 @@ describe('SettingsPage', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Версия nfprogress 5.3.9')
-    expect(wrapper.text()).not.toContain('Версия nfprogress 5.0')
+    expect(wrapper.text()).toContain('Версия worta 5.3.9')
+    expect(wrapper.text()).not.toContain('Версия worta 5.0')
     expect(wrapper.find('[data-testid="browser-cloud-account"]').exists()).toBe(false)
   })
 
@@ -208,7 +208,7 @@ describe('SettingsPage', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Версия nfprogress —')
+    expect(wrapper.text()).toContain('Версия worta —')
   })
 
   it('opens the existing developer dialog only when runtime capability allows it', async () => {

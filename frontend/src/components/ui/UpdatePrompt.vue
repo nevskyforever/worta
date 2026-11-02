@@ -20,7 +20,7 @@ const t = locale.translate
   >
     <IonIcon class="update-prompt__icon" :icon="cloudDownloadOutline" aria-hidden="true" />
     <div class="update-prompt__body">
-      <strong id="update-prompt-title">{{ t('Доступно обновление nfprogress') }}</strong>
+      <strong id="update-prompt-title">{{ t('Доступно обновление nfprogress').replace(/nfprogress/gi, 'worta') }}</strong>
       <p id="update-prompt-description">
         <template v-if="updater.status === 'available'">
           {{ t('Новая версия {version} готова к установке.', { version: updater.availableVersion }) }}

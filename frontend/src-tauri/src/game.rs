@@ -899,6 +899,25 @@ fn checked_count(value: i64) -> GameResult<i64> {
     }
 }
 
+fn checked_inventory_total(
+    current: i64,
+    requested: i64,
+    item_maximum: Option<i64>,
+) -> GameResult<i64> {
+    let total = current
+        .checked_add(requested)
+        .filter(|total| *total <= MAX_ITEM_COUNT)
+        .ok_or_else(|| {
+            GameError::InvalidQuantity("Достигнут лимит предмета в инвентаре.".into())
+        })?;
+    if item_maximum.is_some_and(|maximum| total > maximum) {
+        return Err(GameError::InvalidQuantity(
+            "Достигнут лимит предмета в инвентаре.".into(),
+        ));
+    }
+    Ok(total)
+}
+
 fn object_map<'a>(object: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
     object
         .entry(key.to_string())
@@ -1646,6 +1665,7 @@ fn catalog_item_json(gamer: &Map<String, Value>, item: CatalogItem, include_coun
         "maximum_quantity": item.maximum, "available_for_level": integer_field(gamer, "level", 1) >= item.level,
         "can_buy": item.buyable && integer_field(gamer, "level", 1) >= item.level
             && number_field(gamer, "coins", 0.0) >= item.price
+            && count < MAX_ITEM_COUNT
             && item.maximum.map_or(true, |maximum| count < maximum), "known": true,
     });
     if include_count {
@@ -2657,21 +2677,14 @@ impl GameApplicationService {
                             item.level
                         )));
                     }
-                    if item
-                        .maximum
-                        .is_some_and(|maximum| current + count > maximum)
-                    {
-                        return Err(GameError::InvalidQuantity(
-                            "Достигнут лимит предмета в инвентаре.".into(),
-                        ));
-                    }
+                    let new_count = checked_inventory_total(current, count, item.maximum)?;
                     let total = rounded_money(item.price * count as f64);
                     let coins = number_field(gamer, "coins", 0.0);
                     if coins < total {
                         return Err(GameError::InsufficientFunds("Недостаточно монет!".into()));
                     }
                     gamer.insert("coins".into(), json!(rounded_money(coins - total)));
-                    item_map(gamer, &category).insert(item_id.clone(), json!(current + count));
+                    item_map(gamer, &category).insert(item_id.clone(), json!(new_count));
                     Ok((
                         Some(format!("Куплено: {} x{}.", item.key, count)),
                         Some(
@@ -4412,6 +4425,23 @@ mod tests {
         assert!(player_numbers.iter().all(|number| number
             .as_u64()
             .is_some_and(|number| (1..=30).contains(&number))));
+    }
+
+    #[test]
+    fn inventory_total_is_bounded_without_integer_overflow() {
+        assert_eq!(checked_inventory_total(9_999, 1, None).unwrap(), 10_000);
+        assert!(matches!(
+            checked_inventory_total(10_000, 1, None),
+            Err(GameError::InvalidQuantity(_))
+        ));
+        assert!(matches!(
+            checked_inventory_total(i64::MAX, 1, None),
+            Err(GameError::InvalidQuantity(_))
+        ));
+        assert!(matches!(
+            checked_inventory_total(9, 2, Some(10)),
+            Err(GameError::InvalidQuantity(_))
+        ));
     }
 
     #[test]

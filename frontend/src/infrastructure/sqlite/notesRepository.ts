@@ -60,17 +60,18 @@ export class SQLiteNotesRepository implements NotesRepository {
     const normalized = normalizeMindMapData(data)
     if (!normalized) throw new Error('Редактор вернул повреждённые данные карты.')
     return invoke<MindMapResponse>('save_map', {
-      ...nativeScope(scope),
-      data: normalized,
-      ...(expectedHeads?{expectedHeads}:{}),
+      command: {
+        ...nativeScope(scope),
+        data: normalized,
+        ...(expectedHeads ? { expectedHeads } : {}),
+      },
     })
   }
 
   async importXMind(scope: NotesScope, file: File): Promise<XMindImportResponse> {
     const bytes = Array.from(new Uint8Array(await file.arrayBuffer()))
     return invoke<XMindImportResponse>('import_xmind', {
-      ...nativeScope(scope),
-      bytes,
+      command: { ...nativeScope(scope), bytes },
     })
   }
 }

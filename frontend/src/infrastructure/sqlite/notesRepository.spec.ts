@@ -39,6 +39,16 @@ describe('SQLiteNotesRepository', () => {
     expect(invoke).toHaveBeenCalledWith('create_note', { ...scope, contentFormat: 'plain' })
   })
 
+  it('passes map conflict heads inside the native command envelope', async () => {
+    const map = { nodeData: { id: 'root', topic: 'Root', children: [] } }
+    const expectedHeads = { heads: ['head-1'] }
+    invoke.mockResolvedValue({ project_id: 'project-id', stage_id: null, name: 'Root', data: map })
+    await repository.saveMindMap(scope, map, expectedHeads)
+    expect(invoke).toHaveBeenCalledWith('save_map', {
+      command: { ...scope, data: map, expectedHeads },
+    })
+  })
+
   it('uses typed Tauri commands for maps and XMind without an API fallback', async () => {
     const map = { nodeData: { id: 'root', topic: 'Root', children: [] } }
     const file = new File([new Uint8Array([1, 2, 3])], 'map.xmind')
@@ -52,7 +62,7 @@ describe('SQLiteNotesRepository', () => {
     await repository.importXMind(scope, file)
 
     expect(invoke).toHaveBeenNthCalledWith(1, 'load_map', scope)
-    expect(invoke).toHaveBeenNthCalledWith(2, 'save_map', { ...scope, data: map })
-    expect(invoke).toHaveBeenNthCalledWith(3, 'import_xmind', { ...scope, bytes: [1, 2, 3] })
+    expect(invoke).toHaveBeenNthCalledWith(2, 'save_map', { command: { ...scope, data: map } })
+    expect(invoke).toHaveBeenNthCalledWith(3, 'import_xmind', { command: { ...scope, bytes: [1, 2, 3] } })
   })
 })

@@ -67,7 +67,7 @@ def test_f10_identity_and_data_root_contracts_are_stable():
     config = json.loads(
         (ROOT / "frontend/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
     )
-    assert config["productName"] == "nfprogress"
+    assert config["productName"] == "worta"
     assert config["identifier"] == "app.nfprogress.tracker"
     assert "externalBin" not in config["bundle"]
 
@@ -75,3 +75,10 @@ def test_f10_identity_and_data_root_contracts_are_stable():
     assert 'join("nfprogress")' in rust
     assert 'home.join("Documents").join("nfprogress")' in rust
     assert '"migration_required: legacy_data_detected"' in rust
+
+
+def test_release_workflow_requires_all_three_platform_artifacts():
+    workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+    assert "for arch in arm intel; do" in workflow
+    assert '"$GITHUB_SHA"' in workflow
+    assert "Validated Windows x64, macOS ARM, and macOS Intel release builds." in workflow

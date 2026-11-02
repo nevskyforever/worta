@@ -39,6 +39,7 @@ import type { ProjectMetadata } from '@/cloud/projectMetadataCodec'
 import { canEnableCloudProjectSync } from '@/cloud/capabilities'
 import type { CloudProjectBootstrapRecord } from '@/infrastructure/sqlite/cloudProjectBootstrapRepository'
 import { currentPlatform } from '@/platform/runtime'
+import { desktopCloudEnabled } from '@/platform/desktopCloud'
 
 export type CloudSessionStatus =
   | 'unavailable'
@@ -255,7 +256,7 @@ export const useCloudSessionStore = defineStore('cloud-session', () => {
   }
 
   function requireRuntime(): CloudSessionRuntime {
-    if (runtime === null) throw new Error('Desktop cloud session is unavailable.')
+    if (!desktopCloudEnabled() || runtime === null) throw new Error('Desktop cloud session is unavailable.')
     return runtime
   }
 
@@ -303,7 +304,7 @@ export const useCloudSessionStore = defineStore('cloud-session', () => {
   }
 
   function initialize(): void {
-    if (currentPlatform() !== 'tauri') {
+    if (currentPlatform() !== 'tauri' || !desktopCloudEnabled()) {
       supported.value = false
       status.value = 'unavailable'
       return

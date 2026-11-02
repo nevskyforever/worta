@@ -132,7 +132,7 @@ describe('App bootstrap', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(false)
-    expect(wrapper.get('[role="alert"]').text()).toContain('Не удалось открыть nfprogress')
+    expect(wrapper.get('[role="alert"]').text()).toContain('Не удалось открыть worta')
     await wrapper.get('button').trigger('click')
     await flushPromises()
 
