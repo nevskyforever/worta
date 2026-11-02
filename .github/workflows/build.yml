@@ -822,8 +822,12 @@ jobs:
                 ;;
             esac
             RELEASE_BASE_URL="https://nfproject.ru/app" \
-            RELEASE_MANIFEST_PATH="release-assets/update_manifest_spaceweb.json" \
-              python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+            # Legacy Windows clients require a ZIP payload, not the NSIS installer.
+            # Keep their existing Windows entry until a compatible upgrade exists.
+            if [[ "$platform" != windows ]]; then
+              RELEASE_MANIFEST_PATH="release-assets/update_manifest_spaceweb.json" \
+                python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+            fi
             RELEASE_BASE_URL="https://worta.ru/app" \
             RELEASE_MANIFEST_PATH="release-assets/update_manifest_worta.json" \
               python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
