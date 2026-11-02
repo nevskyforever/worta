@@ -13,6 +13,7 @@ interface NFProgressRuntimeBridge {
   nativeUpdates?: boolean
   architecture?: string
   development?: boolean
+  testProfile?: boolean
   developerModeAvailable?: boolean
   startupError?: string
 }

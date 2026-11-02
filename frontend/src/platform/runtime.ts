@@ -7,6 +7,7 @@ interface DesktopRuntimeInfo {
   nativeUpdates: boolean
   architecture: string
   development: boolean
+  testProfile: boolean
   developerModeAvailable: boolean
   startupError?: string
 }
@@ -42,6 +43,11 @@ export function isTauriDevelopment(): boolean {
   return runtimePlatform === 'tauri' && window.__NFPROGRESS_RUNTIME__?.development === true
 }
 
+/** The native build profile is compiled into the desktop application. */
+export function isDesktopTestProfile(): boolean {
+  return runtimePlatform === 'tauri' && window.__NFPROGRESS_RUNTIME__?.testProfile === true
+}
+
 export function isDeveloperModeAvailable(): boolean {
   return runtimePlatform === 'tauri' && window.__NFPROGRESS_RUNTIME__?.developerModeAvailable === true
 }
@@ -66,6 +72,7 @@ async function initializeTauriRuntime(): Promise<void> {
       nativeUpdates: runtime.nativeUpdates,
       architecture: runtime.architecture,
       development: runtime.development,
+      testProfile: runtime.testProfile,
       developerModeAvailable: runtime.developerModeAvailable,
       startupError: runtime.startupError,
     }

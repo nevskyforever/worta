@@ -3577,6 +3577,7 @@ struct RuntimeInfo {
     native_updates: bool,
     architecture: String,
     development: bool,
+    test_profile: bool,
     developer_mode_available: bool,
     startup_error: Option<String>,
 }
@@ -3834,6 +3835,7 @@ fn runtime_info(startup_status: State<'_, StartupStatus>) -> RuntimeInfo {
         native_updates: native_updates_enabled(),
         architecture: std::env::consts::ARCH.to_string(),
         development: cfg!(debug_assertions),
+        test_profile: build_profile() == "test",
         developer_mode_available: developer_mode_available(),
         startup_error: startup_status.error.clone(),
     }

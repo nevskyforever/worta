@@ -51,6 +51,7 @@ const agreementDocument = computed(() => {
       h1 { font-size: 1.65rem !important; }
       h2 { margin-top: 1.6rem !important; font-size: 1.25rem !important; }
       p, li { white-space: normal !important; }
+      body * { color: inherit !important; }
     </style>
   `
   if (agreement.value.html.includes('</head>')) {
