@@ -738,7 +738,7 @@ jobs:
 
           mkdir -p release-assets
 
-          base_url="https://nfproject.ru/app"
+          base_url="https://worta.ru/app"
 
           for arch in arm intel; do
             file="nfprogress-mac-${arch}-${APP_VERSION}.zip"
@@ -846,8 +846,9 @@ jobs:
           curl --fail --location --retry 3 \
             --output release-assets/update_manifest_spaceweb.json \
             https://nfproject.ru/app/update_manifest.json
-          cp release-assets/update_manifest_spaceweb.json \
-            release-assets/update_manifest_worta.json
+          curl --fail --location --retry 3 \
+            --output release-assets/update_manifest_worta.json \
+            https://worta.ru/app/update_manifest.json
 
           for platform in windows macos_arm macos_intel; do
             case "$platform" in
@@ -861,10 +862,10 @@ jobs:
                 artifact="release-assets/nfprogress-mac-intel-${APP_VERSION}.zip"
                 ;;
             esac
-            RELEASE_BASE_URL="https://nfproject.ru/app" \
-            # Legacy Windows clients require a ZIP payload, not the NSIS installer.
-            # Keep their existing Windows entry until a compatible upgrade exists.
             if [[ "$platform" != windows ]]; then
+              # Keep the legacy manifest, but point new macOS payloads at the
+              # single WORTA app directory. Do not duplicate them on SpaceWeb.
+              RELEASE_BASE_URL="https://worta.ru/app" \
               RELEASE_MANIFEST_PATH="release-assets/update_manifest_spaceweb.json" \
                 python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
             fi
@@ -878,16 +879,14 @@ jobs:
           cp release-assets/update_manifest_spaceweb.json "$legacy_dir/update_manifest.json"
           (cd "$legacy_dir" && python "$GITHUB_WORKSPACE/scripts/create-legacy-manifest.py")
 
+          # Update the legacy manifest in place, but do not duplicate new
+          # release payloads under the legacy host. New links point to the
+          # single WORTA app directory above.
           export SSH_UPLOAD_DIR="/home/n/nevskyfore/nfproject/public_html/app"
           ./scripts/upload-release.sh \
-            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" \
-            "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+            "release-assets/update_manifest_spaceweb.json" update_manifest.json
           ./scripts/upload-release.sh \
-            "release-assets/update_manifest_spaceweb.json" \
-            update_manifest.json
-          ./scripts/upload-release.sh \
-            "$legacy_dir/update_manifest_legacy.json" \
-            update_manifest_legacy.json
+            "$legacy_dir/update_manifest_legacy.json" update_manifest_legacy.json
 
           export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html/app"
           ./scripts/upload-release.sh \
@@ -984,15 +983,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ \
-            -z "$TELEGRAM_BOT_TOKEN" ||
-            -z "$TELEGRAM_CHANNEL_ID" \
-          ]]; then
-
-            echo \
-              "Telegram notification skipped: credentials are not configured."
-
-            exit 0
+          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHANNEL_ID" ]]; then
+            echo "Telegram notification is mandatory; required secrets are missing." >&2
+            exit 1
           fi
 
           message=${TELEGRAM_MESSAGE:-"Обновление ${APP_VERSION}"}

@@ -96,9 +96,11 @@ if [ "${NFPROGRESS_TAURI_RELEASE_UPLOAD:-0}" != "1" ]; then
   exit 0
 fi
 
-MANIFEST_PATH="$ROOT_DIR/update_manifest.json"
+MANIFEST_PATH="$(mktemp "${TMPDIR:-/tmp}/nfprogress-update-manifest.XXXXXX")"
+WORTA_MANIFEST_PATH="$(mktemp "${TMPDIR:-/tmp}/worta-update-manifest.XXXXXX")"
 MANIFEST_LOCK_DIR="$ROOT_DIR/.release-tauri-manifest.lock"
 REMOTE_MANIFEST_PATH="$(mktemp "${TMPDIR:-/tmp}/nfprogress-manifest.XXXXXX")"
+REMOTE_RELEASES_PATH="$(mktemp "${TMPDIR:-/tmp}/worta-releases.XXXXXX")"
 
 while ! mkdir "$MANIFEST_LOCK_DIR" 2>/dev/null; do
   lock_pid=""
@@ -118,6 +120,7 @@ printf '%s\n' "$$" > "$MANIFEST_LOCK_DIR/pid"
 
 cleanup_release_manifest() {
   rm -f -- "$REMOTE_MANIFEST_PATH"
+  rm -f -- "$MANIFEST_PATH" "$WORTA_MANIFEST_PATH" "$REMOTE_RELEASES_PATH"
   rm -f -- "$MANIFEST_LOCK_DIR/pid"
   rmdir "$MANIFEST_LOCK_DIR" 2>/dev/null || true
 }
@@ -134,12 +137,40 @@ if curl --fail --location --retry 3 --silent --show-error \
   mv "$REMOTE_MANIFEST_PATH" "$MANIFEST_PATH"
 else
   echo "Удалённый манифест недоступен; используется локальная копия."
+  if [ -f "$ROOT_DIR/update_manifest.json" ]; then
+    cp "$ROOT_DIR/update_manifest.json" "$MANIFEST_PATH"
+  else
+    printf '%s\n' '{}' > "$MANIFEST_PATH"
+  fi
+fi
+
+if curl --fail --location --retry 3 --silent --show-error \
+  --output "$WORTA_MANIFEST_PATH" \
+  "https://worta.ru/app/update_manifest.json"; then
+  :
+else
+  echo "Манифест worta.ru недоступен; используется манифест nfprogress.ru."
+  cp "$MANIFEST_PATH" "$WORTA_MANIFEST_PATH"
 fi
 
 export RELEASE_NOTES="${RELEASE_NOTES:-}"
-python3 "$ROOT_DIR/scripts/update-release-manifest.py" "$VERSION" "macos_${ARCH}" "$ARTIFACT_PATH"
-python3 "$ROOT_DIR/scripts/create-legacy-manifest.py"
+RELEASE_BASE_URL="https://worta.ru/app" \
+RELEASE_MANIFEST_PATH="$MANIFEST_PATH" \
+  python3 "$ROOT_DIR/scripts/update-release-manifest.py" "$VERSION" "macos_${ARCH}" "$ARTIFACT_PATH"
+RELEASE_BASE_URL="https://worta.ru/app" \
+RELEASE_MANIFEST_PATH="$WORTA_MANIFEST_PATH" \
+  python3 "$ROOT_DIR/scripts/update-release-manifest.py" "$VERSION" "macos_${ARCH}" "$ARTIFACT_PATH"
 python3 - "$MANIFEST_PATH" "macos_${ARCH}" <<'PY'
+import json
+import sys
+
+manifest_path, platform = sys.argv[1:]
+manifest = json.load(open(manifest_path, encoding="utf-8"))
+release = manifest.get(platform, {})
+if not isinstance(release, dict) or not release.get("sha256") or not release.get("size"):
+    raise SystemExit(f"В манифесте нет sha256/size для {platform}.")
+PY
+python3 - "$WORTA_MANIFEST_PATH" "macos_${ARCH}" <<'PY'
 import json
 import sys
 
@@ -152,10 +183,32 @@ PY
 
 if [ "${NFPROGRESS_TAURI_RELEASE_UPLOAD:-1}" = "1" ]; then
   REMOTE_NAME="nfprogress-mac-${ARCH}-${VERSION}.zip"
-  "$ROOT_DIR/scripts/upload-release.sh" "$ARTIFACT_PATH" "$REMOTE_NAME"
+  LEGACY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nfprogress-legacy-manifest.XXXXXX")"
+  cp "$MANIFEST_PATH" "$LEGACY_DIR/update_manifest.json"
+  (cd "$LEGACY_DIR" && python3 "$ROOT_DIR/scripts/create-legacy-manifest.py")
+
+  export SSH_UPLOAD_DIR="/home/n/nevskyfore/nfproject/public_html/app"
   "$ROOT_DIR/scripts/upload-release.sh" "$MANIFEST_PATH" "update_manifest.json"
-  "$ROOT_DIR/scripts/upload-release.sh" "$ROOT_DIR/update_manifest_legacy.json" "update_manifest_legacy.json"
-  "$ROOT_DIR/scripts/prune-release-hosting.sh"
+  "$ROOT_DIR/scripts/upload-release.sh" "$LEGACY_DIR/update_manifest_legacy.json" "update_manifest_legacy.json"
+
+  export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html/app"
+  "$ROOT_DIR/scripts/upload-release.sh" "$ARTIFACT_PATH" "$REMOTE_NAME"
+  "$ROOT_DIR/scripts/upload-release.sh" "$WORTA_MANIFEST_PATH" "update_manifest.json"
+
+  if curl --fail --location --retry 3 --silent --show-error \
+    --output "$REMOTE_RELEASES_PATH" "https://worta.ru/releases.json"; then
+    :
+  else
+    printf '%s\n' '{"schema_version":1,"releases":[]}' > "$REMOTE_RELEASES_PATH"
+  fi
+  RELEASES_PATH="$(mktemp "${TMPDIR:-/tmp}/worta-releases-updated.XXXXXX")"
+  python3 "$ROOT_DIR/scripts/create-worta-releases-manifest.py" \
+    --version "$VERSION" \
+    --source "$REMOTE_RELEASES_PATH" \
+    --platform "$([ "$ARCH" = arm ] && echo macos-arm || echo macos-intel)" \
+    --output "$RELEASES_PATH"
+  export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html"
+  "$ROOT_DIR/scripts/upload-release.sh" "$RELEASES_PATH" "releases.json"
 else
   echo "Загрузка на хостинг отключена: NFPROGRESS_TAURI_RELEASE_UPLOAD=0"
 fi

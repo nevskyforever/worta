@@ -4,21 +4,34 @@ set -euo pipefail
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "$SCRIPT_SOURCE")" && pwd -P)"
 
-TARGETS=("ARM")
-if [ "${1:-}" = "intel" ] || [ "${NFPROGRESS_TAURI_INCLUDE_INTEL:-0}" = "1" ]; then
-  TARGETS+=("Intel")
-fi
+TARGETS=("ARM" "Intel")
 
 echo "Tauri-релизные цели: ${TARGETS[*]}"
-for target in "${TARGETS[@]}"; do
+run_build() {
+  local target="$1"
   case "$target" in
     ARM)
-      "$SCRIPT_DIR/Release Tauri ARM.sh"
+      NFPROGRESS_TAURI_RELEASE_UPLOAD=0 "$SCRIPT_DIR/Release Tauri ARM.sh"
       ;;
     Intel)
-      "$SCRIPT_DIR/Release Tauri Intel.sh"
+      NFPROGRESS_TAURI_RELEASE_UPLOAD=0 "$SCRIPT_DIR/Release Tauri Intel.sh"
       ;;
   esac
-done
+}
+
+run_build ARM &
+ARM_PID=$!
+run_build Intel &
+INTEL_PID=$!
+status=0
+wait "$ARM_PID" || status=1
+wait "$INTEL_PID" || status=1
+[ "$status" -eq 0 ] || exit "$status"
+
+echo "Обе платформы квалифицированы; публикуются проверенные архивы..."
+NFPROGRESS_TAURI_REUSE_ARTIFACT=1 NFPROGRESS_TAURI_RELEASE_UPLOAD=1 \
+  "$SCRIPT_DIR/Release Tauri ARM.sh"
+NFPROGRESS_TAURI_REUSE_ARTIFACT=1 NFPROGRESS_TAURI_RELEASE_UPLOAD=1 \
+  "$SCRIPT_DIR/Release Tauri Intel.sh"
 
 echo "✅ Выбранные Tauri-релизы завершены успешно."
