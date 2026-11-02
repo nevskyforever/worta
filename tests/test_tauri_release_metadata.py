@@ -150,6 +150,35 @@ def test_update_manifest_supports_a_separate_worta_destination(tmp_path, monkeyp
     )
 
 
+def test_legacy_windows_manifest_rejects_nsis_without_mutation(tmp_path, monkeypatch):
+    installer = tmp_path / 'setup.exe'
+    installer.write_bytes(b'NSIS installer')
+    manifest = tmp_path / 'update_manifest.json'
+    original = '{"windows_version":"5.3.9"}\n'
+    manifest.write_text(original, encoding='utf-8')
+    monkeypatch.setenv('RELEASE_BASE_URL', 'https://nfproject.ru/app')
+    monkeypatch.setenv('RELEASE_MANIFEST_PATH', str(manifest))
+    monkeypatch.setattr('sys.argv', ['update-release-manifest.py', '5.3.12', 'windows', str(installer)])
+
+    assert update_legacy_release_manifest.main() == 2
+    assert manifest.read_text(encoding='utf-8') == original
+
+
+def test_worta_windows_manifest_accepts_nsis(tmp_path, monkeypatch):
+    installer = tmp_path / 'setup.exe'
+    installer.write_bytes(b'NSIS installer')
+    manifest = tmp_path / 'update_manifest.json'
+    monkeypatch.setenv('RELEASE_BASE_URL', 'https://worta.ru/app')
+    monkeypatch.setenv('RELEASE_MANIFEST_PATH', str(manifest))
+    monkeypatch.setattr('sys.argv', ['update-release-manifest.py', '5.3.12', 'windows', str(installer)])
+
+    assert update_legacy_release_manifest.main() == 0
+    payload = json.loads(manifest.read_text(encoding='utf-8'))
+    assert payload['windows']['version'] == '5.3.12'
+    assert payload['windows']['size'] == len(b'NSIS installer')
+    assert payload['windows']['url'].startswith('https://worta.ru/app/')
+
+
 def test_tauri_archive_exposes_its_source_revision(tmp_path):
     revision = '0123456789abcdef0123456789abcdef01234567'
     archive_path = tmp_path / 'nfprogress-mac.zip'
