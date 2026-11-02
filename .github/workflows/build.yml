@@ -681,7 +681,7 @@ jobs:
       name: nfprogress-production
 
     permissions:
-      actions: write
+      actions: read
       contents: write
 
     env:
@@ -1147,13 +1147,27 @@ jobs:
           jq --arg version "$APP_VERSION" '{version:$version,status:"sent",message_id:.result.message_id}' "$RUNNER_TEMP/telegram-response.json" > "$receipt"
           gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY" --clobber
 
-      - name: Remove temporary Actions artifact after publication
+  cleanup_artifacts:
+    name: Remove temporary Windows artifact
+    needs: [build_windows, frontend_tests, publish_release]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Remove temporary Actions artifact after publication attempt
         shell: bash
         run: |
           set -euo pipefail
           ids=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
-            --jq '.artifacts[] | select(.name == "tauri-windows-" + env.APP_VERSION) | .id')
-          [[ -n "$ids" ]] || { echo 'Temporary Windows artifact was not found for cleanup.' >&2; exit 1; }
+            --jq '.artifacts[] | select(.name | startswith("tauri-windows-")) | .id')
+          if [[ -z "$ids" ]]; then
+            echo 'No temporary Windows artifact to remove.'
+            exit 0
+          fi
           while IFS= read -r artifact_id; do
             gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
           done <<< "$ids"

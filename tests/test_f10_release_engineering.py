@@ -142,5 +142,5 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     assert "--verify-tag" in workflow
     assert "--target \"${{ steps.release_provenance.outputs.tag_sha }}\"" not in workflow
     assert "retention-days: 1" in workflow
-    assert "Remove temporary Actions artifact after publication" in workflow
+    assert "Remove temporary Actions artifact after publication attempt" in workflow
     assert "actions: write" in workflow
