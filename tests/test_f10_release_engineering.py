@@ -144,3 +144,79 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     assert "retention-days: 1" in workflow
     assert "Remove temporary Actions artifact after publication attempt" in workflow
     assert "actions: write" in workflow
+
+
+def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(tmp_path):
+    import hashlib
+    import os
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
+    script = next(step['run'] for step in workflow['jobs']['inspect_host']['steps']
+                  if step.get('id') == 'inspect')
+    fake_bin = tmp_path / 'bin'
+    fake_bin.mkdir()
+    commands = {
+        'node': 'echo 5.3.12',
+        'git': 'echo 1111111111111111111111111111111111111111',
+        'unzip': 'exit 0',
+        'python3': 'exit 0',
+        'gh': '''case "$*" in
+          *"release view"*)
+            case "$SCENARIO" in
+              released|release_mismatch) printf '{"assets":[{"name":"nfprogress-windows-x86_64-5.3.12-setup.exe","digest":"sha256:%s"},{"name":"provenance.txt","digest":"sha256:%s"}]}' "$RELEASE_HASH" "$PROVENANCE_HASH" ;;
+              *) exit 1 ;;
+            esac ;;
+          *"release download"*) printf 'commit_sha=1111111111111111111111111111111111111111\\n' > "$RUNNER_TEMP/host-inspection/provenance.txt" ;;
+          *"attestation verify"*) echo "$*" >> "$CALLS"; [ "$SCENARIO" != untrusted ] ;;
+          *) exit 1 ;;
+        esac''',
+        'curl': '''output=""; url=""; code=0
+        while [ "$#" -gt 0 ]; do
+          case "$1" in
+            -o|--output) shift; output="$1" ;;
+            --write-out) shift; code=1 ;;
+            https://*) url="$1" ;;
+          esac
+          shift
+        done
+        case "$url:$SCENARIO" in
+          *mac-arm*:missing_mac) exit 22 ;;
+          *setup.exe:missing_windows) printf 404; exit 0 ;;
+        esac
+        [ -z "$output" ] || printf test-payload > "$output"
+        [ "$code" -eq 0 ] || printf 200
+        exit 0''',
+    }
+    for name, body in commands.items():
+        path = fake_bin / name
+        path.write_text('#!/bin/sh\n' + body + '\n')
+        path.chmod(0o755)
+    for scenario in ('missing_mac', 'missing_windows', 'hosted', 'untrusted', 'released', 'release_mismatch'):
+        work = tmp_path / scenario
+        work.mkdir()
+        output = work / 'output'
+        payload_hash = hashlib.sha256(b'test-payload').hexdigest()
+        provenance_hash = hashlib.sha256(
+            b'commit_sha=1111111111111111111111111111111111111111\n'
+        ).hexdigest()
+        env = dict(os.environ, PATH=f'{fake_bin}:{os.environ["PATH"]}',
+                   RUNNER_TEMP=str(work), GITHUB_OUTPUT=str(output),
+                   GITHUB_REPOSITORY='owner/repo', SCENARIO=scenario,
+                   CALLS=str(work / 'calls'), SIGN_WINDOWS='false',
+                   RELEASE_HASH='0' * 64 if scenario == 'release_mismatch' else payload_hash,
+                   PROVENANCE_HASH=provenance_hash)
+        result = subprocess.run(['bash', '-c', script], env=env, text=True,
+                                capture_output=True)
+        if scenario == 'missing_mac':
+            assert result.returncode != 0 and 'Required macOS' in result.stderr
+        elif scenario in ('untrusted', 'release_mismatch'):
+            assert result.returncode != 0
+            assert not output.exists() or 'windows_available=true' not in output.read_text()
+        else:
+            assert result.returncode == 0, result.stderr
+            flag = 'false' if scenario == 'missing_windows' else 'true'
+            assert f'windows_available={flag}' in output.read_text()
+            if scenario == 'hosted':
+                assert '--source-digest 1111111111111111111111111111111111111111' in (work / 'calls').read_text()

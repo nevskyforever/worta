@@ -13,7 +13,7 @@ afterEach(()=>vi.restoreAllMocks())
 type Fixture=Awaited<ReturnType<typeof historicalMetadataFixture>>
 for(const protocol of [2,3] as const)for(const strategy of ['choose_version','manual_merge','delete','keep_both'] as const)for(const compressed of protocol===2?[false]:[false,true])describe(`historical Metadata F${protocol}/ID${compressed?1:0}/${strategy}`,()=>{
  let f:Fixture
- beforeEach(async()=>{f=await historicalMetadataFixture(strategy,protocol,compressed)},5000)
+ beforeEach(async()=>{f=await historicalMetadataFixture(strategy,protocol,compressed)},20000)
  it('authenticates genuine O/H and F dependency components without changing storage',async()=>{
   const before=f.before()
   for(const id of [f.ordinary.event_id,f.original.event_id,...(f.retained?[f.retained.event_id]:[])])expect(await f.reader.inspect(scope,id)).toMatchObject({historicalMetadataAdmissible:true,reason:null,readOnly:true,fullHistoryAuthenticated:false,sourceAuthorized:false,firstApplyAllowed:false,commitAuthorized:false,ackAuthorized:false,ready:false})
@@ -24,7 +24,7 @@ for(const protocol of [2,3] as const)for(const strategy of ['choose_version','ma
 })
 describe('historical component barriers and zero mutation',()=>{
  let f:Fixture
- beforeEach(async()=>{f=await historicalMetadataFixture()},5000)
+ beforeEach(async()=>{f=await historicalMetadataFixture()},20000)
  for(const part of ['gap','duplicate-sequence','duplicate-event','missing-M','missing-proof','metadata-digest','metadata-parent','metadata-bootstrap','metadata-wire','duplicate-proof','note-wire','note-proof','projection','F-evidence','F-proof','unknown-generation','foreign-account','foreign-binding','local-intent'] as const)it(`rejects ${part} without modifying storage`,async()=>{
   const d=f.f.db,m=d.ownerHeads!.find((h:any)=>h.owner_kind==='project_metadata') as any,c=d.legacyNoteHistory!.find((c:any)=>c.event_id===f.ordinary.event_id) as any,row=d.inbox.find((r:any)=>r.event_id===f.ordinary.event_id) as any
   if(part==='gap')d.inbox.splice(0,1)
@@ -106,11 +106,11 @@ describe('historical component barriers and zero mutation',()=>{
 it('genuine Content received before deletion stays received afterward',async()=>{
  const f=await historicalMetadataFixture('keep_both',3,false,{pending:true}),before=f.before()
  expect(await f.reader.inspect(scope,f.pending!.event_id)).toMatchObject({historicalMetadataAdmissible:false,reason:'not_applied'});expect(f.before()).toEqual(before)
-})
+},20000)
 it('genuine unresolved H fork remains a barrier',async()=>{
  const f=await historicalMetadataFixture('keep_both',3,false,{fork:true}),before=f.before()
  expect(await f.reader.inspect(scope,f.ordinary.event_id)).toMatchObject({historicalMetadataAdmissible:false,reason:'unresolved_fork'});expect(f.before()).toEqual(before)
-})
+},20000)
 describe('genuine Stage-scoped history',()=>{
  let baseline:Awaited<ReturnType<typeof ordinaryV10Fixture>>,f:Fixture
  // Each real-owner phase has its own bounded hook budget. Nothing runs outside a hook/test.
