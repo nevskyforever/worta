@@ -647,6 +647,34 @@ jobs:
       # Download Windows artifact
       # ------------------------------------------------------------
 
+      - name: Validate release provenance
+        id: release_provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse --is-shallow-repository)" == true ]]; then
+            git fetch --unshallow origin
+          fi
+          git fetch --no-tags origin refs/tags/v"$APP_VERSION":refs/tags/v"$APP_VERSION"
+          tag_sha=$(git rev-parse "refs/tags/v${APP_VERSION}^{commit}")
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            if [[ "$APP_VERSION" != "5.3.11" || "$tag_sha" != "8017ab1bbd3a2b789acfd38c5d84c84351453468" ]]; then
+              echo 'The release tag must match the qualified revision.' >&2
+              exit 1
+            fi
+            git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA"
+            changes=$(git diff --name-status --no-renames "$tag_sha" "$GITHUB_SHA")
+            [[ -n "$changes" ]] || { echo 'Expected release qualification changes.' >&2; exit 1; }
+            while IFS=$'\t' read -r status path; do
+              [[ "$status" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
+              case "$path" in
+                .github/workflows/build.yml|frontend/src/cloud/syncNetworkFailure.http.spec.ts|frontend/src/platform/web/localSourceKernel.spec.ts) ;;
+                *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+              esac
+            done <<< "$changes"
+          fi
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+
       - name: Download release files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
 
@@ -684,7 +712,7 @@ jobs:
               "${base_url}/${file}"
             then
               unzip -t "$asset_path"
-              python3 scripts/verify-tauri-artifact.py "$asset_path" "$GITHUB_SHA"
+              python3 scripts/verify-tauri-artifact.py "$asset_path" "${{ steps.release_provenance.outputs.tag_sha }}"
             else
               rm -f "$asset_path"
               echo "Required macOS ${arch} build is unavailable." >&2
@@ -719,7 +747,7 @@ jobs:
           for arch in arm intel; do
             mac_asset="release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip"
             test -s "$mac_asset"
-            python3 scripts/verify-tauri-artifact.py "$mac_asset" "$GITHUB_SHA"
+            python3 scripts/verify-tauri-artifact.py "$mac_asset" "${{ steps.release_provenance.outputs.tag_sha }}"
           done
 
           echo "Validated Windows x64, macOS ARM, and macOS Intel release builds."
@@ -748,7 +776,7 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/git/tags/${tag_commit}" \
               --jq '.object.sha')
           fi
-          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+          if [[ "$tag_commit" != "${{ steps.release_provenance.outputs.tag_sha }}" ]]; then
             echo "Tag ${tag} does not point to the qualified source revision." >&2
             exit 1
           fi
@@ -865,7 +893,7 @@ jobs:
               )
             fi
 
-            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            if [[ "$tag_commit" != "${{ steps.release_provenance.outputs.tag_sha }}" ]]; then
               echo \
                 "Release ${tag} already points to ${tag_commit}; update engine.version first." \
                 >&2
@@ -892,7 +920,7 @@ jobs:
               "$tag" \
               "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "${{ steps.release_provenance.outputs.tag_sha }}" \
               --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
