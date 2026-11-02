@@ -8,6 +8,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 PLATFORMS = {
@@ -58,6 +59,9 @@ def main() -> int:
             return 2
 
     base_url = os.environ.get("RELEASE_BASE_URL", "https://nfproject.ru/app").rstrip("/")
+    if platform == "windows" and urlsplit(base_url).hostname in {"nfproject.ru", "www.nfproject.ru"}:
+        print("Legacy Windows updater requires a ZIP; the NSIS installer cannot be published to its manifest.", file=sys.stderr)
+        return 2
     manifest_path = Path(os.environ.get("RELEASE_MANIFEST_PATH", "update_manifest.json"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     notes = os.environ.get("RELEASE_NOTES", "").strip()
