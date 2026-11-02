@@ -1,3 +1,5 @@
+import { BrowserNoteReaderReadiness } from './noteReaderReadiness'
+import { BrowserDeviceRegistration } from './deviceRegistration'
 import { applyReplayContentUpdate } from './replayContentUpdate'
 import type { MetadataPort } from './replayMetadata'
 import { assertReplayOwnerTransition, replayCoverage, migrateReplay, scheduleReplaySnapshot, type ReplaySnapshot } from './replayInventory'
@@ -230,6 +232,20 @@ class BrowserReplayStorage {
         () => { try { this.check(); return true } catch { return false } }, auth, bindings, keys)
     } finally { unAuth(); unKey() }
   }
+  /** Negative qualification diagnostic over the real replay inventory. It never
+   * pulls data, declares a reader, advances coverage or opens a project. */
+  async inspectNoteReaderReadiness(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding,
+    keys: RuntimeKeyContext, options: { checkServerGate?: boolean } = {}) {
+    const stop = () => { void this.close() }
+    const unAuth = auth.onInvalidated(stop), unKey = keys.onInvalidated(stop)
+    try {
+      const current = () => { try { this.check(); return true } catch { return false } }
+      const snapshot = await this.read()
+      const transaction = this.ownerPort().transaction(snapshot, 0, async () => { throw new BrowserPersistenceError('corrupt_record') })
+      const device = await new BrowserDeviceRegistration(transaction, current).bind(auth, bindings).registerVerified(this.scope)
+      return await new BrowserNoteReaderReadiness(transaction, current).bind(auth, bindings, keys, device).inspect(this.scope, options)
+    } finally { unAuth(); unKey() }
+  }
   private ownerPort(): MetadataPort {
     return { read: () => this.read(), transaction: (expected, sequence, server) => async (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope)) fail()
@@ -331,7 +347,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)

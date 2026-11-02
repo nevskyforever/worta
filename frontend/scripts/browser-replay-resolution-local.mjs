@@ -7,14 +7,23 @@ import { chromium } from '@playwright/test'
 
 const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const directory = await mkdtemp(join(tmpdir(), 'worta-replay-conflict-'))
-let context, vite
+let context, vite, offlineGate = false, lastGateAuthorization
+const gateRequests = []
 try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } })
   await vite.listen()
   const address = vite.httpServer.address()
   if (!address || typeof address === 'string') throw Error('vite_address')
   const origin = `http://127.0.0.1:${address.port}`
-  const launch = async () => { context = await chromium.launchPersistentContext(directory, { headless: true }); const page = await context.newPage(); await page.goto(`${origin}/scripts/browser-cloud-account-harness.html`); return page }
+  const launch = async () => { context = await chromium.launchPersistentContext(directory, { headless: true }); if (fixture.backend) await context.route(url => url.pathname.startsWith('/api/'), async route => {
+    const url = new URL(route.request().url())
+    if (url.pathname.endsWith('/note-reader-capabilities')) {
+      gateRequests.push(route.request().method()); lastGateAuthorization = route.request().headers().authorization
+      if (offlineGate) return route.abort('failed')
+    }
+    const response = await route.fetch({ url: fixture.backend + url.pathname + url.search })
+    await route.fulfill({ response })
+  }); const page = await context.newPage(); await page.goto(`${origin}/scripts/browser-cloud-account-harness.html`); return page }
   let page = await launch()
   if (fixture.stores) await page.evaluate(async f => {
     const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
@@ -32,11 +41,11 @@ try {
       const { encryptedSyncV2Api } = await import('/src/api/encryptedSyncV2.ts')
       const { encryptedSyncV3Api } = await import('/src/api/encryptedSyncV3.ts')
       const { syncApi } = await import('/src/api/sync.ts')
-      syncApi.registerDevice = async (_token, device_id) => ({ protocol_version: 1, device_id, last_ack_cursor: 0 })
+      if (!f.backend) syncApi.registerDevice = async (_token, device_id) => ({ protocol_version: 1, device_id, last_ack_cursor: 0 })
       const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
-      const auth = new NormalUserAuthRuntime({ login: async () => ({ access_token: 'local-fixture', refresh_token: 'local-fixture', access_expires_in: 600 }),
+      const auth = f.backend ? new NormalUserAuthRuntime() : new NormalUserAuthRuntime({ login: async () => ({ access_token: 'local-fixture', refresh_token: 'local-fixture', access_expires_in: 600 }),
         me: async () => ({ id: f.scope.canonicalUserId, username: 'fixture', email: 'fixture@example.test', email_verified: true, role: 'user', status: 'active', created_at: 'now' }), logout: async () => undefined })
-      await auth.login('fixture', 'fixture'); const context = auth.requireContext()
+      await auth.login(f.backend ? 'ReaderQualification' : 'fixture', f.backend ? 'correct horse battery staple' : 'fixture'); const context = auth.requireContext()
       const lease = { localAccountId: f.scope.accountId, canonicalUserId: f.scope.canonicalUserId, authEpoch: context.authEpoch,
         isCurrent: () => auth.isCurrent(context), use: async fn => { const key = Uint8Array.from(f.key); try { return await fn(key) } finally { key.fill(0) } } }
       const bindings = { ensureForCurrentUser: async () => ({ context }) }, keys = { leaseForAccount: () => lease, onInvalidated: () => () => undefined }
@@ -57,7 +66,7 @@ try {
           items, next_cursor: items.length, has_more: false }))
         await store.finish(state)
       }
-      window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
+      window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
     }, fixture)
   }
   await attach(page)
@@ -164,6 +173,35 @@ try {
     try { validateNoteHistorySet(f.scope, state.noteHistory) } catch { history = true }
     return inbox && history
   }, fixture), true)
+  if (fixture.backend) {
+    const result = await page.evaluate(async f => {
+      const { auth, bindings, keys } = readerAuth
+      return await adapter.store.inspectNoteReaderReadiness(auth, bindings, keys, {checkServerGate:true})
+    }, fixture)
+    assert.equal(result.serverGate, 'checked_blocked')
+    assert.equal(result.ready, false); assert.equal(result.declarationAllowed, false); assert.equal(result.writerAuthorized, false)
+    assert.equal(result.blockers.length, 10)
+    assert.equal(result.blockers.includes('server_note_gate_not_checked'), true)
+    offlineGate = true
+    assert.equal(await page.evaluate(async () => {
+      try { await adapter.store.inspectNoteReaderReadiness(readerAuth.auth, readerAuth.bindings, readerAuth.keys, {checkServerGate:true}); return false } catch { return true }
+    }), true)
+    offlineGate = false
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+    await page.evaluate(() => readerAuth.auth.logout())
+    assert.equal((await fetch(fixture.backend + '/api/v3/sync/encrypted/note-reader-capabilities', {
+      headers: { Authorization: lastGateAuthorization }
+    })).status, 401)
+    assert.equal(await page.evaluate(async () => {
+      try { await adapter.store.inspectNoteReaderReadiness(readerAuth.auth, readerAuth.bindings, readerAuth.keys, {checkServerGate:true}); return false } catch { return true }
+    }), true)
+    await page.evaluate(() => adapter.store.close())
+    await attach(page)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+    assert.equal(gateRequests.includes('PUT'), false)
+    assert.ok(gateRequests.filter(method => method === 'GET').length >= 2)
+
+  }
   const oldRefused = await page.evaluate(() => new Promise(resolve => {
     const request = indexedDB.open('worta-web-replay', 5)
     request.onerror = () => resolve(request.error?.name === 'VersionError')

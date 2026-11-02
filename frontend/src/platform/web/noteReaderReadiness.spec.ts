@@ -76,3 +76,22 @@ it('late old-group sibling and local outbound remain unaccepted despite good his
  await expect(f.runtime.apply(scope,late.sequence)).rejects.toThrow();expect((await f.inspector.inspect(scope)).blockers).toContain('local_author_after_resolution_not_accepted')
  const source=await f.f.local.readSnapshot(scope,'p');await expect(f.f.local.updateNote(scope,source.token,'content-note',{content:'UNPUBLISHED'},'2026-10-20T00:00:00.000000Z')).rejects.toThrow();expect(f.before()).toEqual(before)
 })
+
+for(const ready of [false,true])it(`explicit gate GET ready=${ready} never grants reader or writer permission`,async()=>{
+ const f=await fixture(),before=f.before(),put=vi.spyOn(encryptedSyncV3Api,'noteReaderCapabilities')
+ const get=vi.spyOn(encryptedSyncV3Api,'noteReaderGate').mockResolvedValue({ready,missing_devices:ready?0:1})
+ const d=await f.inspector.inspect(scope,{checkServerGate:true})
+ expect(d).toMatchObject({ready:false,declarationAllowed:false,writerAuthorized:false,serverGate:ready?'checked_account_ready':'checked_blocked',serverMissingDevices:ready?0:1})
+ expect(d.blockers).toHaveLength(10);expect(d.blockers).toContain('server_note_gate_not_checked')
+ expect(get).toHaveBeenCalledTimes(1);expect(put).not.toHaveBeenCalled();expect(f.before()).toEqual(before)
+})
+for(const kind of ['network','revocation','proof'] as const)it(`gate observation fails closed on ${kind}`,async()=>{
+ const f=await fixture()
+ vi.spyOn(encryptedSyncV3Api,'noteReaderGate').mockImplementation(async()=>{
+  if(kind==='network')throw Error('offline')
+  if(kind==='revocation')f.f.lock()
+  if(kind==='proof')f.f.db.legacyNoteHistory.find((r:any)=>r.record_kind==='resolution').record_digest='0'.repeat(64)
+  return{ready:true,missing_devices:0}
+ })
+ await expect(f.inspector.inspect(scope,{checkServerGate:true})).rejects.toThrow()
+})

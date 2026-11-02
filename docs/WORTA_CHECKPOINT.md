@@ -1,5 +1,75 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-02 — WEB.ONLINE.02B Slice 4/5: PARTIAL authenticated gate observation
+
+Starting SHA `f91f1dd6f518e2bd85381dfa6c76f4e68c42573c`, branch `6.0`.
+Implemented an independently verified production part, not full Reader
+qualification. `BrowserNoteReaderReadiness.inspect` now optionally performs the
+existing authenticated account Note gate GET, then authenticates the complete
+local owner inventory again before returning. It reports `checked_blocked` or
+`checked_account_ready` as observations only. Even a ready account response
+never grants this browser eligibility, declaration authority or writer access.
+All ten frozen acceptance blockers remain: a GET observation is not an accepted
+full-capability recipient pull. Default inspection remains network-free.
+
+`replayStorage.inspectNoteReaderReadiness` connects this existing inspector to
+actual replay IndexedDB, device registration, account/auth/key lifecycle and
+snapshot CAS. It cannot write owner data, manifest coverage, qualified prefix
+or ACK, and has no capability declaration API. Authentication/key invalidation
+closes its storage lease. No server gate, authorization, schema or release rule
+was changed; no new qualification framework was introduced.
+
+New acceptance uses two independent SQLite production writers for the genuine
+Content conflict/Resolution2 history, actual Chromium/IndexedDB and an isolated
+PostgreSQL16 container with migrated FastAPI served over real loopback HTTP.
+Auth/device registration and gate GET use HTTP; encrypted history intentionally
+remains on the isolated local transport. The test is NOT a positive protected
+server-to-browser Note feed acceptance. The server contains no encrypted events
+and its browser Note capability fields and ACK remain zero. No capability PUT
+or prequalified browser identity is used.
+
+Verified gate observation, network failure, real session logout/revocation
+(401 for the revoked bearer), fresh login/reopen and exact retained ciphertext/
+proof inventory. The reused real-writer Chromium path also verifies ordering,
+parent/conflict/Resolution outcomes, duplicates, physical profile restart,
+transaction abort, corrupt ciphertext/proofs/evidence/closure and old-reader
+refusal. Unit checks cover proof mutation during gate HTTP and key revocation;
+no stale observation or partially checked project is published.
+
+Local checks PASS for this part: Rust `content_note_sync` 12 tests; focused
+readiness/recovery/receiver/Resolution Vitest 128; replay/account/readiness
+regressions 150 passed with 2 optional Chromium cases SKIPPED, not counted as
+PASS; final readiness run 34 passed. New PostgreSQL/HTTP/Chromium pytest 1 passed
+with no skips. Typecheck/build and maintained quick acceptance PASS. Existing
+build/Rust warnings are non-fatal. Maintenance dry run completed without deletion.
+The task-owned PostgreSQL container was stopped/removed; no other Docker data
+or user data was touched. Commit/push records this bounded PARTIAL implementation.
+CI is not manually dispatched or polled.
+
+Remaining frozen blockers (none is removed by this change):
+
+| Existing blocker | Missing acceptance |
+| --- | --- |
+| production_v10_reader_dispatch_incomplete | Production dispatch for the full frozen contract beyond bounded v6 cohorts |
+| transport_v10_page_replay_incomplete | Full supported mixed-history transport/replay with eligible recipient |
+| orphan_dependency_recovery_not_accepted | Production dependency/orphan recovery across all supported histories |
+| tombstone_resurrection_not_accepted | Full ordinary/Resolution tombstone and resurrection reader coverage |
+| further_resolution_chains_not_accepted | Subsequent conflicts and Resolution generations |
+| local_author_after_resolution_not_accepted | Existing local-author chain compatibility after Resolution |
+| own_content_self_echo_not_qualified | Full own Content/self-echo qualification |
+| own_resolution_author_chain_not_accepted | Own Resolution author/publication ancestry |
+| multi_device_reader_orchestration_not_proven | Full-capability multi-device recipient orchestration |
+| server_note_gate_not_checked | Actual eligible recipient protected feed/gate acceptance; account GET observation alone is insufficient |
+
+Production capability PUT and its revocation lifecycle still require separate
+owner approval under the contract. That approval would not resolve the remaining
+engineering blockers; it is not requested or exercised here. Next work stays
+in Slice 4: full frozen reader dispatch/coverage, then genuine eligible-recipient
+server acceptance and separately authorized declaration lifecycle. Slice 5 is
+not started. `ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+Registration CLOSED, PUBLIC RELEASE BLOCKED. Official progress remains **89.36%**.
+
+
 ## 2026-11-02 — WEB.ONLINE.02B Slice 3/5: LOCAL COMPLETE browser Resolution bridge
 
 Starting SHA: `25b8e0a7f6cd62f86057bfd1f6a7d40d28bb5b32`, branch `6.0`.

@@ -52,9 +52,9 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
+def native_content_resolution_history(tmp_path, canonical_user=None):
     transport = LocalTransport()
-    user, amk = str(uuid4()), list(range(32))
+    user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
     b, ib = provision(tmp_path, 'content-b', user, False)
     assert a != b and ia['device_id'] != ib['device_id']
@@ -138,3 +138,9 @@ def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
+    return fixture
+
+
+def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path)

@@ -1,3 +1,6 @@
+import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
+import { BrowserPersistenceError } from './persistence'
+import { currentBrowserDevice } from './deviceRegistration'
 import type {NormalUserAuthRuntime} from '@/auth/userAuth'
 import type {AuthoritativeAccountBinding} from '@/auth/accountBinding'
 import type {RuntimeKeyContext} from '@/auth/keyContext'
@@ -22,25 +25,45 @@ const blockers=Object.freeze([
 export interface BrowserNoteReadinessDiagnostic {
  readonly readOnly:true;readonly ready:false;readonly declarationAllowed:false;readonly writerAuthorized:false
  readonly localEvidence:'authenticated_bounded_inventory'
- readonly serverGate:'not_checked'
+ readonly serverGate:'not_checked'|'checked_blocked'|'checked_account_ready'
+ readonly serverMissingDevices?:number
  readonly blockers:readonly string[]
  readonly localPrefix:{current:number;candidate:number;firstBlockingSequence:number|null}
 }
-/** Dormant negative preflight only. No server declaration/gate HTTP, write method,
- * persistent flag or positive capability token. Not composed into persistence. */
+/** Dormant negative preflight only. Optional explicit gate GET only; no declaration HTTP, write method,
+ * persistent flag or positive capability token. Replay storage exposes this
+ * diagnostic explicitly; it is never an automatic reader declaration. */
 export class BrowserNoteReaderReadiness {
  constructor(private readonly transaction:BrowserSyncTransaction,private readonly profileCurrent:()=>boolean){}
  bind(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){
   // Keep the actual G runtime and its tokens in this lexical closure, never in a
   // TypeScript-private property or a diagnostic DTO available to JS callers.
   const prefix=new BrowserResolutionPrefix(this.transaction,this.profileCurrent).bind(auth,bindings,keys,device)
-  return Object.freeze({inspect:async(scope:BrowserSyncScope):Promise<BrowserNoteReadinessDiagnostic>=>{
+  return Object.freeze({inspect:async(scope:BrowserSyncScope,options:{checkServerGate?:boolean}={}):Promise<BrowserNoteReadinessDiagnostic>=>{
    // Accepted G owns normal auth/device/AMK/profile checks, complete bounded
    // inventory authentication/currentness and fresh native snapshot comparison.
    // Unsupported/corrupt/stale local evidence rejects, never becomes readiness.
-   const certificate=await prefix.prepare(scope),result=await prefix.calculate(certificate)
+   const context=auth.requireContext(),lease=keys.leaseForAccount(scope.accountId)
+   const check=()=>{if(!this.profileCurrent()||!auth.isCurrent(context)||!lease?.isCurrent()
+     ||!currentBrowserDevice(device,scope,auth))throw new BrowserPersistenceError('closed')}
+   check()
+   const certificate=await prefix.prepare(scope)
+   let result=await prefix.calculate(certificate)
+   let gate:Awaited<ReturnType<typeof encryptedSyncV3Api.noteReaderGate>>|undefined
+   if(options.checkServerGate){
+    // GET is account-wide observation only: it never establishes this device's
+    // eligibility, and cannot replace the remaining frozen reader requirements.
+    gate=(await auth.authorized(token=>encryptedSyncV3Api.noteReaderGate(token))).value
+    check()
+    // HTTP may outlive a lock, source mutation or proof corruption. Authenticate
+    // the complete current inventory again before returning any observation.
+    result=await prefix.calculate(await prefix.prepare(scope));check()
+   }
    return Object.freeze({readOnly:true,ready:false,declarationAllowed:false,writerAuthorized:false,
-    localEvidence:'authenticated_bounded_inventory',serverGate:'not_checked',
+    localEvidence:'authenticated_bounded_inventory',serverGate:gate?(gate.ready?'checked_account_ready':'checked_blocked'):'not_checked',
+    ...(gate?{serverMissingDevices:gate.missing_devices}:{}),
+    // A gate GET is observation, not accepted full-capability recipient pull.
+    // Preserve the frozen acceptance blockers even when the account GET succeeds.
     blockers:Object.freeze([...blockers,...(result.first_blocking_sequence===null?[]:['local_prefix_blocked'])]),
     localPrefix:Object.freeze({current:result.current_proven_prefix,candidate:result.candidate_proven_prefix,firstBlockingSequence:result.first_blocking_sequence})})
   }})
