@@ -106,6 +106,16 @@ prepare_frontend_workspace() {
     rsync --archive --delete \
       "$ROOT_DIR/backend/" "$WORKSPACE_DIR/backend/"
   fi
+  # The backend smoke test imports the shared service package and legacy
+  # engine module from the repository root. They remain test-only sources and
+  # are not part of the production Desktop artifact.
+  if [ -d "$ROOT_DIR/nfprogress" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/nfprogress/" "$WORKSPACE_DIR/nfprogress/"
+  fi
+  if [ -f "$ROOT_DIR/engine.py" ]; then
+    cp -p "$ROOT_DIR/engine.py" "$WORKSPACE_DIR/engine.py"
+  fi
   # Rust embeds the shared migration SQL from the repository-relative path in
   # src-tauri/src/sqlite.rs. Keep that source available in the isolated build
   # workspace without copying the Python runtime or its user data.
