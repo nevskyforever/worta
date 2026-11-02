@@ -91,7 +91,7 @@ svg { display: block; }
 
 .site-header { position: sticky; z-index: 10; top: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 74%, transparent); background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(16px); }
 .header-inner { display: flex; width: min(1280px, calc(100% - 64px)); min-height: 82px; margin-inline: auto; align-items: center; justify-content: space-between; gap: 32px; }
-.wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-size: 20px; font-weight: 760; letter-spacing: .09em; }
+.wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; font-size: 29px; font-weight: 700; letter-spacing: normal; }
 .wordmark-icon { display: block; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 11px; }
 .primary-nav { display: flex; align-items: center; gap: 27px; }
 .primary-nav > a, .footer-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 560; transition: color .18s ease; }
