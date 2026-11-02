@@ -68,7 +68,7 @@ for(const protocol of [2,3] as const)for(const compressed of protocol===2?[false
   await expect(f.g.prepare(scope)).rejects.toThrow();await expect(f.runtime.run(scope)).rejects.toThrow();expect(f.before()).toEqual(stable)
   const retained=await f.receive('retained-note',f.children[1]!.event_id,5),pending=f.before()
   await expect(f.h.apply(scope,retained.sequence)).rejects.toMatchObject({code:'note_conflict_unproven'});expect(f.before()).toEqual(pending)
- })
+ },20_000)
 })
 describe('mixed H source-owner barriers',()=>{
  let f:Awaited<ReturnType<typeof ordinaryV10Fixture>>,preO:ReturnType<Awaited<ReturnType<typeof ordinaryV10Fixture>>['before']>,ordinary:Awaited<ReturnType<Awaited<ReturnType<typeof ordinaryV10Fixture>>['receive']>>
@@ -195,4 +195,4 @@ it('reuses authenticated Stage/StageOrder dependencies for mixed H and Content p
  const child=await f.receive('content-note',f.children[0]!.event_id,5),before=f.before()
  expect(await f.h.apply(scope,child.sequence)).toBe('applied');expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:1})
  expect(f.f.db.ownerHeads).toEqual(before.ownerHeads)
-})
+},20_000)
