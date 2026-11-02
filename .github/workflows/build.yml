@@ -721,6 +721,22 @@ jobs:
 
           tag="v${APP_VERSION}"
 
+          tag_type=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '.object.type')
+          tag_commit=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '.object.sha')
+          if [[ "$tag_type" == "tag" ]]; then
+            tag_commit=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/tags/${tag_commit}" \
+              --jq '.object.sha')
+          fi
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Tag ${tag} does not point to the qualified source revision." >&2
+            exit 1
+          fi
+
           notes_file="$RUNNER_TEMP/release-notes.txt"
 
           printf '%s\n' \
