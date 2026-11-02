@@ -95,7 +95,7 @@
   }
 
   function displayProductName(text) {
-    return text.replace(/\b(?:WORTA|Worta|NFProgress)\b/g, 'WORTA')
+    return text.replace(/\b(?:WORTA|Worta|NFProgress)\b/g, 'worta')
   }
 
   async function loadDesktopReleases() {
@@ -147,7 +147,7 @@
       } else {
         downloadNote.textContent = typeof data.message === 'string'
           ? displayProductName(data.message)
-          : 'Загрузки временно недоступны: подтверждённых установщиков WORTA пока нет.'
+          : 'Загрузки временно недоступны: подтверждённых установщиков worta пока нет.'
       }
     } catch {
       downloadNote.textContent = 'Не удалось загрузить список релизов. Попробуйте позже.'

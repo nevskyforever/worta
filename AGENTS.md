@@ -12,6 +12,10 @@ The application is built with Nuitka for:
 * macOS Apple Silicon;
 * macOS Intel.
 
+## Product naming
+
+* In all user-facing copy, documentation, headings, metadata, and release labels, spell the product name exactly `worta` in lowercase. Do not capitalize it as `WORTA` or `Worta`. Keep technical identifiers, file names, URLs, and user-provided project data unchanged.
+
 ## General working rules
 
 * Perform only the task specified by the user.
