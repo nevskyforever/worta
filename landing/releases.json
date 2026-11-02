@@ -6,22 +6,22 @@
       "status": "unavailable",
       "version": null,
       "url": null,
-      "message": "Временно недоступно. Текущий установщик собран под брендом NFProgress."
+      "message": "Установщик worta для Windows пока не опубликован."
     },
     {
       "platform": "macos-arm",
-      "status": "unavailable",
-      "version": null,
-      "url": null,
-      "message": "Временно недоступно. Текущий архив собран под брендом NFProgress."
+      "status": "available",
+      "version": "5.3.11",
+      "url": "https://worta.ru/app/nfprogress-mac-arm-5.3.11.zip",
+      "message": "Скачать worta 5.3.11"
     },
     {
       "platform": "macos-intel",
-      "status": "unavailable",
-      "version": null,
-      "url": null,
-      "message": "Временно недоступно. Текущий архив собран под брендом NFProgress."
+      "status": "available",
+      "version": "5.3.11",
+      "url": "https://worta.ru/app/nfprogress-mac-intel-5.3.11.zip",
+      "message": "Скачать worta 5.3.11"
     }
   ],
-  "message": "Подтверждённых установщиков WORTA пока нет."
+  "message": "Выберите установщик worta 5.3.11 для своей платформы."
 }

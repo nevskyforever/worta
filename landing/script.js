@@ -94,6 +94,10 @@
     }
   }
 
+  function displayProductName(text) {
+    return text.replace(/\b(?:WORTA|Worta|NFProgress)\b/g, 'worta')
+  }
+
   async function loadDesktopReleases() {
     if (!downloadNote) return
 
@@ -120,7 +124,7 @@
         card.dataset.releaseStatus = release.status
         version.textContent = release.version ? `Версия ${release.version}` : 'Версия не подтверждена'
         status.textContent = typeof release.message === 'string'
-          ? release.message
+          ? displayProductName(release.message)
           : release.status === 'preparing'
             ? `Версия ${release.version} готовится.`
             : release.status === 'unavailable'
@@ -137,11 +141,13 @@
       })
 
       if (Array.from(uniqueReleases.values()).some((release) => release.status === 'available')) {
-        downloadNote.textContent = typeof data.message === 'string' ? data.message : 'Выберите сборку для своей платформы.'
+        downloadNote.textContent = typeof data.message === 'string'
+          ? displayProductName(data.message)
+          : 'Выберите сборку для своей платформы.'
       } else {
         downloadNote.textContent = typeof data.message === 'string'
-          ? data.message
-          : 'Загрузки временно недоступны: подтверждённых установщиков WORTA пока нет.'
+          ? displayProductName(data.message)
+          : 'Загрузки временно недоступны: подтверждённых установщиков worta пока нет.'
       }
     } catch {
       downloadNote.textContent = 'Не удалось загрузить список релизов. Попробуйте позже.'
