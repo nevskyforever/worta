@@ -7,7 +7,6 @@
   --text: #292638;
   --muted: #6b6879;
   --accent: #7459d9;
-  --wordmark-color: #2e78b8;
   --accent-strong: #6248c7;
   --accent-soft: #eee9ff;
   --border: #e8e4f1;
@@ -34,7 +33,6 @@
   --text: #f3f0fa;
   --muted: #b9b3c7;
   --accent: #b5a5ff;
-  --wordmark-color: #f1f3f4;
   --accent-strong: #c4b8ff;
   --accent-soft: #332d49;
   --border: #3b3548;
@@ -55,7 +53,6 @@
     --text: #f3f0fa;
     --muted: #b9b3c7;
     --accent: #b5a5ff;
-    --wordmark-color: #f1f3f4;
     --accent-strong: #c4b8ff;
     --accent-soft: #332d49;
     --border: #3b3548;
@@ -94,7 +91,7 @@ svg { display: block; }
 
 .site-header { position: sticky; z-index: 10; top: 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 74%, transparent); background: color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter: blur(16px); }
 .header-inner { display: flex; width: min(1280px, calc(100% - 64px)); min-height: 82px; margin-inline: auto; align-items: center; justify-content: space-between; gap: 32px; }
-.wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--wordmark-color); text-decoration: none; font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; font-size: 29px; font-weight: 700; letter-spacing: normal; }
+.wordmark { display: inline-flex; align-items: center; gap: 10px; color: var(--accent); text-decoration: none; font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; font-size: 29px; font-weight: 700; letter-spacing: normal; }
 .wordmark-icon { display: block; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 11px; }
 .primary-nav { display: flex; align-items: center; gap: 27px; }
 .primary-nav > a, .footer-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 560; transition: color .18s ease; }
