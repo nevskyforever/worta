@@ -2,12 +2,12 @@
 import {computed} from 'vue'
 import {useLocaleStore} from '@/stores/locale'
 import type {TiptapDocument} from '@/types/documents'
-const props=defineProps<{attached:boolean;state?:string;externalContent?:TiptapDocument}>()
+const props=defineProps<{attached:boolean;state?:string;externalContent?:TiptapDocument;showConflictActions?:boolean}>()
 const emit=defineEmits<{reattach:[];cancel:[];decision:[choice:'compare'|'cloud'|'import'|'unlink']}>()
 const t=useLocaleStore().translate
 const label=computed(()=>t(!props.attached?'Файл Word не подключён на этом устройстве':props.state==='synced'?'Файл Word связан':props.state==='external_import_pending'?'Импорт Word ожидает подтверждения синхронизации':props.state==='missing_external'?'Локальный файл не найден. Переподключите его.':'Word отличается от WORTA. Выберите действие.'))
 const showReattach = computed(() => !props.attached || props.state === 'missing_external')
-const showResolutionActions = computed(() => props.attached && props.state !== 'synced' && props.state !== 'unlinked' && props.state !== 'missing_external')
+const showResolutionActions = computed(() => props.showConflictActions === true && props.attached && props.state !== 'synced' && props.state !== 'unlinked' && props.state !== 'missing_external')
 function text(node:unknown):string{
  if(!node||typeof node!=='object')return ''
  const n=node as {text?:unknown;content?:unknown;type?:unknown}

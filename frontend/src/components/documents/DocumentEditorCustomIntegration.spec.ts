@@ -17,7 +17,10 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@/api/projects', () => ({ projectsApi: { get: vi.fn() } }))
-vi.mock('@/platform/runtime', () => ({ currentPlatform: vi.fn(() => 'tauri') }))
+vi.mock('@/platform/runtime', () => ({
+  currentPlatform: vi.fn(() => 'tauri'),
+  isDeveloperModeAvailable: vi.fn(() => false),
+}))
 vi.mock('@/services/documentDocx', () => ({
   blobToBase64: vi.fn(),
   exportDocx: vi.fn(async () => new Blob(['copy'])),

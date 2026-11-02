@@ -42,6 +42,10 @@ export function isTauriDevelopment(): boolean {
   return runtimePlatform === 'tauri' && window.__NFPROGRESS_RUNTIME__?.development === true
 }
 
+export function isDeveloperModeAvailable(): boolean {
+  return runtimePlatform === 'tauri' && window.__NFPROGRESS_RUNTIME__?.developerModeAvailable === true
+}
+
 export function supportsMacUpdateChecks(): boolean {
   return runtimePlatform === 'tauri'
     && !supportsNativeUpdates()

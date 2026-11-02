@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import type { Editor } from '@tiptap/core'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { pickDesktopWordFile, pickDesktopWordSavePath } from '@/platform/files'
-import { currentPlatform } from '@/platform/runtime'
+import { currentPlatform, isDeveloperModeAvailable } from '@/platform/runtime'
 import { useDocumentSync, type ConflictChoice } from '@/composables/useDocumentSync'
 import { exportDocx } from '@/services/documentDocx'
 import type { DocumentScope, TiptapDocument } from '@/types/documents'
@@ -479,7 +479,7 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
       </div>
 
     </header>
-    <LocalWordBindingPanel v-if="showWordBindingPanel" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" @reattach="linkWord" @decision="decideLocalFile" @cancel="status=''" />
+    <LocalWordBindingPanel v-if="showWordBindingPanel" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" :show-conflict-actions="isDeveloperModeAvailable()" @reattach="linkWord" @decision="decideLocalFile" @cancel="status=''" />
     <div class="document-editor-view__workspace">
       <div ref="editorShell" class="document-editor-view__editor-shell">
         <NFDocumentEditor

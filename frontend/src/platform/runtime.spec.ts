@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Capacitor } from '@capacitor/core'
-import { currentPlatform, initializePlatformRuntime, openExternalUrl, requestApplicationClose, requireDesktopRuntime, supportsUpdateChecks, syncNativeSystemBars } from './runtime'
+import { currentPlatform, initializePlatformRuntime, isDeveloperModeAvailable, openExternalUrl, requestApplicationClose, requireDesktopRuntime, supportsUpdateChecks, syncNativeSystemBars } from './runtime'
 import { diagnostics } from '@/diagnostics/service'
 import { pickDesktopWordFile } from './files'
 
@@ -19,6 +19,7 @@ describe('plain browser boundary', () => {
     const timer = vi.spyOn(window, 'setInterval')
     await initializePlatformRuntime()
     expect(currentPlatform()).toBe('web')
+    expect(isDeveloperModeAvailable()).toBe(false)
     expect(document.documentElement.dataset.platform).toBe('web')
     expect(supportsUpdateChecks()).toBe(false)
     expect(timer).not.toHaveBeenCalled()

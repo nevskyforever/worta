@@ -33,8 +33,13 @@ Production Desktop targets:
   existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
 * Use the existing signing, update, and publication mechanisms. Do not create
   new release mechanisms without separate approval.
-* GitHub Releases is the primary source of published installers. Update
-  `worta.ru` using its existing process.
+* GitHub Releases remains the official release record and archive. Legacy
+  desktop builds keep using the existing `nfproject.ru/app` update manifest
+  and files. New WORTA builds use `worta.ru/app` for updater manifests and
+  payloads, and `worta.ru/releases.json` for the three download buttons. Keep
+  these generations separate while publishing compatible release files through
+  the existing `scripts/upload-release.sh`; the WORTA document root is
+  `/home/n/nevskyfore/worta/public_html` and its app directory is `app/`.
 
 ## General working rules
 

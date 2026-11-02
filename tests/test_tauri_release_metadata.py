@@ -24,12 +24,18 @@ release_config = _load_script(
 update_manifest = _load_script(
     'create-tauri-update-manifest.py', 'create_tauri_update_manifest',
 ).update_manifest
+update_legacy_release_manifest = _load_script(
+    'update-release-manifest.py', 'update_legacy_release_manifest',
+)
 sync_versions = _load_script(
     'sync-tauri-versions.py', 'sync_tauri_versions',
 )
 artifact_revision = _load_script(
     'verify-tauri-artifact.py', 'verify_tauri_artifact',
 ).artifact_revision
+release_catalog = _load_script(
+    'create-worta-releases-manifest.py', 'create_worta_releases_manifest',
+).release_catalog
 
 
 def test_engine_versions_are_normalized_to_three_components():
@@ -51,6 +57,10 @@ def test_runtime_package_version_matches_canonical_engine_version():
     assert 'version: env!("CARGO_PKG_VERSION").to_string()' in (
         tauri_dir / 'src' / 'lib.rs'
     ).read_text(encoding='utf-8')
+    tauri_source = (tauri_dir / 'src' / 'lib.rs').read_text(encoding='utf-8')
+    assert 'https://worta.ru/app/update_manifest.json' in tauri_source
+    assert 'url.starts_with("https://worta.ru/app/")' in tauri_source
+    assert 'https://nfproject.ru/app/update_manifest.json' not in tauri_source
 
 
 def test_version_sync_can_target_an_isolated_frontend_workspace(tmp_path):
@@ -81,14 +91,13 @@ def test_version_sync_can_target_an_isolated_frontend_workspace(tmp_path):
 def test_release_config_creates_nsis_updater_artifacts():
     payload = release_config(
         version='4.15.0',
-        repository='owner/nfprogress',
         public_key='untrusted comment: minisign public key\nRWQexample',
     )
 
     assert payload['bundle']['createUpdaterArtifacts'] is True
     assert payload['bundle']['windows']['nsis']['installMode'] == 'currentUser'
     assert payload['plugins']['updater']['endpoints'] == [
-        'https://github.com/owner/nfprogress/releases/latest/download/latest.json',
+        'https://worta.ru/app/latest.json',
     ]
     assert payload['plugins']['updater']['windows']['installMode'] == 'passive'
 
@@ -96,7 +105,6 @@ def test_release_config_creates_nsis_updater_artifacts():
 def test_update_manifest_embeds_signature_and_stable_release_url():
     payload = update_manifest(
         version='4.15.0',
-        repository='owner/nfprogress',
         tag='v4.15.0',
         artifact_name='nfprogress-windows-x86_64-4.15.0-setup.exe',
         signature='signed-content\n',
@@ -106,8 +114,39 @@ def test_update_manifest_embeds_signature_and_stable_release_url():
 
     windows = payload['platforms']['windows-x86_64']
     assert windows['signature'] == 'signed-content'
-    assert windows['url'].endswith(
-        '/releases/download/v4.15.0/nfprogress-windows-x86_64-4.15.0-setup.exe',
+    assert windows['url'] == (
+        'https://worta.ru/app/nfprogress-windows-x86_64-4.15.0-setup.exe'
+    )
+
+
+def test_worta_download_catalog_preserves_platforms_until_qualified():
+    previous = release_catalog('5.3.10', platforms={'macos-arm'})
+    updated = release_catalog(
+        '5.3.11', existing=previous, platforms={'macos-intel'},
+    )
+
+    releases = {item['platform']: item for item in updated['releases']}
+    assert releases['macos-intel']['url'] == 'https://worta.ru/app/nfprogress-mac-intel-5.3.11.zip'
+    assert releases['macos-arm']['version'] == '5.3.10'
+    assert releases['windows']['status'] == 'unavailable'
+
+
+def test_update_manifest_supports_a_separate_worta_destination(tmp_path, monkeypatch):
+    archive = tmp_path / 'nfprogress-mac-arm-5.3.11.zip'
+    archive.write_bytes(b'qualified archive')
+    output_manifest = tmp_path / 'worta-update_manifest.json'
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv('RELEASE_BASE_URL', 'https://worta.ru/app')
+    monkeypatch.setenv('RELEASE_MANIFEST_PATH', str(output_manifest))
+    monkeypatch.setattr(
+        'sys.argv',
+        ['update-release-manifest.py', '5.3.11', 'macos_arm', str(archive)],
+    )
+
+    assert update_legacy_release_manifest.main() == 0
+    payload = json.loads(output_manifest.read_text(encoding='utf-8'))
+    assert payload['macos_arm']['url'] == (
+        'https://worta.ru/app/nfprogress-mac-arm-5.3.11.zip'
     )
 
 

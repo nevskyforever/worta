@@ -215,7 +215,7 @@ jobs:
           $publicKeyPath = Join-Path $env:RUNNER_TEMP 'f11-tauri-updater.pub'
           ($env:TAURI_UPDATER_PUBLIC_KEY -replace '\\n', "`n").Trim() | Set-Content -LiteralPath $publicKeyPath -Encoding utf8
           $configPath = Join-Path $env:RUNNER_TEMP 'f11-tauri-release.conf.json'
-          python scripts\create-tauri-release-config.py --version $version --repository $env:GITHUB_REPOSITORY --public-key-file $publicKeyPath --output $configPath
+          python scripts\create-tauri-release-config.py --version $version --public-key-file $publicKeyPath --output $configPath
           "TAURI_RELEASE_CONFIG=$configPath" >> $env:GITHUB_ENV
           "NFPROGRESS_UPDATER_ENABLED=1" >> $env:GITHUB_ENV
 

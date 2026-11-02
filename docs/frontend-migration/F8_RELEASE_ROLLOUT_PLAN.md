@@ -14,11 +14,16 @@ For a future release, publish only after F10 qualification:
 - separately packaged migration helper/bridge artifact, if that is the chosen
   legacy strategy.
 
-The later release owner must update the platform-specific sections in the two
-legacy manifests without overwriting unrelated user changes, then verify the
-remote manifest and hosted assets. The current legacy manifest shape points to
-`nfproject.ru` while the Windows Tauri updater workflow publishes GitHub
-Release metadata; this cross-generation contract needs an explicit cutover.
+For the 5.3.11 transition, legacy clients keep their existing
+`nfproject.ru/app` update source and receive compatible release files there.
+New WORTA clients use `worta.ru/app` for updater manifests and payloads; the
+landing page reads `worta.ru/releases.json`. GitHub Releases remains the
+official release record and downloadable archive. Publish through the existing
+`scripts/upload-release.sh`, using `/home/n/nevskyfore/nfproject/public_html/app`
+for legacy assets, `/home/n/nevskyfore/worta/public_html/app` for new updater
+assets, and `/home/n/nevskyfore/worta/public_html` for the download catalog.
+Update each generation's manifest independently and verify the hosted files
+before publishing the GitHub Release.
 
 The release config must continue to use identifier `app.nfprogress.tracker`,
 Tauri updater signatures, Windows `x86_64-pc-windows-msvc`, and the existing

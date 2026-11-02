@@ -57,7 +57,8 @@ def main() -> int:
             print(f"{label} not found: {path}", file=sys.stderr)
             return 2
 
-    manifest_path = Path("update_manifest.json")
+    base_url = os.environ.get("RELEASE_BASE_URL", "https://nfproject.ru/app").rstrip("/")
+    manifest_path = Path(os.environ.get("RELEASE_MANIFEST_PATH", "update_manifest.json"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     notes = os.environ.get("RELEASE_NOTES", "").strip()
     if notes:
@@ -65,7 +66,7 @@ def main() -> int:
     else:
         manifest.setdefault("notes", "Исправлены ошибки и улучшена стабильность.")
 
-    url = f"https://nfproject.ru/app/{filename}"
+    url = f"{base_url}/{filename}"
     if platform == "windows":
         section = {
             "version": version,
@@ -93,7 +94,7 @@ def main() -> int:
             section["size"] = artifact.stat().st_size
         if installer is not None:
             section["installer_url"] = (
-                f"https://nfproject.ru/app/nfprogress-windows-x86_64-{version}-setup.exe"
+                f"{base_url}/nfprogress-windows-x86_64-{version}-setup.exe"
             )
             section["installer_sha256"] = _sha256(installer)
             section["installer_size"] = installer.stat().st_size

@@ -3481,7 +3481,7 @@ fn set_settings(values: serde_json::Map<String, serde_json::Value>) -> Result<()
     transaction.commit().map_err(|error| error.to_string())
 }
 
-const UPDATE_MANIFEST_URL: &str = "https://nfproject.ru/app/update_manifest.json";
+const UPDATE_MANIFEST_URL: &str = "https://worta.ru/app/update_manifest.json";
 const UPDATE_MANIFEST_TIMEOUT: Duration = Duration::from_secs(10);
 const WINDOW_STATE_FILE: &str = "main-window.json";
 
@@ -6165,7 +6165,7 @@ async fn install_macos_update(
     sha256: String,
     size: u64,
 ) -> Result<bool, String> {
-    if !url.starts_with("https://nfproject.ru/app/") {
+    if !url.starts_with("https://worta.ru/app/") {
         return Err("Недопустимый адрес обновления macOS.".to_string());
     }
     if sha256.len() != 64 || !sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) || size == 0 {

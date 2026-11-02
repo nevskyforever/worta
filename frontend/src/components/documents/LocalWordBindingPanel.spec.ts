@@ -3,11 +3,12 @@ import { createPinia } from 'pinia'
 import { expect, it } from 'vitest'
 import Panel from './LocalWordBindingPanel.vue'
 
-function panel(attached = false, state = attached ? 'external_proposal' : 'unlinked') {
+function panel(attached = false, state = attached ? 'external_proposal' : 'unlinked', showConflictActions = false) {
   return mount(Panel, {
     props: {
       attached,
       state,
+      showConflictActions,
       externalContent: {
         type: 'doc',
         content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Local external manuscript' }] }],
@@ -36,7 +37,7 @@ it('hides conflict actions while the Word binding is synchronized', () => {
 })
 
 it('offers conflict decisions only when a linked file needs resolution', async () => {
-  const wrapper = panel(true, 'external_proposal')
+  const wrapper = panel(true, 'external_proposal', true)
   expect(wrapper.find('details.local-word-binding__decisions').attributes('open')).toBeUndefined()
   expect(wrapper.find('[data-action="reattach"]').exists()).toBe(false)
   expect(wrapper.find('[data-action="copy"]').exists()).toBe(false)
@@ -44,6 +45,16 @@ it('offers conflict decisions only when a linked file needs resolution', async (
     await wrapper.get(`[data-action="${choice}"]`).trigger('click')
   }
   expect(wrapper.emitted('decision')).toEqual([['compare'], ['cloud'], ['import'], ['unlink']])
+  wrapper.unmount()
+})
+
+it('never shows conflict resolution controls in ordinary production mode', () => {
+  const wrapper = panel(true, 'conflict')
+  expect(wrapper.find('details.local-word-binding__decisions').exists()).toBe(false)
+  expect(wrapper.find('[data-action="compare"]').exists()).toBe(false)
+  expect(wrapper.find('[data-action="cloud"]').exists()).toBe(false)
+  expect(wrapper.find('[data-action="import"]').exists()).toBe(false)
+  expect(wrapper.find('[data-action="unlink"]').exists()).toBe(false)
   wrapper.unmount()
 })
 

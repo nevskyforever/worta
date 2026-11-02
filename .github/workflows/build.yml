@@ -389,7 +389,6 @@ jobs:
 
           python scripts\create-tauri-release-config.py `
             --version $env:APP_VERSION `
-            --repository $env:GITHUB_REPOSITORY `
             --public-key-file $env:TAURI_UPDATER_PUBLIC_KEY_FILE `
             --output $configPath
 
@@ -533,7 +532,6 @@ jobs:
 
           python scripts\create-tauri-update-manifest.py `
             --version $env:APP_VERSION `
-            --repository $env:GITHUB_REPOSITORY `
             --tag "v$($env:APP_VERSION)" `
             --artifact $assetPath `
             --signature "$assetPath.sig" `
@@ -716,6 +714,8 @@ jobs:
 
       - name: Publish GitHub release and updater manifest
         shell: bash
+        env:
+          SSH_UPLOAD_PRIVATE_KEY: ${{ secrets.SSH_UPLOAD_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -734,6 +734,75 @@ jobs:
               -print |
             sort
           )
+
+          key_path="$RUNNER_TEMP/nfprogress_spaceweb"
+          printf '%s' "$SSH_UPLOAD_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          export SSH_UPLOAD_KEY_PATH="$key_path"
+
+          curl --fail --location --retry 3 \
+            --output release-assets/update_manifest_spaceweb.json \
+            https://nfproject.ru/app/update_manifest.json
+          cp release-assets/update_manifest_spaceweb.json \
+            release-assets/update_manifest_worta.json
+
+          for platform in windows macos_arm macos_intel; do
+            case "$platform" in
+              windows)
+                artifact="release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+                ;;
+              macos_arm)
+                artifact="release-assets/nfprogress-mac-arm-${APP_VERSION}.zip"
+                ;;
+              macos_intel)
+                artifact="release-assets/nfprogress-mac-intel-${APP_VERSION}.zip"
+                ;;
+            esac
+            RELEASE_BASE_URL="https://nfproject.ru/app" \
+            RELEASE_MANIFEST_PATH="release-assets/update_manifest_spaceweb.json" \
+              python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+            RELEASE_BASE_URL="https://worta.ru/app" \
+            RELEASE_MANIFEST_PATH="release-assets/update_manifest_worta.json" \
+              python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+          done
+
+          legacy_dir="$RUNNER_TEMP/spaceweb-legacy-manifest"
+          mkdir -p "$legacy_dir"
+          cp release-assets/update_manifest_spaceweb.json "$legacy_dir/update_manifest.json"
+          (cd "$legacy_dir" && python "$GITHUB_WORKSPACE/scripts/create-legacy-manifest.py")
+
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/nfproject/public_html/app"
+          ./scripts/upload-release.sh \
+            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" \
+            "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+          ./scripts/upload-release.sh \
+            "release-assets/update_manifest_spaceweb.json" \
+            update_manifest.json
+          ./scripts/upload-release.sh \
+            "$legacy_dir/update_manifest_legacy.json" \
+            update_manifest_legacy.json
+
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html/app"
+          ./scripts/upload-release.sh \
+            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" \
+            "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+          ./scripts/upload-release.sh \
+            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" \
+            "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig"
+          ./scripts/upload-release.sh \
+            release-assets/latest.json latest.json
+          ./scripts/upload-release.sh \
+            release-assets/update_manifest_worta.json update_manifest.json
+          for arch in arm intel; do
+            ./scripts/upload-release.sh \
+              "release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip" \
+              "nfprogress-mac-${arch}-${APP_VERSION}.zip"
+          done
+          python scripts/create-worta-releases-manifest.py \
+            --version "$APP_VERSION" \
+            --output release-assets/releases.json
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html"
+          ./scripts/upload-release.sh release-assets/releases.json releases.json
 
           if gh release view \
             "$tag" \
@@ -793,7 +862,6 @@ jobs:
               --notes-file "$notes_file" \
               --latest
           fi
-
 
       # ------------------------------------------------------------
       # Telegram
