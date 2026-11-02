@@ -1,5 +1,28 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-02 — Branch-specific CI / pre-release policy (owner decision)
+
+The owner confirms that the new **main-only** `AGENTS.md` pre-release policy
+(local-first qualification and no broad automatic test/release workflow after
+ordinary `main` pushes) applies **only to `main`**. It must **not** be copied
+into `6.0`: the product-6.0 pre-release test process has not yet been agreed.
+Until a separate owner decision near the 6.0 release, retain the current
+development CI workflow triggers and existing focused/negative/compatibility
+acceptance requirements. In particular, `6.0` currently has path-filtered
+Cloud backend and SQLite sync workflows on push/PR; Windows F11 and release
+engineering qualifications are manually dispatched. A working code change
+must not be relabelled qualified when required tests were not run or failed.
+
+Do not wholesale import the `main`-specific `AGENTS.md` pre-release rules,
+release pipeline, or publishing scripts into `6.0`. Assess 5.3.12 Desktop
+bugfixes and release compatibility separately before selecting any safe
+port. The owner's objective remains rapid, limited closed-MVP testing rather
+than overengineering. This decision changes no code, CI workflow, capability,
+registration or public-release gate. Product stage remains **2/6 Full Web
+reading**; technical replay **Slice 2/5 Conflict owner bridge LOCAL COMPLETE**,
+next **Slice 3/5 Resolution owner bridge**. Historical progress remains
+**89.36%**, not a newly recalculated readiness value.
+
 ## 2026-11-01 — Content genesis / Conflict owner bridge (local implementation)
 
 Starting `817f037a6a408d6745fff19260db681cc8968f99`. The owner-approved
