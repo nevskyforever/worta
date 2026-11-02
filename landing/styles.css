@@ -137,8 +137,8 @@ h1 span { color: var(--accent); }
 .glow-one { width: 240px; height: 240px; top: 0; right: 6%; background: radial-gradient(circle, color-mix(in srgb, var(--accent) 19%, transparent), transparent 70%); }
 .glow-two { width: 220px; height: 220px; bottom: 2%; left: 2%; background: radial-gradient(circle, color-mix(in srgb, #e6b7a4 22%, transparent), transparent 72%); }
 .screenshot-placeholder { position: relative; display: flex; min-height: 300px; overflow: hidden; flex-direction: column; border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: 19px; background: linear-gradient(145deg, color-mix(in srgb, var(--surface) 91%, var(--accent-soft)), var(--surface)); color: var(--muted); }
-.screenshot-hero { min-height: 400px; transform: rotate(1.2deg); border-style: solid; box-shadow: var(--shadow); }
-.screenshot-placeholder.screenshot-figure { display: block; min-height: 0; margin: 0; border-style: solid; box-shadow: var(--shadow-soft); }
+.screenshot-hero { min-height: 0; transform: none; }
+.screenshot-placeholder.screenshot-figure { display: block; min-height: 0; margin: 0; overflow: visible; border: 0; border-radius: 0; background: none; box-shadow: none; }
 .screenshot-figure img { display: block; width: 100%; height: auto; }
 .screenshot-card img { width: min(100%, 520px); margin-inline: auto; }
 .screenshot-gallery { display: grid; max-width: 1000px; margin: 54px auto 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
@@ -165,7 +165,7 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
 .section-heading > p:last-child { margin-bottom: 0; color: var(--muted); font-size: 16px; line-height: 1.75; }
 .section-heading-centered > p:last-child { max-width: 620px; margin-inline: auto; }
 .accent-text { color: var(--accent); }
-.screenshot-wide { min-height: 390px; max-width: 1000px; margin: 54px auto 0; box-shadow: var(--shadow-soft); }
+.screenshot-wide { max-width: 1000px; margin: 54px auto 0; }
 .placeholder-content-wide { min-height: 310px; }
 
 .features { border-top: 1px solid var(--border); background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 55%, var(--page)), var(--page) 65%); }
@@ -190,14 +190,13 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
 .workflow-steps p { margin: 0; color: var(--muted); font-size: 13px; }
 .workflow-visual { position: relative; }
 .workflow-visual::before { position: absolute; width: 68%; height: 75%; top: 11%; left: 16%; border-radius: 50%; background: color-mix(in srgb, var(--accent) 12%, transparent); content: ""; filter: blur(38px); }
-.screenshot-tall { min-height: 440px; border-style: solid; box-shadow: var(--shadow); transform: rotate(-1deg); }
+.screenshot-tall { min-height: 0; transform: none; }
 .screenshot-tall .placeholder-content { min-height: 345px; }
 
 .progress-section { overflow: hidden; background: var(--surface-soft); }
 .progress-layout { display: grid; grid-template-columns: 1.05fr .95fr; align-items: center; gap: 92px; }
 .progress-visual { position: relative; }
-.progress-visual::after { position: absolute; z-index: 0; width: 130px; height: 130px; right: -35px; bottom: -33px; border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); border-radius: 50%; content: ""; }
-.screenshot-progress { z-index: 1; min-height: 365px; border-style: solid; background: var(--surface); box-shadow: var(--shadow); }
+.screenshot-progress { z-index: 1; min-height: 0; background: none; box-shadow: none; }
 .screenshot-progress .placeholder-content { min-height: 290px; }
 .progress-copy .text-link { margin-top: 13px; }
 
@@ -278,7 +277,6 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
   .primary-nav { gap: 17px; }
   .primary-nav > a { font-size: 13px; }
   .hero { min-height: auto; grid-template-columns: 1fr .92fr; gap: 42px; }
-  .screenshot-hero { min-height: 340px; }
   .workflow, .progress-layout { gap: 52px; }
   .footer-inner { grid-template-columns: auto 1fr auto; }
   .footer-inner small { display: none; }
@@ -318,10 +316,9 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
   h1 { max-width: 600px; font-size: clamp(42px, 10vw, 62px); }
   .hero-lede { max-width: 600px; font-size: 16px; }
   .hero-art { width: min(100% - 10px, 560px); margin-inline: auto; padding-block: 16px 25px; }
-  .screenshot-hero { min-height: 300px; transform: rotate(.6deg); }
   .art-caption { right: -8px; }
   .intro { padding-block: 28px 80px; }
-  .screenshot-wide { min-height: 290px; margin-top: 35px; }
+  .screenshot-wide { margin-top: 35px; }
   .screenshot-gallery { margin-top: 35px; grid-template-columns: 1fr; gap: 16px; }
   .screenshot-figure.screenshot-wide { margin-top: 35px; }
   .placeholder-content-wide { min-height: 215px; }
@@ -330,8 +327,6 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
   .feature-icon { margin-bottom: 17px; }
   .workflow, .progress-layout { grid-template-columns: 1fr; gap: 38px; }
   .workflow-visual { width: min(100% - 10px, 520px); margin-inline: auto; }
-  .screenshot-tall { min-height: 330px; }
-  .screenshot-tall .placeholder-content { min-height: 235px; }
   .progress-visual { width: min(100% - 10px, 540px); margin-inline: auto; }
   .progress-copy { grid-row: 1; }
   .tools-row { grid-template-columns: 1fr; gap: 10px; }
