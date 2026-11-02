@@ -12,6 +12,13 @@ The application is built with Nuitka for:
 * macOS Apple Silicon;
 * macOS Intel.
 
+## Release signing policy (owner-approved)
+
+* Until the owner explicitly changes this policy, worta Desktop releases are intentionally distributed **without platform code-signing certificates**: no Apple Developer ID signing/notarization for macOS and no Authenticode signing for Windows. This is expected and **is not, by itself, a release blocker or a reason to report PARTIAL/STOP**.
+* Do not wait for certificates, purchase signing services, add mandatory signing steps, or change the existing build, updater, and publication workflows solely to obtain platform signatures.
+* This exception applies **only to platform installer/app signing**. Keep the existing cryptographic signatures and integrity checks used by the updater, security gates, installer validation, backward compatibility, and data-migration acceptance requirements intact. Never bypass or disable those protections.
+* Still test that installers launch, data remains intact, and updates work where applicable. Report actual platform warnings or failures for unsigned apps accurately, without confusing missing certificates with a functional build failure.
+
 ## General working rules
 
 * Perform only the task specified by the user.
