@@ -29,7 +29,7 @@ def test_f10_workflow_is_manual_and_publish_job_is_protected():
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     assert "publish_production:" in workflow
     assert "github.event_name == 'workflow_dispatch'" in workflow
-    assert "inputs.publish_production == true" in workflow
+    assert "${{ inputs.publish_production }}" in workflow
     assert "name: nfprogress-production" in workflow
 
     qualification = (ROOT / ".github/workflows/release-qualification.yml").read_text(
@@ -60,7 +60,7 @@ def test_f10_signing_script_is_fail_closed_and_keeps_credentials_external():
     assert "Get-AuthenticodeSignature" in windows_script
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     assert "Sign Windows executable and installer" in workflow
-    assert "inputs.publish_production == true" in workflow
+    assert "Publication is required for a release dispatch" in workflow
 
 
 def test_f10_identity_and_data_root_contracts_are_stable():
@@ -82,3 +82,56 @@ def test_release_workflow_requires_all_three_platform_artifacts():
     assert "for arch in arm intel; do" in workflow
     assert '"$GITHUB_SHA"' in workflow
     assert "Validated Windows x64, macOS ARM, and macOS Intel release builds." in workflow
+
+
+def test_telegram_receipts_fail_closed_and_allow_safe_reruns(tmp_path):
+    """Exercise the workflow shell against absent, sent, and uncertain receipts."""
+    import os
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / '.github/workflows/build.yml').read_text())
+    steps = workflow['jobs']['publish_release']['steps']
+    script = next(step['run'] for step in steps if step.get('id') == 'telegram_receipt')
+    fake_bin = tmp_path / 'bin'
+    fake_bin.mkdir()
+    gh = fake_bin / 'gh'
+    gh.write_text('''#!/bin/sh
+if [ "$1 $2" = "release view" ]; then
+  case "$RECEIPT_STATE" in
+    new) exit 1 ;;
+    missing) echo '{"assets":[]}' ;;
+    *) echo '{"assets":[{"name":"telegram-receipt.json"}]}' ;;
+  esac
+elif [ "$1 $2" = "release download" ]; then
+  mkdir -p "$RUNNER_TEMP/telegram-receipt"
+  if [ "$RECEIPT_STATE" = sent ]; then
+    echo '{"version":"5.3.12","status":"sent","message_id":123}' > "$RUNNER_TEMP/telegram-receipt/telegram-receipt.json"
+  else
+    echo '{"version":"5.3.12","status":"pending"}' > "$RUNNER_TEMP/telegram-receipt/telegram-receipt.json"
+  fi
+elif [ "$1" = api ]; then
+  :
+else
+  exit 1
+fi
+''')
+    gh.chmod(0o755)
+    for state, expected, output in (
+        ('new', 0, 'already_sent=false'),
+        ('sent', 0, 'already_sent=true'),
+        ('pending', 1, 'indeterminate'),
+        ('missing', 1, 'no Telegram receipt'),
+    ):
+        work = tmp_path / state
+        work.mkdir()
+        output_file = work / 'output'
+        env = dict(os.environ, PATH=f'{fake_bin}:{os.environ["PATH"]}',
+                   RUNNER_TEMP=str(work), GITHUB_OUTPUT=str(output_file),
+                   GITHUB_REPOSITORY='owner/repo', APP_VERSION='5.3.12',
+                   RECEIPT_STATE=state)
+        result = subprocess.run(['bash', '-e', '-c', script], env=env,
+                                text=True, capture_output=True)
+        assert result.returncode == expected, (state, result.stderr)
+        text = output_file.read_text() if output_file.exists() else result.stderr
+        assert output in text

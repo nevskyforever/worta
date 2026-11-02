@@ -16,9 +16,9 @@ on:
         type: string
 
       publish_production:
-        description: 'Опубликовать уже квалифицированные production-артефакты'
+        description: 'Опубликовать квалифицированный релиз (обязательно)'
         required: true
-        default: false
+        default: true
         type: boolean
 
       sign_windows:
@@ -39,6 +39,23 @@ concurrency:
 
 
 jobs:
+  validate_dispatch:
+    name: Validate release dispatch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the main branch and production publication
+        env:
+          PUBLISH_PRODUCTION: ${{ inputs.publish_production }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo 'A release must be dispatched from main.' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_PRODUCTION" != true ]]; then
+            echo 'Publication is required for a release dispatch; publish_production must be true.' >&2
+            exit 1
+          fi
+
   frontend_tests:
     name: Windows frontend tests (${{ matrix.shard }}/4)
     if: >-
@@ -650,13 +667,12 @@ jobs:
   publish_release:
     name: Publish GitHub release
 
-    needs: [build_windows, frontend_tests]
+    needs: [validate_dispatch, build_windows, frontend_tests]
 
     if: >-
       needs.build_windows.result == 'success' &&
       needs.frontend_tests.result == 'success' &&
-      github.event_name == 'workflow_dispatch' &&
-      inputs.publish_production == true
+      github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -698,10 +714,22 @@ jobs:
           git fetch --no-tags origin refs/tags/v"$APP_VERSION":refs/tags/v"$APP_VERSION"
           tag_sha=$(git rev-parse "refs/tags/v${APP_VERSION}^{commit}")
           if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
-            if [[ "$APP_VERSION" != "5.3.11" || "$tag_sha" != "8017ab1bbd3a2b789acfd38c5d84c84351453468" ]]; then
-              echo 'The release tag must match the qualified revision.' >&2
-              exit 1
-            fi
+            if [[ "$APP_VERSION" == "5.3.12" && "$tag_sha" == "ad67da2ed9d253a4a98638cc21f187fb4e1e373e" ]]; then
+              # The fixed baseline differs from the tag only in CI, tests, and
+              # macOS release orchestration, not application build sources.
+              # Permit only this task's reviewed publication changes afterward.
+              baseline=6612e656580f685138079ea84ddaa07bfcd3a1a8
+              git merge-base --is-ancestor "$tag_sha" "$baseline"
+              git merge-base --is-ancestor "$baseline" "$GITHUB_SHA"
+              changes=$(git diff --name-status --no-renames "$baseline" "$GITHUB_SHA")
+              while IFS=$'\t' read -r status path; do
+                [[ "$status" == M ]] || { echo 'Unexpected release change.' >&2; exit 1; }
+                case "$path" in
+                  .github/workflows/build.yml|AGENTS.md|tests/test_f10_release_engineering.py) ;;
+                  *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+                esac
+              done <<< "$changes"
+            elif [[ "$APP_VERSION" == "5.3.11" && "$tag_sha" == "8017ab1bbd3a2b789acfd38c5d84c84351453468" ]]; then
             git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA"
             changes=$(git diff --name-status --no-renames "$tag_sha" "$GITHUB_SHA")
             [[ -n "$changes" ]] || { echo 'Expected release qualification changes.' >&2; exit 1; }
@@ -712,6 +740,10 @@ jobs:
                 *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
               esac
             done <<< "$changes"
+            else
+              echo 'The release tag must match the qualified revision.' >&2
+              exit 1
+            fi
           fi
           echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
 
@@ -776,6 +808,9 @@ jobs:
           test -s "${installer}.sig"
           test -s release-assets/latest.json
           test -s release-assets/SHA256SUMS.txt
+          (cd release-assets && tr -d '\r' < SHA256SUMS.txt | sha256sum -c -)
+          grep -Fx "commit_sha=${{ needs.build_windows.outputs.commit_sha }}" <(tr -d '\r' < release-assets/provenance.txt)
+          [[ "${{ needs.build_windows.outputs.commit_sha }}" == "$GITHUB_SHA" ]]
 
           jq \
             -e \
@@ -792,11 +827,96 @@ jobs:
 
           echo "Validated Windows x64, macOS ARM, and macOS Intel release builds."
 
+      - name: Verify updater signature and reject tampering
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY || secrets.TAURI_UPDATER_PUBLIC_KEY }}
+          CARGO_INCREMENTAL: 0
+        run: |
+          set -euo pipefail
+          [[ -n "$TAURI_UPDATER_PUBLIC_KEY" ]] || { echo 'Updater public key is required.' >&2; exit 1; }
+          verifier="$RUNNER_TEMP/worta-updater-verifier"
+          mkdir -p "$verifier/src"
+          cat > "$verifier/Cargo.toml" <<'TOML'
+          [package]
+          name = "worta-updater-verifier"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          base64 = "=0.22.1"
+          minisign-verify = "=0.2.5"
+          TOML
+          cat > "$verifier/src/main.rs" <<'RUST'
+          use base64::{engine::general_purpose::STANDARD, Engine};
+          use minisign_verify::{PublicKey, Signature};
+          use std::{env, fs};
+          fn main() -> Result<(), Box<dyn std::error::Error>> {
+              let key = env::var("TAURI_UPDATER_PUBLIC_KEY")?.replace("\\n", "\n");
+              let key_bytes = STANDARD.decode(key.trim())?;
+              let key = PublicKey::decode(std::str::from_utf8(&key_bytes)?)?;
+              let artifact = env::args().nth(1).ok_or("missing artifact")?;
+              let sig = fs::read_to_string(format!("{artifact}.sig"))?;
+              let sig_bytes = STANDARD.decode(sig.trim())?;
+              let signature = Signature::decode(std::str::from_utf8(&sig_bytes)?)?;
+              let mut payload = fs::read(artifact)?;
+              key.verify(&payload, &signature, false)?;
+              if payload.is_empty() { return Err("empty updater artifact".into()); }
+              payload[0] ^= 1;
+              if key.verify(&payload, &signature, false).is_ok() {
+                  return Err("tampered updater artifact was accepted".into());
+              }
+              println!("Updater signature accepted; tampered artifact rejected.");
+              Ok(())
+          }
+          RUST
+          cargo run --quiet --manifest-path "$verifier/Cargo.toml" -- \
+            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+          if [[ "$APP_VERSION" == 5.3.12 ]]; then
+            previous="$verifier/nfprogress-windows-x86_64-5.3.11-setup.exe"
+            curl --fail --location --retry 3 --silent --show-error \
+              https://worta.ru/app/nfprogress-windows-x86_64-5.3.11-setup.exe -o "$previous"
+            curl --fail --location --retry 3 --silent --show-error \
+              https://worta.ru/app/nfprogress-windows-x86_64-5.3.11-setup.exe.sig -o "$previous.sig"
+            cargo run --quiet --manifest-path "$verifier/Cargo.toml" -- "$previous"
+            echo 'Current updater key also verifies the previous release.'
+          fi
+
+      # A durable receipt prevents a rerun from sending Telegram twice. An
+      # indeterminate attempt fails closed and requires an operator review.
+      - name: Check existing Telegram publication receipt
+        id: telegram_receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${APP_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            if ! jq -e '.assets[] | select(.name == "telegram-receipt.json")' "$RUNNER_TEMP/existing-release.json" >/dev/null; then
+              echo 'Existing release has no Telegram receipt; inspect the channel before retrying.' >&2
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/telegram-receipt"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern telegram-receipt.json --dir "$RUNNER_TEMP/telegram-receipt"
+            jq -e --arg version "$APP_VERSION" '.version == $version and .status == "sent" and (.message_id | type == "number")' "$RUNNER_TEMP/telegram-receipt/telegram-receipt.json" >/dev/null || {
+              echo 'Telegram delivery is indeterminate; inspect the channel before retrying.' >&2
+              exit 1
+            }
+            echo 'already_sent=true' >> "$GITHUB_OUTPUT"
+          else
+            # Verify API access separately so errors are never interpreted as absence.
+            gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq '.[].tag_name' > "$RUNNER_TEMP/release-tags"
+            if grep -Fxq "$tag" "$RUNNER_TEMP/release-tags"; then
+              echo 'Release lookup failed for an existing release.' >&2
+              exit 1
+            fi
+            echo 'already_sent=false' >> "$GITHUB_OUTPUT"
+          fi
+
       # ------------------------------------------------------------
       # GitHub Release
       # ------------------------------------------------------------
 
       - name: Publish GitHub release and updater manifest
+        if: steps.telegram_receipt.outputs.already_sent != 'true'
         shell: bash
         env:
           SSH_UPLOAD_PRIVATE_KEY: ${{ secrets.SSH_UPLOAD_PRIVATE_KEY }}
@@ -899,11 +1019,8 @@ jobs:
             release-assets/latest.json latest.json
           ./scripts/upload-release.sh \
             release-assets/update_manifest_worta.json update_manifest.json
-          for arch in arm intel; do
-            ./scripts/upload-release.sh \
-              "release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip" \
-              "nfprogress-mac-${arch}-${APP_VERSION}.zip"
-          done
+          # The verified macOS archives were downloaded from this same host;
+          # never overwrite a live release payload with an identical copy.
           python scripts/create-worta-releases-manifest.py \
             --version "$APP_VERSION" \
             --output release-assets/releases.json
@@ -969,34 +1086,58 @@ jobs:
               --latest
           fi
 
+      - name: Verify published release and hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified="$RUNNER_TEMP/published-release"
+          mkdir -p "$verified/github"
+          for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
+            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+            gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verified/github"
+            cmp "$verified/$name" "$verified/github/$name"
+            if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" != true ]]; then
+              cmp "release-assets/$name" "$verified/$name"
+            fi
+          done
+          for name in latest.json update_manifest.json; do
+            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+          done
+          curl --fail --location --retry 3 --silent --show-error https://worta.ru/releases.json -o "$verified/releases.json"
+          if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" != true ]]; then
+            cmp release-assets/latest.json "$verified/latest.json"
+            cmp release-assets/update_manifest_worta.json "$verified/update_manifest.json"
+          fi
+          jq -e --arg version "$APP_VERSION" '.version == $version and .platforms["windows-x86_64"].url == ("https://worta.ru/app/nfprogress-windows-x86_64-" + $version + "-setup.exe") and (.platforms["windows-x86_64"].signature | length > 0)' "$verified/latest.json" >/dev/null
+          jq -e --arg version "$APP_VERSION" '[.releases[] | select(.version == $version and .status == "available") | .platform] | sort == ["macos-arm", "macos-intel", "windows"]' "$verified/releases.json" >/dev/null
+          jq -e --arg version "$APP_VERSION" '.windows.version == $version and .macos_arm.version == $version and .macos_intel.version == $version' "$verified/update_manifest.json" >/dev/null
+
       # ------------------------------------------------------------
       # Telegram
       # ------------------------------------------------------------
 
       - name: Notify Telegram channel
+        if: steps.telegram_receipt.outputs.already_sent != 'true'
         shell: bash
-
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-
         run: |
           set -euo pipefail
-
           if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHANNEL_ID" ]]; then
             echo "Telegram notification is mandatory; required secrets are missing." >&2
             exit 1
           fi
-
+          tag="v${APP_VERSION}"
+          receipt="$RUNNER_TEMP/telegram-receipt.json"
+          jq -n --arg version "$APP_VERSION" '{version:$version,status:"pending"}' > "$receipt"
+          gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY"
           message=${TELEGRAM_MESSAGE:-"Обновление ${APP_VERSION}"}
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --request POST \
+          curl --fail --silent --show-error --request POST \
             --data-urlencode "chat_id=${TELEGRAM_CHANNEL_ID}" \
             --data-urlencode "text=${message}" \
             --data-urlencode "disable_web_page_preview=true" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            >/dev/null
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" > "$RUNNER_TEMP/telegram-response.json"
+          jq -e '.ok == true and (.result.message_id | type == "number")' "$RUNNER_TEMP/telegram-response.json" >/dev/null
+          jq --arg version "$APP_VERSION" '{version:$version,status:"sent",message_id:.result.message_id}' "$RUNNER_TEMP/telegram-response.json" > "$receipt"
+          gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY" --clobber

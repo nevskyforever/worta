@@ -21,6 +21,12 @@ Production Desktop targets:
 
 ## Product name and release process
 
+* Owner decision (2026-11-02): `main` contains standalone stable Desktop;
+  `6.0` contains the separate cloud/Web development. C21/C22/C23/PF6.0
+  and the public-release block apply to cloud/Web 6.0, not standalone Desktop
+  releases from `main`. Desktop security, installer, update, data-preservation
+  and migration acceptance gates remain mandatory. Cloud 6.0 remains closed.
+
 * The official product name is `worta`, always lowercase in user-facing names,
   window titles, installers, releases, and other product references.
 * Existing internal identifiers may be retained when changing them would break
@@ -298,7 +304,8 @@ changes before commit and independent GitHub Actions acceptance.
 8. New Web user flows must use real server APIs and relevant backend tests.
    Keep credentials out of browser storage and expose no raw access token to UI.
 9. Do not change Desktop offline-first behavior. Public registration and release
-   remain blocked until all required gates and explicit approvals pass.
+   of cloud/Web 6.0 remain blocked until all required gates and explicit approvals
+   pass; the separate Desktop `main` release policy above applies to Desktop.
 
 Use `scripts/maintenance/local_acceptance.sh` for the maintained `quick`,
 `backend`, `frontend`, and `prepush` local acceptance modes.
