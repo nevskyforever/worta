@@ -94,6 +94,18 @@ prepare_frontend_workspace() {
     "$FRONTEND_SOURCE_DIR/" "$FRONTEND_DIR/"
   rsync --archive --delete \
     "$ROOT_DIR/mindmap_assets/" "$WORKSPACE_DIR/mindmap_assets/"
+  # Vitest's node-only release checks resolve shared compression fixtures and
+  # the local FastAPI app from the workspace root. Copy only their source
+  # trees; these are test inputs and are never included in the Tauri bundle.
+  if [ -d "$ROOT_DIR/scripts/compression" ]; then
+    mkdir -p "$WORKSPACE_DIR/scripts"
+    rsync --archive --delete \
+      "$ROOT_DIR/scripts/compression/" "$WORKSPACE_DIR/scripts/compression/"
+  fi
+  if [ -d "$ROOT_DIR/backend" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/backend/" "$WORKSPACE_DIR/backend/"
+  fi
   # Rust embeds the shared migration SQL from the repository-relative path in
   # src-tauri/src/sqlite.rs. Keep that source available in the isolated build
   # workspace without copying the Python runtime or its user data.
