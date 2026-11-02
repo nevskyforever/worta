@@ -14,7 +14,7 @@ from uuid import uuid4
 from nfprogress.core.sqlite.connection import register_remote_apply_authorization_guard
 from test_cloud_c15_headless_cross_runtime import PROJECT_ID
 from test_cloud_c18_authority_cross_runtime import provision, bootstrap, native, publish, sync
-from test_cloud_c18_content_note_acceptance import content, emit, receive
+from test_cloud_c18_content_note_acceptance import NOW, content, emit, receive
 
 
 class Response:
@@ -102,6 +102,39 @@ def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
     path.write_text(json.dumps(fixture), encoding='utf-8'); path.chmod(0o600)
     root = Path(__file__).resolve().parents[1]
     result = subprocess.run(['node', 'scripts/browser-replay-conflict-local.mjs', str(path)], cwd=root / 'frontend',
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
+    # Exercise the real Desktop choice only after both devices have retained
+    # the peer conflict; then deliver the genuine emitted wire to Chromium.
+    decision = content(tmp_path, a, ia, user, 'conflicts')[0]
+    selected = decision['versions'][0]['event_id']
+    selected_note = decision['versions'][0]['note']
+    assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected, now=NOW) == 'Applied'
+    pending = content(tmp_path, a, ia, user, 'pending')
+    assert len(pending) == 1
+    resolution = json.loads(bytes(pending[0]['frame'][20:]))['event']
+    assert resolution['mutation'] == 'resolution'
+    assert resolution['resolution']['strategy'] == 'choose_version'
+    assert resolution['resolution']['selected_event_id'] == selected
+    assert set(resolution['resolution']['resolved_event_ids']) == {
+        item['event']['event_id'] for item in transport.items[-2:]}
+    assert resolution['result']['note'] == selected_note
+    assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+    assert b'NATIVE_PRIVATE_' not in json.dumps(transport.items[-1]).encode()
+    for db_path, identity in ((a, ia), (b, ib)):
+        receive(transport, tmp_path, 'local-only', db_path, identity, user, amk)
+        assert content(tmp_path, db_path, identity, user, 'conflicts') == []
+        with sqlite3.connect(db_path) as db:
+            saved = json.loads(db.execute("SELECT payload_json FROM notes WHERE id='native-conflict'").fetchone()[0])
+        assert saved['content'] == selected_note['content']
+
+    fixture['anchor']['registry']['current_cursor'] = 5
+    fixture['items'] = transport.items
+    fixture['selectedNote'] = selected_note
+    path.write_text(json.dumps(fixture), encoding='utf-8')
+    result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']

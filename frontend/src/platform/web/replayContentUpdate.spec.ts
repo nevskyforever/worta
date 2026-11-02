@@ -28,7 +28,7 @@ async function setup() {
 it('genuine Legacy -> Content atomic owner records qualify the v5 transition and authenticate again', async () => {
   const { f, before, after, runtime } = await setup()
   assertReplayOwnerTransition(before, after, 3, 'applied')
-  await verifyStoredContentNoteProof(scope, amk, after.rows[2]!, after.noteHistory!)
+  await verifyStoredContentNoteProof(scope, amk, after.rows[2]! as never, after.noteHistory! as never)
   const saved = structuredClone(f.db)
   expect(await runtime.apply(scope, 3)).toBe('already_applied'); expect(f.db).toEqual(saved)
   assertReplayOwnerTransition(after, structuredClone(after), 3, 'already_applied')

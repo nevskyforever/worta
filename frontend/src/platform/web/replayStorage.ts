@@ -242,9 +242,9 @@ class BrowserReplayStorage {
               this.check()
               if (mode === 'readonly') { result(value); return }
               const finish = (after: ReplaySnapshot) => {
-                try { assertReplayOwnerTransition(before, after, sequence, value); result(value) } catch (error) { abort(error) }
+                try { assertReplayOwnerTransition(before, after, sequence, value && typeof value === 'object' && 'status' in value ? value.status : value); result(value) } catch (error) { abort(error) }
               }
-              if (value === 'applied' || value === 'conflict_preserved') {
+              if (value === 'applied' || value === 'conflict_preserved' || value && typeof value === 'object' && 'status' in value && value.status === 'applied') {
                 const manifest = before.manifest!
                 if (manifest.revision === Number.MAX_SAFE_INTEGER) fail()
                 const row = tx.objectStore('inbox').get([this.scope.accountId, sequence])

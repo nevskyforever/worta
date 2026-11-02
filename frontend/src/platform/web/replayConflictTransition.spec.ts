@@ -23,7 +23,7 @@ async function transition() {
 it('checks the genuine peer conflict outcome and its retained owner proof', async () => {
   const { before, after } = await transition()
   assertReplayOwnerTransition(before, after, 4, 'conflict_preserved')
-  await verifyStoredContentConflictProof(scope, amk, after.rows[3]!, after.noteHistory!, after.rows)
+  await verifyStoredContentConflictProof(scope, amk, after.rows[3]! as never, after.noteHistory! as never, after.rows.filter(r => r.state !== 'note_resolution_proven'))
   assertReplayOwnerTransition(after, structuredClone(after), 4, 'already_applied')
 })
 

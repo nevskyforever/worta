@@ -1,5 +1,97 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-02 — WEB.ONLINE.02B Slice 3/5: LOCAL COMPLETE browser Resolution bridge
+
+Starting SHA: `25b8e0a7f6cd62f86057bfd1f6a7d40d28bb5b32`, branch `6.0`.
+This entry supersedes the partial implementation notes below.
+
+The existing Resolution planner/apply owner is now composed into replay v6 for
+one bounded cohort: Content genesis, two distinct peer updates, then a
+choose-version Resolution2. IndexedDB admits the genuine Resolution4,
+group_transition2, head2 and inbox10 records. The owner writes encrypted source,
+proofs, closure and outcome in the same transaction as replay manifest coverage;
+the original candidate/group records and wire ciphertext remain immutable.
+Historical ordinary checks use a transient pre-closure frontier view; no new
+proof structure or fabricated persisted certificate is introduced. Closed
+history is authenticated by the existing Resolution authenticator and exact
+owner reconcile, including after IndexedDB reopen. Qualified prefix and ACK
+remain unchanged at zero.
+
+The production-Rust two-SQLite test emits a real Resolution2 into the local
+Chromium transport. Chromium applies it, decrypts the selected content, reopens
+the browser profile, reauthenticates and performs duplicate delivery without
+writes. It rejects changed wire ciphertext, outcome proof, encrypted evidence,
+transition digest and head reference. Injecting an IndexedDB transaction abort
+leaves coverage at the conflict and no Resolution/transition records; reopening
+and retry succeeds. Old schema opening and ordinary-only inbox/history readers
+reject the closed format. Parent/selected-version negative cases also pass in
+the bounded-entry Vitest tests.
+
+Validation: native/Chromium pytest PASS; Rust Content writer 4 PASS and Resolution
+filter 56 PASS; Resolution planner/apply/entry Vitest 143 PASS; replay Vitest
+113 PASS, 2 SKIPPED (optional Chromium cases are exercised separately by the
+maintained frontend acceptance). Quick acceptance PASS. Maintained `local_acceptance.sh frontend` PASS:
+862 Vitest passed, 2 optional cases skipped in the initial run, then the separate
+Chromium-enabled runs passed all 15 and 16 cases without skips. Typecheck and
+production build PASS. Chromium Stage/account/workspace/document/migration and
+17-scenario replay-storage acceptance PASS. The dedicated real-Rust Resolution
+Chromium test also passes after the final production changes. Build warnings
+about chunk sizes/dynamic imports and existing Rust warnings remain non-fatal.
+Maintenance dry run completed; no generated output or unrelated data was deleted.
+
+Slice 3 status: **LOCAL COMPLETE** for this bounded local browser bridge.
+Commit/push target: `origin/6.0`; final SHA is the commit containing this entry.
+
+This is local bridge acceptance only. Server-to-browser reader qualification
+belongs to Slice 4 and is not claimed. `ready=false`, `declarationAllowed=false`,
+`writerAuthorized=false`; Registration CLOSED, PUBLIC RELEASE BLOCKED.
+Official overall progress remains **89.36%** pending formal recalculation.
+CI is not manually dispatched or polled. Existing uncommitted work is retained.
+
+
+## 2026-11-02 — Bounded Resolution owner entry implemented (PARTIAL)
+
+Added production `frontend/src/platform/web/replayResolution.ts`: the bounded
+v6 entry validates a Content genesis and two distinct peer updates, then invokes
+the existing Resolution planner and atomic apply owner for two-parent
+`choose_version`. It uses real owner proofs and performs persisted-result
+`reconcile`; repeated delivery also goes through owner authentication.
+
+The entry is NOT yet called by replayStorage/replayMetadata. Their inventory
+validator and manifest transaction wrapper still reject the closed-history
+Resolution4/group_transition/head2/inbox10 records. This integration, actual
+IndexedDB reopen and the production-Rust-history Chromium acceptance remain
+outstanding. No browser Resolution readiness is claimed.
+
+Local checks: new entry Vitest 7 passed (apply, duplicate, old contract,
+ciphertext, parent, selection, persisted proof and transaction-abort checks);
+preceding combined replay/Resolution run 75 passed, 2 skipped (before the added
+abort case); frontend typecheck/build passed. Rust and Chromium acceptance for
+this entry NOT RUN. The transaction-abort test uses the existing in-memory
+transaction fixture, not Chromium IndexedDB. Existing user changes were retained.
+No commit/push: mandatory acceptance is incomplete. Gates stay false and public
+release/registration stay closed; overall recorded progress remains 89.36%.
+
+
+## 2026-11-02 — Resolution owner bridge (partial local work)
+
+Starting `25b8e0a7f6cd62f86057bfd1f6a7d40d28bb5b32`. The existing
+two-SQLite production-writer and Chromium conflict test now continues on the
+native devices: a real `choose_version` creates a Resolution2, its encrypted
+wire is delivered by the isolated test transport, and both SQLite databases
+apply the chosen content and close the conflict. The Chromium portion still
+ends at the conflict, before that resolution. This does not implement or
+qualify the browser Resolution owner bridge.
+
+The focused native/Chromium test passed. The focused replay and Resolution
+planner Vitest run passed 95 tests, with two skipped. Browser Resolution replay,
+its atomicity and negative cases, and server-to-browser acceptance remain NOT
+RUN. No capability or release gate is changed. Slice 3 remains PARTIAL;
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`,
+Registration CLOSED and PUBLIC RELEASE BLOCKED. Historical progress remains
+89.36%; the next step is the bounded replay inventory and Resolution owner
+transaction adapter with actual Resolution2 and restart authentication.
+
 ## 2026-11-02 — Branch-specific CI / pre-release policy (owner decision)
 
 The owner confirms that the new **main-only** `AGENTS.md` pre-release policy

@@ -1,7 +1,9 @@
+import { readFutureInboxRecord, readFutureHistoryRecord, type FutureInbox, type FutureNoteHistory } from './resolutionRecords'
+import { inspectResolutionDag } from './resolutionDag'
 import { contentHistoryJoin } from './contentNoteProof'
 import { contentConflictHistoryJoin } from './contentNoteConflictProof'
 import { BrowserPersistenceError } from './persistence'
-import { validateBrowserInboxRecord, validateBrowserSyncCursor, type BrowserInboxRecord, type BrowserSyncScope } from './syncDurability'
+import { validateBrowserSyncCursor, type BrowserSyncScope } from './syncDurability'
 import { validateBrowserProjectBinding, type BrowserProjectBinding } from './projectBindings'
 import type { BrowserMetadataHead, BrowserMetadataProof } from './metadataApplyRecords'
 import { validateBrowserOwnerHead, stageOwnerId, type BrowserStageHead, type BrowserStageProof } from './stageRecords'
@@ -11,27 +13,49 @@ import { validateNoteHistorySet, type BrowserNoteHistoryRecord, type BrowserNote
 import { REPLAY_LIMITS, replayExact, replaySame, replayUuid, validateReplayManifest, type ReplayManifest } from './replayRecords'
 
 export interface ReplaySnapshot {
-  manifest: ReplayManifest | null; rows: BrowserInboxRecord[]; bindings: BrowserProjectBinding[]; owners: Array<BrowserMetadataHead | BrowserStageHead | BrowserStageOrderHead>
+  manifest: ReplayManifest | null; rows: FutureInbox[]; bindings: BrowserProjectBinding[]; owners: Array<BrowserMetadataHead | BrowserStageHead | BrowserStageOrderHead>
   sources?: LocalProjectRecord[]
-  notes?: LocalNoteRecord[]; noteHistory?: BrowserNoteHistoryRecord[]
+  notes?: LocalNoteRecord[]; noteHistory?: FutureNoteHistory[]
 }
 /** Derived coverage is never a qualified cursor or owner certificate. */
-export function replayNoteOutcome(row: BrowserInboxRecord) {
+export function replayNoteOutcome(row: FutureInbox) {
   if (row.state === 'note_proven') return row.note_proof
   if (row.state === 'content_note_proven') return row.content_note_proof
   throw new BrowserPersistenceError('corrupt_record')
 }
-export function replayCoverage(manifest: ReplayManifest, row: BrowserInboxRecord) {
+export function replayCoverage(manifest: ReplayManifest, row: FutureInbox) {
   const sequence = row.server_sequence
   return { ...manifest, applied_cursor: sequence, metadata_cursor: row.state === 'applied' && sequence === (manifest.metadata_cursor ?? 0) + 1 ? sequence : manifest.metadata_cursor,
     revision: manifest.revision + 1 }
 }
-export function replayAppliedProof(row: BrowserInboxRecord): BrowserMetadataProof | BrowserStageProof | BrowserStageOrderProof | undefined {
+export function replayAppliedProof(row: FutureInbox): BrowserMetadataProof | BrowserStageProof | BrowserStageOrderProof | undefined {
   return row.state === 'applied' ? row.applied_proof : row.state === 'stage_proven' ? row.stage_proof : row.state === 'stage_order_proven' ? row.stage_order_proof : undefined
 }
 export function assertReplayOwnerTransition(before: ReplaySnapshot, after: ReplaySnapshot, sequence: number, status: unknown): void {
   if (status === 'already_applied') { if (!replaySame(before, after)) fail(); return }
   const manifest = before.manifest!, previous = before.rows[sequence - 1], row = after.rows[sequence - 1]
+  if (row?.state === 'note_resolution_proven') {
+    if (manifest.contract_version !== 6 || status !== 'applied' || previous?.state !== 'received'
+      || sequence !== manifest.applied_cursor! + 1 || !replaySame(after.manifest, replayCoverage(manifest, row))
+      || !replaySame(before.bindings, after.bindings) || !replaySame(before.owners, after.owners)
+      || !replaySame(before.rows.slice(0, -1), after.rows.slice(0, -1))) fail()
+    const { resolution_proof: proof, ...wire } = row
+    if (!replaySame({ ...wire, record_version: 1, state: 'received' }, previous)) fail()
+    const history = after.noteHistory ?? [], old = before.noteHistory ?? []
+    const resolution = history.find(r => r.record_kind === 'resolution')
+    const transition = history.find(r => r.record_kind === 'group_transition')
+    if (!resolution || resolution.record_kind !== 'resolution' || resolution.event_id !== row.event_id
+      || resolution.record_digest !== proof.resolution_digest || resolution.strategy !== 'choose_version'
+      || !transition || transition.record_kind !== 'group_transition' || transition.record_digest !== proof.transition_digest
+      || history.length !== old.length + 2
+      || old.filter(r => !(r.record_kind === 'head' && r.project_id === resolution.project_id && r.note_id === resolution.note_id)).some(r => !history.some(v => replaySame(r, v)))) fail()
+    const source = before.sources?.find(r => r.project_id === resolution.project_id)
+    const next = after.sources?.find(r => r.project_id === resolution.project_id)
+    if (!source || !next || next.source_revision !== source.source_revision + 1
+      || !replaySame(before.sources?.filter(r => r !== source), after.sources?.filter(r => r !== next))
+      || !replaySame(before.notes?.filter(r => r.note_id !== resolution.note_id), after.notes?.filter(r => r.note_id !== resolution.note_id))) fail()
+    return
+  }
   if (row?.state === 'content_note_conflict_preserved') {
     if (manifest.contract_version !== 6 || status !== 'conflict_preserved' || previous?.state !== 'received'
       || sequence !== (manifest.applied_cursor ?? 0) + 1 || !replaySame(after.manifest, replayCoverage(manifest, row))
@@ -41,8 +65,8 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
     const original = { ...row } as Record<string, unknown>; delete original.content_note_conflict_proof
     if (!replaySame({ ...original, record_version: 1, state: 'received' }, previous)) fail()
     const scope = { accountId: manifest.account_id, canonicalUserId: manifest.canonical_user_id, deviceId: manifest.device_id }
-    const { candidate, group } = contentConflictHistoryJoin(scope, row, after.noteHistory ?? [])
-    const old = before.noteHistory ?? [], next = after.noteHistory ?? []
+    const { candidate, group } = contentConflictHistoryJoin(scope, row, replayOrdinaryHistory(after.noteHistory ?? []))
+    const old = before.noteHistory ?? [], next = replayOrdinaryHistory(after.noteHistory ?? [])
     const winner = group.members.find(member => member.source === 'remote_applied')
     const prior = winner && before.rows.find(value => value.event_id === winner.event_id)
     const winningCandidate = winner && old.find(value => value.record_kind === 'candidate' && value.event_id === winner.event_id)
@@ -66,7 +90,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
   if (row?.state === 'note_proven' || row?.state === 'content_note_proven') {
     if (row.state === 'content_note_proven') {
       if (row.content_note_proof.mutation !== 'update' && !(manifest.contract_version === 6 && row.content_note_proof.mutation === 'create')) fail()
-      contentHistoryJoin({ accountId: manifest.account_id, canonicalUserId: manifest.canonical_user_id, deviceId: manifest.device_id }, row, after.noteHistory ?? [])
+      contentHistoryJoin({ accountId: manifest.account_id, canonicalUserId: manifest.canonical_user_id, deviceId: manifest.device_id }, row, replayOrdinaryHistory(after.noteHistory ?? []))
     }
     const proof = replayNoteOutcome(row), project = proof.header.project_id, note = proof.header.entity_id
     if (status !== 'applied' || previous?.state !== 'received' || proof.outcome !== 'applied'
@@ -126,7 +150,7 @@ const range = (account: string) => IDBKeyRange.bound([account], [account, []])
 /** Complete account snapshot, with structural joins only. Crypto is owned by the existing family certificates. */
 export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, check: () => void,
   result: (snapshot: ReplaySnapshot) => void, abort: (error: unknown) => void, version: 1 | 2 | 3 | 4 | 5 | 6 = 6): void {
-  const bound = range(s.accountId), rows: BrowserInboxRecord[] = []
+  const bound = range(s.accountId), rows: FutureInbox[] = []
   const identity = tx.objectStore('identities').get(s.canonicalUserId), alias = tx.objectStore('identities').index('local_account_id').get(s.accountId)
   const binding = tx.objectStore('accountBindings').get(s.accountId), cursors = tx.objectStore('cursors').getAll(bound)
   const manifests = tx.objectStore('replayManifest').getAll(bound), bindings = tx.objectStore('projectBindings').getAll(bound), owners = tx.objectStore('ownerHeads').getAll(bound)
@@ -152,7 +176,26 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const imported = bindings.result.map(raw => validateBrowserProjectBinding(raw, s)), heads = owners.result.map(raw => validateBrowserOwnerHead(raw, s))
       const sources = projects.result.map(raw => validateLocalProjectRecord(raw, s))
       const notes = localNotes.result.map(raw => validateLocalNoteRecord(raw, s, raw.project_id))
-      const history = validateNoteHistorySet(s, noteHistory.result)
+      const future = noteHistory.result.map(raw => readFutureHistoryRecord(raw, s))
+      const resolutions = future.filter(r => r.record_kind === 'resolution')
+      const transitions = future.filter(r => r.record_kind === 'group_transition')
+      if (resolutions.length > 1 || resolutions.length !== transitions.length || version < 6 && resolutions.length) fail()
+      const closed = resolutions[0]
+      if (closed && (closed.strategy !== 'choose_version' || closed.transport_kind !== 'content_note_resolution_v2'
+        || closed.retained_note_id !== null || closed.server_sequence !== rows.length
+        || transitions[0]?.resolution_event_id !== closed.event_id)) fail()
+      inspectResolutionDag(s, future)
+      const history = replayOrdinaryHistory(future)
+      if (closed) {
+        const head = future.find(r => r.record_kind === 'head' && r.record_version === 2)
+        const row = rows.at(-1)
+        if (!head || head.record_kind !== 'head' || head.head_revision !== 4 || head.linear_head_event_id !== closed.event_id
+          || row?.state !== 'note_resolution_proven' || row.event_id !== closed.event_id
+          || row.resolution_proof.resolution_digest !== closed.record_digest
+          || row.resolution_proof.transition_digest !== transitions[0]!.record_digest
+          || rows.filter(r => JSON.parse(r.wire_item).event.entity_type === 'note').length !== 4) fail()
+      }
+      validateNoteHistorySet(s, history)
       const noteProofs = rows.filter(row => row.state === 'note_proven' || row.state === 'content_note_proven')
       const conflicts = rows.filter(row => row.state === 'content_note_conflict_preserved')
       const noteKey = (project: string, note: string) => JSON.stringify([project, note])
@@ -171,7 +214,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         || noteHeads.some(head => !noteKeys.has(noteKey(head.project_id, head.note_id)))) fail()
       for (const source of sources) {
         const appliedNotes = noteProofs.filter(row => replayNoteOutcome(row).header.project_id === source.project_id)
-        if (source.source_revision !== appliedNotes.length + 1 || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
+        if (source.source_revision !== appliedNotes.length + 1 + (closed?.project_id === source.project_id ? 1 : 0) || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
       }
       for (const seed of manifest?.source_seeds ?? []) {
         const genesis = rows.find(row => row.event_id === seed.genesis_event_id)
@@ -184,7 +227,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       let ciphertextBytes = 0
       const ids = new Set<string>()
       for (const [index, row] of rows.entries()) {
-        if (row.server_sequence !== index + 1 || ids.has(row.event_id) || (row.server_sequence <= applied) !== (!!replayAppliedProof(row) || row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved')) fail()
+        if (row.server_sequence !== index + 1 || ids.has(row.event_id) || (row.server_sequence <= applied) !== (!!replayAppliedProof(row) || row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven')) fail()
         ids.add(row.event_id)
         const wire = JSON.parse(row.wire_item) as { event: { project_id: string }; object: { ciphertext: string } }
         ciphertextBytes += Math.floor(wire.object.ciphertext.length * 3 / 4)
@@ -214,7 +257,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
             || candidate.projection.source_revision !== p.source_revision || candidate.projection.deleted !== (p.mutation === 'delete')
             || !replaySame(p.reference, retained.event)) fail()
           if (previous?.state === 'content_note_proven' && !(version >= 6 && previous.content_note_proof.mutation === 'create')) fail()
-          if (isLatest && !replaySame(candidate.projection, note)) fail()
+          if (isLatest && !closed && !replaySame(candidate.projection, note)) fail()
         }
         if (proof) {
           const head = heads.find(value => value.owner_kind === proof.owner_kind && value.owner_id === (proof.owner_kind === 'stage' ? stageOwnerId(proof.project_id, proof.stage_id) : proof.project_id))
@@ -268,9 +311,9 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         const genesis = head.history.find(proof => proof.operation === 'create')
         if (!genesis || genesis.source_device_id !== manifest!.anchor.registry.projects.find(record => record.project_id === project)?.origin_device_id) fail()
       }
-      bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history })).length + REPLAY_LIMITS.controlReserveBytes
+      bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history: future })).length + REPLAY_LIMITS.controlReserveBytes
       if (manifest && (ciphertextBytes !== manifest.ciphertext_bytes || bytes > REPLAY_LIMITS.inventoryBytes)) fail()
-      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: history })
+      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: future })
     } catch (error) { abort(error) }
   }
   for (const request of [identity, alias, binding, cursors, manifests, bindings, owners, projects, localNotes, noteHistory, ...counts]) request.onsuccess = finish
@@ -280,8 +323,9 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       check(); const cursor = scan.result
       if (!cursor) { finish(); return }
       if (rows.length >= REPLAY_LIMITS.events) fail()
-      const row = validateBrowserInboxRecord(cursor.value, s)
+      const row = readFutureInboxRecord(cursor.value, s)
       if (!(row.state === 'received' && row.record_version === 1 || version >= 2 && row.state === 'applied' && row.record_version === 2 || version >= 3 && (row.state === 'stage_proven' && row.record_version === 5 || row.state === 'stage_order_proven' && row.record_version === 6) || version >= 4 && row.state === 'note_proven' && row.record_version === 3 || version >= 5 && row.state === 'content_note_proven' && row.record_version === 7 || version >= 6 && row.state === 'content_note_conflict_preserved' && row.record_version === 8)
+        && !(version >= 6 && row.state === 'note_resolution_proven' && row.record_version === 10)
         || row.protocol_version !== 3 || !replaySame(cursor.primaryKey, [s.accountId, row.server_sequence])) fail()
       bytes += new TextEncoder().encode(JSON.stringify(row)).length
       if (bytes > REPLAY_LIMITS.inventoryBytes) fail()
@@ -335,4 +379,21 @@ export function migrateReplay(tx: IDBTransaction, names: readonly string[], chec
       } catch (error) { abort(error) }
     }
   }
+}
+
+/** Historical ordinary proofs remain bound to the immutable pre-closure group.
+ * This view is only for ordinary proof verification, never persisted or granted
+ * Resolution authority; closed outputs require authenticateResolutionHistory.
+ */
+export function replayOrdinaryHistory(values: FutureNoteHistory[]): BrowserNoteHistoryRecord[] {
+  const ordinary = values.filter((r): r is BrowserNoteHistoryRecord => r.record_kind !== 'resolution' && r.record_kind !== 'group_transition' && !(r.record_kind === 'head' && r.record_version === 2))
+  for (const head of values) if (head.record_kind === 'head' && head.record_version === 2) {
+    const group = ordinary.find(r => r.record_kind === 'group' && r.project_id === head.project_id && r.note_id === head.note_id)
+    const winner = group?.record_kind === 'group' && group.members.find(m => m.source === 'remote_applied')
+    if (!group || group.record_kind !== 'group' || !winner) fail()
+    const { node_ref: _ref, ...identity } = head
+    ordinary.push({ ...identity, record_id: 'head', record_version: 1, head_revision: head.head_revision - 1,
+      linear_head_event_id: winner.event_id, tip_event_ids: group.tip_event_ids })
+  }
+  return ordinary
 }

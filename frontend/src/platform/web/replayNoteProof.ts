@@ -1,6 +1,7 @@
+import { authenticateResolutionHistory } from './resolutionAuthentication'
 import { verifyStoredContentNoteProof } from './contentNoteProof'
 import { verifyStoredContentConflictProof } from './contentNoteConflictProof'
-import { replayNoteOutcome } from './replayInventory'
+import { replayOrdinaryHistory, replayNoteOutcome } from './replayInventory'
 import type { AccountMasterKey } from '@/crypto'
 import type { BrowserSyncScope } from './syncDurability'
 import type { LocalSourceSnapshot } from './localAuthority'
@@ -34,7 +35,7 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
       && !initial && proof.mutation === 'create' && proof.header.revision === 1 && proof.header.parent_event_id === null
     if (!seed || proof.outcome !== 'applied' || (!contentGenesis && (initial ? proof.mutation !== 'create' || proof.header.revision !== 1
       : !['update', 'delete'].includes(proof.mutation) || proof.header.revision < 2))) throw new BrowserReplayError('note_proof_reauthentication_failed')
-    if (row.state === 'content_note_proven') await verifyStoredContentNoteProof(scope, amk, row, snapshot.noteHistory ?? [])
+    if (row.state === 'content_note_proven') await verifyStoredContentNoteProof(scope, amk, row, replayOrdinaryHistory(snapshot.noteHistory ?? []))
     else await verifyStoredNoteProof(scope, amk, row)
     const candidate = snapshot.noteHistory?.find((record): record is BrowserNoteCandidate => record.record_kind === 'candidate' && record.event_id === row.event_id)
     if (!candidate || candidate.record_version !== (row.state === 'content_note_proven' ? 2 : 1) || candidate.origin !== 'peer'
@@ -44,8 +45,14 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
   }
   for (const row of snapshot.rows) if (row.state === 'content_note_conflict_preserved') {
     if (!current() || snapshot.manifest?.contract_version !== 6) throw new BrowserReplayError('note_proof_reauthentication_failed')
-    await verifyStoredContentConflictProof(scope, amk, row, snapshot.noteHistory ?? [], snapshot.rows)
+    await verifyStoredContentConflictProof(scope, amk, row, replayOrdinaryHistory(snapshot.noteHistory ?? []), snapshot.rows.filter(r => r.state !== 'note_resolution_proven'))
     sequences.add(row.server_sequence)
+  }
+  if (snapshot.rows.some(r => r.state === 'note_resolution_proven')) {
+    await authenticateResolutionHistory(scope, { rows: snapshot.rows, history: snapshot.noteHistory ?? [],
+      bindings: snapshot.bindings, owners: snapshot.owners, out: [], receipts: [],
+      cursor: { pull_cursor: snapshot.rows.length, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1 } }, amk, current)
+    for (const r of snapshot.rows) if (r.state === 'note_resolution_proven') sequences.add(r.server_sequence)
   }
   if (!current()) throw new BrowserReplayError('session_closed')
   return sequences
