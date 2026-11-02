@@ -240,6 +240,9 @@ h2 { margin-bottom: 17px; font-size: clamp(32px, 4vw, 48px); font-weight: 660; l
 .footer-inner > p { margin: 0; color: var(--muted); font-size: 12px; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 18px; }
 .footer-links a, .footer-inner small { font-size: 11px; }
+.footer-links .github-link { display: inline-flex; padding: 9px 13px; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-soft); color: var(--text); font-size: 12px; font-weight: 650; transition: border-color .18s ease, background .18s ease, transform .18s ease; }
+.github-link svg { width: 17px; height: 17px; flex: 0 0 auto; }
+.footer-links .github-link:hover { transform: translateY(-1px); border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
 .footer-inner small { color: var(--muted); }
 
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 74%, white); outline-offset: 3px; }
