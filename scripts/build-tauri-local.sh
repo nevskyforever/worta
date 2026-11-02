@@ -116,6 +116,11 @@ prepare_frontend_workspace() {
   if [ -f "$ROOT_DIR/engine.py" ]; then
     cp -p "$ROOT_DIR/engine.py" "$WORKSPACE_DIR/engine.py"
   fi
+  # The compatibility layer imported by the backend smoke test also resolves
+  # legacy top-level Python modules (game, settings, and related schemas).
+  # Keep these test-only sources available without placing Python in the app.
+  rsync --archive --include='*.py' --exclude='*' \
+    "$ROOT_DIR/" "$WORKSPACE_DIR/"
   # Rust embeds the shared migration SQL from the repository-relative path in
   # src-tauri/src/sqlite.rs. Keep that source available in the isolated build
   # workspace without copying the Python runtime or its user data.
