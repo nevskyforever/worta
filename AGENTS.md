@@ -203,6 +203,9 @@ opened from the Help menu in `main_UI.py`.
 
 ## Verifying changes
 
+* Do not perform GUI testing without the user's explicit authorization for the current task. This includes launching an application for visual or interactive testing, computer-use automation, and browser tests through Playwright or similar tools. Prior authorization for another task does not authorize a new task.
+* Without that authorization, use non-GUI checks and report any unverified visual or interactive behavior.
+
 After making changes:
 
 1. Check syntax of affected Python files.
@@ -220,9 +223,9 @@ port or prevents a clean test run. First verify the process command and project
 path; do not terminate an unrelated application or a production build.
 
 For changes to the Vue interface that affect user interaction, verify the flow
-in Chromium through Playwright when practical. Use `Run Web.sh` to start the
-local application. If Chromium is not installed for Playwright, ask the user
-for permission before running `npx playwright install chromium`.
+in Chromium through Playwright when practical and only when the user has explicitly
+authorized GUI testing for this task. Use `Run Web.sh` to start the local application.
+If Chromium is not installed, ask the user for permission before installing it.
 
 ## LOCAL-FIRST TESTING POLICY — MANDATORY FOR ALL FUTURE CODEX TASKS
 
