@@ -135,3 +135,12 @@ fi
         assert result.returncode == expected, (state, result.stderr)
         text = output_file.read_text() if output_file.exists() else result.stderr
         assert output in text
+
+
+def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
+    workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+    assert "--verify-tag" in workflow
+    assert "--target \"${{ steps.release_provenance.outputs.tag_sha }}\"" not in workflow
+    assert "retention-days: 1" in workflow
+    assert "Remove temporary Actions artifact after publication" in workflow
+    assert "actions: write" in workflow

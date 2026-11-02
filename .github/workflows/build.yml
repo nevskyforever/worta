@@ -657,7 +657,7 @@ jobs:
           name: tauri-windows-${{ steps.version.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
 
   # ==============================================================
@@ -681,7 +681,7 @@ jobs:
       name: nfprogress-production
 
     permissions:
-      actions: read
+      actions: write
       contents: write
 
     env:
@@ -1080,7 +1080,7 @@ jobs:
               "$tag" \
               "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "${{ steps.release_provenance.outputs.tag_sha }}" \
+              --verify-tag \
               --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
@@ -1146,3 +1146,15 @@ jobs:
           jq -e '.ok == true and (.result.message_id | type == "number")' "$RUNNER_TEMP/telegram-response.json" >/dev/null
           jq --arg version "$APP_VERSION" '{version:$version,status:"sent",message_id:.result.message_id}' "$RUNNER_TEMP/telegram-response.json" > "$receipt"
           gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Remove temporary Actions artifact after publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          ids=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name == "tauri-windows-" + env.APP_VERSION) | .id')
+          [[ -n "$ids" ]] || { echo 'Temporary Windows artifact was not found for cleanup.' >&2; exit 1; }
+          while IFS= read -r artifact_id; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done <<< "$ids"
+          echo 'Temporary Windows Actions artifact removed.'
