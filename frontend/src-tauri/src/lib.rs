@@ -739,6 +739,13 @@ fn require_projects_owner(connection: &rusqlite::Connection) -> Result<(), Strin
     Ok(())
 }
 
+fn projects_read_status(connection: &rusqlite::Connection) -> Result<String, String> {
+    require_projects_owner(connection)?;
+    // mirror_state describes the legacy shadow mirror. SQLite-owned project
+    // rows are authoritative, so a stale mirror marker cannot block reads.
+    Ok("healthy".to_string())
+}
+
 fn now_from_database(connection: &rusqlite::Connection) -> Result<String, String> {
     connection
         .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%SZ','now')", [], |row| {
@@ -987,15 +994,24 @@ fn require_note_relation(
     project_id: &str,
     stage_id: Option<&str>,
 ) -> Result<(), String> {
-    let healthy: String = connection
+    let projects_owner: String = connection
         .query_row(
-            "SELECT sync_status FROM mirror_state WHERE id = 1",
+            "SELECT owner FROM storage_ownership WHERE subsystem = 'projects'",
             [],
             |row| row.get(0),
         )
-        .map_err(|error| format!("Не удалось проверить состояние SQLite mirror: {error}"))?;
-    if healthy != "healthy" {
-        return Err("SQLite mirror проектов недоступен для проверки связи заметки.".to_string());
+        .map_err(|error| format!("Не удалось проверить ownership проектов: {error}"))?;
+    if projects_owner != "sqlite" {
+        let status: String = connection
+            .query_row(
+                "SELECT sync_status FROM mirror_state WHERE id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| format!("Не удалось проверить состояние SQLite mirror: {error}"))?;
+        if status != "healthy" {
+            return Err("SQLite mirror проектов недоступен для проверки связи заметки.".to_string());
+        }
     }
     connection
         .query_row(
@@ -5211,17 +5227,7 @@ fn read_sqlite_entity_rows(
 fn read_sqlite_projects() -> Result<SqliteProjectReadModel, String> {
     let database = sqlite_data_root()?.join("nfprogress.db");
     let connection = sqlite::open_database(&database).map_err(|error| error.to_string())?;
-    require_projects_owner(&connection)?;
-    let status: String = connection
-        .query_row(
-            "SELECT sync_status FROM mirror_state WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|error| error.to_string())?;
-    if status != "healthy" {
-        return Err(format!("SQLite mirror status is {status}"));
-    }
+    let status = projects_read_status(&connection)?;
     let mut progress = connection
         .prepare("SELECT p.id, p.project_id, p.stage_id, p.created_at, p.added_symbols, p.added_progress, p.payload_json FROM progress_entries p JOIN progress_order o ON o.entry_id=p.id ORDER BY o.position")
         .map_err(|error| error.to_string())?;
@@ -5547,6 +5553,56 @@ mod tests {
                 )
                 .unwrap(),
             "{\"gamer\":{},\"game\":{}}"
+        );
+    }
+
+    #[test]
+    fn sqlite_owned_projects_remain_readable_with_a_stale_dirty_mirror_marker() {
+        let connection = Connection::open_in_memory().unwrap();
+        super::sqlite::apply_migrations(&connection).unwrap();
+        super::initialize_fresh_desktop_database(
+            &connection,
+            Path::new("/nfprogress/f7-fresh-install"),
+        )
+        .unwrap();
+        connection
+            .execute(
+                "UPDATE mirror_state SET sync_status='dirty', last_error='stale legacy mirror error' WHERE id=1",
+                [],
+            )
+            .unwrap();
+        assert_eq!(
+            super::projects_read_status(&connection).unwrap(),
+            "healthy"
+        );
+
+        let mut connection = connection;
+        let project = super::ProjectRecord {
+            id: "dirty-mirror-project".into(),
+            name: "Локальный проект".into(),
+            goal: None,
+            infinite: true,
+            unit: "symbols".into(),
+            status: "активен".into(),
+            created_at: None,
+            updated_at: None,
+            payload: serde_json::json!({"id":"dirty-mirror-project","name":"Локальный проект"}),
+        };
+        super::ProjectsRepository::new(&mut connection)
+            .insert_project(&project)
+            .unwrap();
+        super::create_note_in_connection(
+            &mut connection,
+            &project.id,
+            None,
+            "dirty-mirror-note",
+        )
+        .unwrap();
+        assert_eq!(
+            connection
+                .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
         );
     }
 
