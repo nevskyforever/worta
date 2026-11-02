@@ -229,6 +229,14 @@ If Chromium is not installed, ask the user for permission before installing it.
 
 ## LOCAL-FIRST TESTING POLICY — MANDATORY FOR ALL FUTURE CODEX TASKS
 
+### Pre-release CI policy
+
+The pre-release test process is currently local-only. Do not trigger cloud,
+SQLite, frontend, or release qualification workflows automatically from pushes
+to `main`; keep those workflows available only through explicit manual dispatch
+after the relevant local checks pass. A normal commit/push to `main` must not
+start broad pre-release validation or publication.
+
 Use local verification as the primary development loop, then commit and push
 for independent GitHub Actions acceptance:
 

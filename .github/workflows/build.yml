@@ -1,10 +1,8 @@
 name: Build Tauri Windows desktop release
 
 on:
-  push:
-    branches:
-      - main
-
+  # Release qualification/publication is explicitly started by the owner
+  # after local pre-release checks. Do not run it for every main push.
   workflow_dispatch:
     inputs:
       release_notes:
