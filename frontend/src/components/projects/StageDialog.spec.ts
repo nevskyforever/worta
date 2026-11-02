@@ -51,6 +51,29 @@ describe('StageDialog', () => {
     expect((wrapper.get('#stage-deadline').element as HTMLInputElement).value)
       .toBe('2026-08-31')
   })
+
+  it('recalculates from current progress when the stage deadline is today', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-19T12:00:00'))
+    const wrapper = mount(StageDialog, {
+      props: {
+        open: true,
+        projectUnit: 'symbols',
+        stage: projectFixture({
+          goal: 16_000, total: 14_464, personal_goal: 500,
+          plan_daily_goal: 500, today_goal: 16_000, deadline: '2026-09-19',
+          planning_date: '2026-09-19',
+        }),
+      },
+      global: { plugins: [createPinia()], stubs: ionicStubs },
+    })
+
+    await wrapper.get('#stage-personal-goal').setValue('250')
+
+    expect((wrapper.get('#stage-deadline').element as HTMLInputElement).value)
+      .toBe('2026-09-25')
+  })
+
   it('carries an edited current value without implicitly recalculating the plan', async () => {
     const wrapper = mount(StageDialog, {
       props: {
