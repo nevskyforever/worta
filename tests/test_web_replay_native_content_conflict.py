@@ -52,7 +52,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -139,8 +139,28 @@ def native_content_resolution_history(tmp_path, canonical_user=None):
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
+    if successor:
+        content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_PRIVATE_AFTER_RESOLUTION'})
+        assert len(emit(transport, tmp_path, 'local-only', b, ib, user, amk)) == 1
+        for db_path, identity in ((a, ia), (b, ib)):
+            receive(transport, tmp_path, 'local-only', db_path, identity, user, amk)
+            assert content(tmp_path, db_path, identity, user, 'conflicts') == []
+        fixture['anchor']['registry']['current_cursor'] = 6
+        fixture['items'] = transport.items
+        fixture['successor'] = True
+        fixture['selectedNote'] = {'content': 'NATIVE_PRIVATE_AFTER_RESOLUTION'}
+        path.write_text(json.dumps(fixture), encoding='utf-8')
+        result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
     return fixture
 
 
 def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path)
+
+
+def test_native_post_resolution_successor_dispatch_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, successor=True)

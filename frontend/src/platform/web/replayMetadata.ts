@@ -1,3 +1,4 @@
+import { BrowserResolutionContinuation } from './resolutionContinuation'
 import { applyReplayResolutionOwner } from './replayResolution'
 import { BrowserDeviceRegistration } from './deviceRegistration'
 import { CryptoError } from '@/crypto'
@@ -31,7 +32,7 @@ export interface ReplayInitialNoteResult extends Omit<ReplayStructuralResult, 'k
   readonly kind: 'initial_legacy_notes_applied'; readonly noteProofs: number
 }
 export interface ReplayOrderedContentResult extends Omit<ReplayInitialNoteResult, 'kind'> {
-  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied'; readonly contentProofs: 1 | 2 | 3
+  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied' | 'bounded_resolution_continuation_applied'; readonly contentProofs: 1 | 2 | 3 | 4
 }
 export interface MetadataPort {
   read(): Promise<ReplaySnapshot>
@@ -179,10 +180,10 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   let snapshot = await port.read(); check()
   if (!snapshot.manifest) throw new BrowserReplayError('metadata_history_incomplete')
   const anchor = snapshot.manifest.anchor
-  const resolutionTail = terminalContent && snapshot.manifest.contract_version === 6 && snapshot.rows.length >= 5
-    && JSON.parse(snapshot.rows.at(-1)!.wire_item).event.revision === 3
-    && snapshot.rows.slice(-4).every(r => JSON.parse(r.wire_item).event.entity_type === 'note')
-  const contentEnd = snapshot.rows.length - (resolutionTail ? 1 : 0)
+  const resolutionSequence = terminalContent && snapshot.manifest.contract_version === 6
+    ? snapshot.rows.find(r => { const e = JSON.parse(r.wire_item).event; return e.entity_type === 'note' && e.operation === 'event' && e.revision === 3 })?.server_sequence : undefined
+  const resolutionTail = resolutionSequence !== undefined && snapshot.rows.length <= resolutionSequence + 1
+  const contentEnd = resolutionTail ? resolutionSequence! - 1 : snapshot.rows.length
   const contentRows = snapshot.rows.slice(0, contentEnd)
   const peerConflict = terminalContent && snapshot.manifest.contract_version === 6 && contentRows.slice(-2).length === 2
     && contentRows.slice(-2).every(row => { const event = JSON.parse(row.wire_item).event; return event.entity_type === 'note' && event.operation === 'event' })
@@ -269,10 +270,19 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
       throw new BrowserReplayError('content_not_applied')
   }
   if (resolutionTail) {
-    const transaction: BrowserSyncTransaction = async (...args) => port.transaction(await port.read(), snapshot.rows.length, server)(...args)
+    const transaction: BrowserSyncTransaction = async (...args) => {
+      const expected = await port.read()
+      const target = expected.manifest!.applied_cursor! < resolutionSequence! ? resolutionSequence! : snapshot.rows.length
+      return port.transaction(expected, target, server)(...args)
+    }
     const device = await new BrowserDeviceRegistration(transaction, current).bind(auth, bindings).registerVerified(scope)
-    await applyReplayResolutionOwner({ contractVersion: 6, scope, sequence: snapshot.rows.length,
+    if (snapshot.manifest!.applied_cursor! <= resolutionSequence!) await applyReplayResolutionOwner({ contractVersion: 6, scope, sequence: resolutionSequence!,
       transaction, current, auth, bindings, keys, device })
+    if (snapshot.rows.length > resolutionSequence!) {
+      const owner = new BrowserResolutionContinuation(transaction, new BrowserLocalAuthority(transaction), current).bind(auth, bindings, keys, device)
+      await owner.apply(scope, snapshot.rows.length)
+      await owner.history(scope)
+    }
     snapshot = await port.read(); check()
   }
   await reauthenticate(); await server()
@@ -284,8 +294,8 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   const result = { cursor: snapshot.manifest!.receive_cursor, generation: snapshot.manifest!.generation,
     ownerProofs: snapshot.manifest!.applied_cursor!, projects: snapshot.owners.filter(head => head.owner_kind === 'project_metadata').length,
     projectOpened: false as const, ready: false as const, declarationAllowed: false as const, writerAuthorized: false as const }
-  if (terminalContent) return { ...result, kind: resolutionTail ? 'bounded_resolution_owner_applied' : peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
-    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: contentGenesis ? 3 : peerConflict ? 2 : 1 }
+  if (terminalContent) return { ...result, kind: resolutionTail ? (snapshot.rows.length > resolutionSequence! ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied') : peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
+    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: resolutionTail && snapshot.rows.length > resolutionSequence! ? 4 : contentGenesis ? 3 : peerConflict ? 2 : 1 }
   return initialNotes ? { ...result, kind: 'initial_legacy_notes_applied', metadataProofs, stageProofs, stageOrderProofs,
     noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length }
     : structural ? { ...result, kind: 'structural_owners_applied', metadataProofs, stageProofs, stageOrderProofs }

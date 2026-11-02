@@ -32,12 +32,19 @@ export async function applyReplayResolutionOwner(input: {
     scheduleResolutionInventory(tx, scope, current, result, abort))
   check()
   const rows = inventory.rows.map(row => readFutureInboxRecord(row, scope))
-  if (rows.length !== sequence || inventory.cursor.pull_cursor !== sequence
+  if ((rows.length !== sequence && rows.length !== sequence + 1) || inventory.cursor.pull_cursor !== rows.length
     || rows.some((row, index) => row.server_sequence !== index + 1)) reject()
-  const notes = rows.filter(row => JSON.parse(row.wire_item).event.entity_type === 'note')
+  const notes = rows.slice(0, sequence).filter(row => JSON.parse(row.wire_item).event.entity_type === 'note')
   if (notes.length !== 4 || notes.some((row, index) => row.server_sequence !== sequence - 3 + index
     || row.protocol_version !== 3)) reject()
   const root = notes[0]!, first = notes[1]!, second = notes[2]!, resolution = notes[3]!
+  const tail = rows[sequence]
+  if (tail) {
+    const e = JSON.parse(tail.wire_item).event, parent = JSON.parse(resolution.wire_item).event
+    if (tail.protocol_version !== 3 || tail.state !== 'received' || e.entity_type !== 'note' || e.operation !== 'event'
+      || e.project_id !== parent.project_id || e.entity_id !== parent.entity_id || e.revision !== 4
+      || e.deleted_at !== null || e.device_id === scope.deviceId) reject()
+  }
   if (root.state !== 'content_note_proven' || first.state !== 'content_note_proven'
     || second.state !== 'content_note_conflict_preserved'
     || !['received', 'note_resolution_proven'].includes(resolution.state)) reject()

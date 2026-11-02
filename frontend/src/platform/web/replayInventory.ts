@@ -38,7 +38,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
     if (manifest.contract_version !== 6 || status !== 'applied' || previous?.state !== 'received'
       || sequence !== manifest.applied_cursor! + 1 || !replaySame(after.manifest, replayCoverage(manifest, row))
       || !replaySame(before.bindings, after.bindings) || !replaySame(before.owners, after.owners)
-      || !replaySame(before.rows.slice(0, -1), after.rows.slice(0, -1))) fail()
+      || !replaySame(before.rows.filter(r => r.server_sequence !== sequence), after.rows.filter(r => r.server_sequence !== sequence))) fail()
     const { resolution_proof: proof, ...wire } = row
     if (!replaySame({ ...wire, record_version: 1, state: 'received' }, previous)) fail()
     const history = after.noteHistory ?? [], old = before.noteHistory ?? []
@@ -85,6 +85,27 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
       || old.some(value => value.record_kind === 'group' || value.record_kind === 'local_version')
       || next.length !== old.length + 2 || old.some(value => value !== oldHead && !next.some(record => replaySame(record, value)))
       || next.filter(value => !old.some(record => replaySame(record, value))).some(value => value !== candidate && value !== group && value !== newHead)) fail()
+    return
+  }
+  const closed = before.noteHistory?.find(r => r.record_kind === 'resolution')
+  if (closed?.record_kind === 'resolution' && row?.state === 'content_note_proven' && sequence === closed.server_sequence + 1) {
+    const proof = row.content_note_proof
+    const { content_note_proof: _proof, ...wire } = row
+    const old = before.noteHistory ?? [], next = after.noteHistory ?? []
+    const candidate = next.find(r => r.record_kind === 'candidate' && r.event_id === row.event_id)
+    if (status !== 'applied' || previous?.state !== 'received' || manifest.contract_version !== 6
+      || sequence !== manifest.applied_cursor! + 1 || !replaySame(after.manifest, replayCoverage(manifest, row))
+      || !replaySame({ ...wire, record_version: 1, state: 'received' }, previous)
+      || !replaySame(before.rows.filter(r => r.server_sequence !== sequence), after.rows.filter(r => r.server_sequence !== sequence))
+      || !replaySame(before.bindings, after.bindings) || !replaySame(before.owners, after.owners)
+      || proof.header.parent_event_id !== closed.event_id || proof.mutation !== 'update'
+      || !candidate || candidate.record_kind !== 'candidate' || candidate.record_digest !== proof.candidate_digest
+      || next.length !== old.length + 1
+      || old.filter(r => !(r.record_kind === 'head' && r.project_id === closed.project_id && r.note_id === closed.note_id)).some(r => !next.some(v => replaySame(v, r)))) fail()
+    const source = before.sources?.find(r => r.project_id === closed.project_id), updated = after.sources?.find(r => r.project_id === closed.project_id)
+    if (!source || !updated || updated.source_revision !== source.source_revision + 1
+      || !replaySame(before.sources?.filter(r => r !== source), after.sources?.filter(r => r !== updated))
+      || !replaySame(before.notes?.filter(r => r.note_id !== closed.note_id), after.notes?.filter(r => r.note_id !== closed.note_id))) fail()
     return
   }
   if (row?.state === 'note_proven' || row?.state === 'content_note_proven') {
@@ -182,21 +203,31 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (resolutions.length > 1 || resolutions.length !== transitions.length || version < 6 && resolutions.length) fail()
       const closed = resolutions[0]
       if (closed && (closed.strategy !== 'choose_version' || closed.transport_kind !== 'content_note_resolution_v2'
-        || closed.retained_note_id !== null || closed.server_sequence !== rows.length
+        || closed.retained_note_id !== null || (closed.server_sequence !== rows.length && closed.server_sequence !== rows.length - 1)
         || transitions[0]?.resolution_event_id !== closed.event_id)) fail()
       inspectResolutionDag(s, future)
+      const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
+      const successor = successors[0]
+      if (successor) {
+        const e = JSON.parse(successor.wire_item).event
+        if (successors.length !== 1 || e.entity_type !== 'note' || e.operation !== 'event' || e.revision !== 4
+          || e.project_id !== closed!.project_id || e.entity_id !== closed!.note_id || e.device_id === s.deviceId
+          || !['received', 'content_note_proven'].includes(successor.state)) fail()
+      }
+      const appliedSuccessors = successors.filter(r => r.state === 'content_note_proven')
       const history = replayOrdinaryHistory(future)
       if (closed) {
         const head = future.find(r => r.record_kind === 'head' && r.record_version === 2)
-        const row = rows.at(-1)
-        if (!head || head.record_kind !== 'head' || head.head_revision !== 4 || head.linear_head_event_id !== closed.event_id
+        const row = rows.find(r => r.server_sequence === closed.server_sequence)
+        if (!head || head.record_kind !== 'head' || head.head_revision !== 4 + appliedSuccessors.length || head.linear_head_event_id !== (appliedSuccessors[0]?.event_id ?? closed.event_id)
           || row?.state !== 'note_resolution_proven' || row.event_id !== closed.event_id
           || row.resolution_proof.resolution_digest !== closed.record_digest
           || row.resolution_proof.transition_digest !== transitions[0]!.record_digest
-          || rows.filter(r => JSON.parse(r.wire_item).event.entity_type === 'note').length !== 4) fail()
+          || rows.filter(r => JSON.parse(r.wire_item).event.entity_type === 'note').length !== 4 + successors.length) fail()
       }
+      if (future.length !== history.length + (closed ? 2 + appliedSuccessors.length : 0)) fail()
       validateNoteHistorySet(s, history)
-      const noteProofs = rows.filter(row => row.state === 'note_proven' || row.state === 'content_note_proven')
+      const noteProofs = rows.filter(row => (!closed || row.server_sequence < closed.server_sequence) && (row.state === 'note_proven' || row.state === 'content_note_proven'))
       const conflicts = rows.filter(row => row.state === 'content_note_conflict_preserved')
       const noteKey = (project: string, note: string) => JSON.stringify([project, note])
       const noteKeys = new Set(noteProofs.map(row => noteKey(replayNoteOutcome(row).header.project_id, replayNoteOutcome(row).header.entity_id)))
@@ -214,7 +245,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         || noteHeads.some(head => !noteKeys.has(noteKey(head.project_id, head.note_id)))) fail()
       for (const source of sources) {
         const appliedNotes = noteProofs.filter(row => replayNoteOutcome(row).header.project_id === source.project_id)
-        if (source.source_revision !== appliedNotes.length + 1 + (closed?.project_id === source.project_id ? 1 : 0) || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
+        if (source.source_revision !== appliedNotes.length + 1 + (closed?.project_id === source.project_id ? 1 + appliedSuccessors.length : 0) || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
       }
       for (const seed of manifest?.source_seeds ?? []) {
         const genesis = rows.find(row => row.event_id === seed.genesis_event_id)
@@ -232,6 +263,17 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         const wire = JSON.parse(row.wire_item) as { event: { project_id: string }; object: { ciphertext: string } }
         ciphertextBytes += Math.floor(wire.object.ciphertext.length * 3 / 4)
         const proof = replayAppliedProof(row)
+        if (closed && row.server_sequence > closed.server_sequence) {
+          if (row.state === 'content_note_proven') {
+            const candidate = future.find(r => r.record_kind === 'candidate' && r.event_id === row.event_id)
+            if (!candidate || candidate.record_kind !== 'candidate' || candidate.record_version !== 2
+              || candidate.header.parent_event_id !== closed.event_id || candidate.header.revision !== 4
+              || row.content_note_proof.mutation !== 'update' || candidate.wire_item !== row.wire_item
+              || candidate.record_digest !== row.content_note_proof.candidate_digest
+              || !replaySame(candidate.projection, notes.find(n => n.note_id === closed.note_id))) fail()
+          }
+          continue // The continuation owner authenticates these proofs and sources.
+        }
         if (row.state === 'note_proven' || row.state === 'content_note_proven') {
           if (row.state === 'content_note_proven') contentHistoryJoin(s, row, history)
           const p = replayNoteOutcome(row), seed = manifest?.source_seeds?.find(value => value.project_id === p.header.project_id)
@@ -386,13 +428,15 @@ export function migrateReplay(tx: IDBTransaction, names: readonly string[], chec
  * Resolution authority; closed outputs require authenticateResolutionHistory.
  */
 export function replayOrdinaryHistory(values: FutureNoteHistory[]): BrowserNoteHistoryRecord[] {
-  const ordinary = values.filter((r): r is BrowserNoteHistoryRecord => r.record_kind !== 'resolution' && r.record_kind !== 'group_transition' && !(r.record_kind === 'head' && r.record_version === 2))
+  const root = values.find(r => r.record_kind === 'resolution')
+  const descendants = values.filter(r => r.record_kind === 'candidate' && root?.record_kind === 'resolution' && r.header.revision > root.header.revision)
+  const ordinary = values.filter((r): r is BrowserNoteHistoryRecord => r.record_kind !== 'resolution' && r.record_kind !== 'group_transition' && !descendants.includes(r) && !(r.record_kind === 'head' && r.record_version === 2))
   for (const head of values) if (head.record_kind === 'head' && head.record_version === 2) {
     const group = ordinary.find(r => r.record_kind === 'group' && r.project_id === head.project_id && r.note_id === head.note_id)
     const winner = group?.record_kind === 'group' && group.members.find(m => m.source === 'remote_applied')
     if (!group || group.record_kind !== 'group' || !winner) fail()
     const { node_ref: _ref, ...identity } = head
-    ordinary.push({ ...identity, record_id: 'head', record_version: 1, head_revision: head.head_revision - 1,
+    ordinary.push({ ...identity, record_id: 'head', record_version: 1, head_revision: head.head_revision - 1 - descendants.length,
       linear_head_event_id: winner.event_id, tip_event_ids: group.tip_event_ids })
   }
   return ordinary

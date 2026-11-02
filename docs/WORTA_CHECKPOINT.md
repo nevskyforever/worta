@@ -1,5 +1,67 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-02 — Slice 4/5: production post-Resolution peer update dispatch
+
+Starting SHA `ffce6cbf8a6a12d021543b8f9bd68804a5579b63`, branch `6.0`.
+Slice 4 remains **PARTIAL**; this specific scenario is locally complete.
+
+Production replay v6 now dispatches one ordinary codec8 peer Content update
+immediately following the existing Content genesis / two-peer conflict /
+choose-version Resolution2 cohort. It invokes the existing
+`BrowserResolutionContinuation` owner, not a new reducer. The dispatch result
+is `bounded_resolution_continuation_applied`; coverage includes all six events
+without advancing qualified prefix or ACK. The cohort remains one project,
+stage-less plain Content and a distinct browser recipient, with strict dense
+sequence, scope, revision, parent, route and source checks. It is not general
+ordinary1/Resolution2 dispatch and does not authorize wider histories.
+
+Inventory now admits the genuine post-Resolution candidate and Head2 update.
+The owner source, candidate, head, original inbox/proof and replay coverage are
+committed atomically with a full inventory CAS. The original Resolution,
+transition, pre-conflict candidates/group and all incoming wire bytes remain
+immutable. Historical ordinary checks use only the transient pre-closure view;
+post-Resolution proofs and current encrypted sources are authenticated through
+the existing continuation-history/source verifiers. After reopening, the
+continuation owner reconciles the exact persisted history without resealing
+ciphertext or synthesizing proofs. Resolution exact-current reconciliation is
+not incorrectly applied to an already advanced source.
+
+Production acceptance: two independent SQLite writers create the conflict,
+resolve it, and then create the descendant through the native Content writer.
+Chromium applies that descendant via production replay/owner dispatch, decrypts
+the expected content and verifies exact original wire preservation. A forced
+IndexedDB abort leaves the complete Resolution at coverage 5 and the successor
+received, with no partial successor source/proof/head. Physical browser-profile
+restart and retry succeed; duplicate delivery leaves the complete snapshot
+unchanged. Corrupt descendant ciphertext/proof and prior Resolution evidence,
+transition/head are rejected. Logout rejects replay; new auth and reopening
+reconcile the exact retained records. Existing incompatible-reader and ordering
+negative checks remain intact. No actual PostgreSQL or protected HTTP pull is
+needed for this local-only dispatch change, and no server-to-browser acceptance
+is claimed. The local integration transport remains explicit.
+
+Checks: Rust Resolution filter **56 passed**; focused replay/continuation/readiness
+Vitest **215 passed, 2 optional tests skipped** (skips are not counted as PASS);
+production-writer Chromium pytest **2 passed** including the prior Resolution
+scenario and the new successor. Typecheck, production build, diff checks and
+maintained quick acceptance PASS. Maintenance dry run only; no output or user
+data deletion. Existing Rust/build warnings remain non-fatal. Commit/push target
+`origin/6.0`; CI is not dispatched or polled.
+
+**Readiness blockers fully closed: 0/10.** The production dispatch blocker has
+one additional accepted case, but full dispatch, transport/page replay,
+orphan/dependency recovery, tombstone/resurrection, further Resolution chains,
+local-author-after-Resolution, own Content self-echo, own Resolution author chains,
+full multi-device orchestration and actual eligible-recipient server gate
+acceptance remain incomplete under the frozen contract. All ten existing
+blockers are preserved. Next Slice 4 work must finish another supported history
+through these same owners before broadening qualification. No Slice 5, writer,
+capability declaration or release work was started.
+
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+Registration CLOSED, PUBLIC RELEASE BLOCKED. Overall progress remains **89.36%**.
+
+
 ## 2026-11-02 — WEB.ONLINE.02B Slice 4/5: PARTIAL authenticated gate observation
 
 Starting SHA `f91f1dd6f518e2bd85381dfa6c76f4e68c42573c`, branch `6.0`.

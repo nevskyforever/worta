@@ -1,3 +1,4 @@
+import { authenticateContinuationHistory, verifyContinuationSources } from './resolutionHistorical'
 import { authenticateResolutionHistory } from './resolutionAuthentication'
 import { verifyStoredContentNoteProof } from './contentNoteProof'
 import { verifyStoredContentConflictProof } from './contentNoteConflictProof'
@@ -17,7 +18,8 @@ import { authenticateReplaySourceSeed } from './replaySourceSeed'
 export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapshot: ReplaySnapshot, amk: AccountMasterKey,
   current: () => boolean, readSource: (projectId: string) => Promise<{ source: LocalSourceSnapshot; project: NativeLocalProject }>): Promise<ReadonlySet<number>> {
   const sequences = new Set<number>()
-  const rows = snapshot.rows.filter(row => row.state === 'note_proven' || row.state === 'content_note_proven')
+  const root = snapshot.noteHistory?.find(r => r.record_kind === 'resolution')
+  const rows = snapshot.rows.filter(row => row.state === 'note_proven' || row.state === 'content_note_proven').filter(row => root?.record_kind !== 'resolution' || row.server_sequence < root.server_sequence)
   for (const seed of snapshot.manifest?.source_seeds ?? []) {
     if (!current()) throw new BrowserReplayError('session_closed')
     const opened = await readSource(seed.project_id)
@@ -49,9 +51,14 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
     sequences.add(row.server_sequence)
   }
   if (snapshot.rows.some(r => r.state === 'note_resolution_proven')) {
-    await authenticateResolutionHistory(scope, { rows: snapshot.rows, history: snapshot.noteHistory ?? [],
-      bindings: snapshot.bindings, owners: snapshot.owners, out: [], receipts: [],
-      cursor: { pull_cursor: snapshot.rows.length, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1 } }, amk, current)
+    const inventory = { rows: snapshot.rows, history: snapshot.noteHistory ?? [],
+      bindings: snapshot.bindings, owners: snapshot.owners, out: [], receipts: [], projects: snapshot.sources ?? [], localNotes: snapshot.notes ?? [],
+      cursor: { pull_cursor: snapshot.rows.length, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1 } }
+    if (root?.record_kind === 'resolution' && snapshot.rows.some(r => r.server_sequence > root.server_sequence && r.state !== 'received')) {
+      const history = await authenticateContinuationHistory(scope, inventory, amk, current)
+      await verifyContinuationSources(scope, inventory, history, amk, current)
+      for (const r of snapshot.rows) if (r.server_sequence > root.server_sequence && r.state === 'content_note_proven') sequences.add(r.server_sequence)
+    } else await authenticateResolutionHistory(scope, inventory, amk, current)
     for (const r of snapshot.rows) if (r.state === 'note_resolution_proven') sequences.add(r.server_sequence)
   }
   if (!current()) throw new BrowserReplayError('session_closed')
