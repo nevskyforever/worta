@@ -446,7 +446,7 @@ onBeforeUnmount(() => controller.abort())
               <span>{{ t('Автор') }}: nevskyforever / nfproject</span>
               <a
                 class="nf-button nf-button--secondary settings-repository-link"
-                href="https://github.com/nevskyforever/nfprogress"
+                href="https://github.com/nevskyforever/worta"
                 target="_blank"
                 rel="noopener noreferrer"
                 :aria-label="t('Открыть репозиторий nfprogress на GitHub').replace(/nfprogress/gi, 'worta')"

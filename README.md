@@ -65,7 +65,7 @@ feature-level parity matrix and remaining platform-specific behavior.
 ## Download
 
 Tauri desktop builds are published through
-[GitHub Releases](https://github.com/nevskyforever/nfprogress/releases).
+[GitHub Releases](https://github.com/nevskyforever/worta/releases).
 Windows releases use the bundled NSIS installer; automatic updates are delivered
 from the same GitHub release channel.
 
@@ -81,8 +81,8 @@ from the same GitHub release channel.
 Clone the repository and create a Python environment:
 
 ```bash
-git clone https://github.com/nevskyforever/nfprogress.git
-cd nfprogress
+git clone https://github.com/nevskyforever/worta.git
+cd worta
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-backend.txt

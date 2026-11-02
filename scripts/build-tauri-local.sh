@@ -169,7 +169,7 @@ cp "$ROOT_DIR/SOURCE_CODE.txt" "$PACKAGE_DIR/SOURCE_CODE.txt"
 SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 {
   printf '\nРевизия сборки: %s\n' "$SOURCE_REVISION"
-  printf 'Архив исходного кода: https://github.com/nevskyforever/nfprogress/archive/%s.zip\n' "$SOURCE_REVISION"
+  printf 'Архив исходного кода: https://github.com/nevskyforever/worta/archive/%s.zip\n' "$SOURCE_REVISION"
 } >> "$PACKAGE_DIR/SOURCE_CODE.txt"
 
 rm -f "$ARTIFACT_PATH"
