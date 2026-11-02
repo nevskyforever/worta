@@ -668,7 +668,7 @@ jobs:
             while IFS=$'\t' read -r status path; do
               [[ "$status" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
               case "$path" in
-                .github/workflows/build.yml|frontend/src/cloud/syncNetworkFailure.http.spec.ts|frontend/src/platform/web/localSourceKernel.spec.ts) ;;
+                .github/workflows/build.yml|frontend/src/cloud/syncNetworkFailure.http.spec.ts|frontend/src/platform/web/localSourceKernel.spec.ts|frontend/src/platform/web/resolutionMixedContinuation.spec.ts) ;;
                 *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
               esac
             done <<< "$changes"
