@@ -94,6 +94,33 @@ prepare_frontend_workspace() {
     "$FRONTEND_SOURCE_DIR/" "$FRONTEND_DIR/"
   rsync --archive --delete \
     "$ROOT_DIR/mindmap_assets/" "$WORKSPACE_DIR/mindmap_assets/"
+  # Vitest's node-only release checks resolve shared compression fixtures and
+  # the local FastAPI app from the workspace root. Copy only their source
+  # trees; these are test inputs and are never included in the Tauri bundle.
+  if [ -d "$ROOT_DIR/scripts/compression" ]; then
+    mkdir -p "$WORKSPACE_DIR/scripts"
+    rsync --archive --delete \
+      "$ROOT_DIR/scripts/compression/" "$WORKSPACE_DIR/scripts/compression/"
+  fi
+  if [ -d "$ROOT_DIR/backend" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/backend/" "$WORKSPACE_DIR/backend/"
+  fi
+  # The backend smoke test imports the shared service package and legacy
+  # engine module from the repository root. They remain test-only sources and
+  # are not part of the production Desktop artifact.
+  if [ -d "$ROOT_DIR/nfprogress" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/nfprogress/" "$WORKSPACE_DIR/nfprogress/"
+  fi
+  if [ -f "$ROOT_DIR/engine.py" ]; then
+    cp -p "$ROOT_DIR/engine.py" "$WORKSPACE_DIR/engine.py"
+  fi
+  # The compatibility layer imported by the backend smoke test also resolves
+  # legacy top-level Python modules (game, settings, and related schemas).
+  # Keep these test-only sources available without placing Python in the app.
+  rsync --archive --include='*.py' --exclude='*' \
+    "$ROOT_DIR/" "$WORKSPACE_DIR/"
   # Rust embeds the shared migration SQL from the repository-relative path in
   # src-tauri/src/sqlite.rs. Keep that source available in the isolated build
   # workspace without copying the Python runtime or its user data.
