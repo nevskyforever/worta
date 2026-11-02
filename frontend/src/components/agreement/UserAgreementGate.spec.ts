@@ -6,6 +6,7 @@ import { contentApi } from '@/api/content'
 import { settingsApi } from '@/api/settings'
 import { requestApplicationClose } from '@/platform/runtime'
 import { useLocaleStore } from '@/stores/locale'
+import { useThemeStore } from '@/stores/theme'
 import type { SupportedLanguage } from '@/types/api'
 import type { SettingsResponse } from '@/types/content'
 
@@ -27,6 +28,7 @@ vi.mock('@/api/settings', () => ({
 
 vi.mock('@/platform/runtime', () => ({
   requestApplicationClose: vi.fn(),
+  syncNativeSystemBars: vi.fn().mockResolvedValue(undefined),
 }))
 
 function settingsResponse(
@@ -92,6 +94,28 @@ describe('UserAgreementGate', () => {
     expect(wrapper.emitted<SettingsResponse[]>('accepted')?.[0]?.[0]?.values.user_agreement).toBe(
       true,
     )
+  })
+
+  it('overrides inline white text with the active theme colour', async () => {
+    vi.mocked(contentApi.agreement).mockResolvedValue({
+      id: 'agreement-v1',
+      language: 'ru',
+      html: '<!doctype html><html><head></head><body><p><span style="color:#ffffff">Terms</span></p></body></html>',
+    })
+    const pinia = createPinia()
+    const wrapper = mount(UserAgreementGate, { global: { plugins: [pinia] } })
+    useThemeStore(pinia).setPreference('light')
+    await flushPromises()
+
+    let srcdoc = wrapper.get('iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('color: #1e2925 !important')
+    expect(srcdoc).toMatch(/body\s+\*\s*\{\s*color:\s*inherit\s*!important/)
+    expect(srcdoc).toContain('style="color:#ffffff"')
+
+    useThemeStore(pinia).setPreference('dark')
+    await flushPromises()
+    srcdoc = wrapper.get('iframe').attributes('srcdoc') ?? ''
+    expect(srcdoc).toContain('color: #edf2ef !important')
   })
 
   it('persists a language before applying it and reloads the shared agreement', async () => {
