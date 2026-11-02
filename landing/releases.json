@@ -6,21 +6,21 @@
       "status": "available",
       "version": "5.3.9",
       "url": "https://nfproject.ru/app/nfprogress-windows-x86_64-5.3.9-setup.exe",
-      "message": "Скачать worta 5.3.9"
+      "message": "Скачать WORTA 5.3.9"
     },
     {
       "platform": "macos-arm",
       "status": "available",
       "version": "5.3.11",
       "url": "https://worta.ru/app/nfprogress-mac-arm-5.3.11.zip",
-      "message": "Скачать worta 5.3.11"
+      "message": "Скачать WORTA 5.3.11"
     },
     {
       "platform": "macos-intel",
       "status": "available",
       "version": "5.3.11",
       "url": "https://worta.ru/app/nfprogress-mac-intel-5.3.11.zip",
-      "message": "Скачать worta 5.3.11"
+      "message": "Скачать WORTA 5.3.11"
     }
   ],
   "message": "Выберите установщик для своей платформы."
