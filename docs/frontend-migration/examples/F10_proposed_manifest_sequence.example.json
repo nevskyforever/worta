@@ -62,7 +62,7 @@
     }
   },
   "tauri_after_transition": {
-    "endpoint": "https://github.com/nevskyforever/nfprogress/releases/latest/download/latest.json",
+    "endpoint": "https://github.com/nevskyforever/worta/releases/latest/download/latest.json",
     "platform_keys": ["windows-x86_64", "darwin-aarch64", "darwin-x86_64"],
     "signature": "Tauri generated .sig content, not a URL",
     "public_key": "TAURI_UPDATER_PUBLIC_KEY_FROM_CI_VARIABLE"

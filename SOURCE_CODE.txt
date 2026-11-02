@@ -3,7 +3,7 @@ nfprogress — получение исходного кода
 nfprogress распространяется на условиях GNU General Public License version 3.
 
 Репозиторий исходного кода:
-https://github.com/nevskyforever/nfprogress
+https://github.com/nevskyforever/worta
 
 В поставляемом пакете ниже также указываются идентификатор Git-коммита,
 использованного для сборки, и прямая ссылка на архив исходного кода этого
