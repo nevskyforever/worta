@@ -120,6 +120,8 @@ printf '%s\n' "$$" > "$MANIFEST_LOCK_DIR/pid"
 
 cleanup_release_manifest() {
   rm -f -- "$REMOTE_MANIFEST_PATH"
+  if [ -n "${LEGACY_DIR:-}" ]; then rm -rf -- "$LEGACY_DIR"; fi
+  if [ -n "${RELEASES_PATH:-}" ]; then rm -f -- "$RELEASES_PATH"; fi
   rm -f -- "$MANIFEST_PATH" "$WORTA_MANIFEST_PATH" "$REMOTE_RELEASES_PATH"
   rm -f -- "$MANIFEST_LOCK_DIR/pid"
   rmdir "$MANIFEST_LOCK_DIR" 2>/dev/null || true

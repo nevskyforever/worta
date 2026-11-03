@@ -25,9 +25,23 @@ marker is refreshed before and after each command. Targets containing app bundle
 DMG or ZIP installers are retained. Direct Cargo invocations must not write into
 managed targets: use the runner so cleanup and builds share the same lock.
 
-Release workspaces retain separate targets because their bundles are inputs to
-release provenance checks; existing release scripts and installer retention remain
-unchanged. The existing `clean_generated.py` audits worktree-local legacy outputs;
-its `--apply` requires stopping builds and reviewing the exact targets first.
-It must never be applied in another active worktree. Neither cleanup tool removes
-Git worktrees, user profiles, documents, backups, global registry or npm caches.
+Release workspaces use separate targets because bundles are inputs to provenance
+checks. By default `build-tauri-local.sh` now runs Cargo cleanup on exit, including
+failed qualification or packaging. `NFPROGRESS_TAURI_KEEP_BUNDLE=1` preserves only
+the bundle at its original path: it is moved aside during `cargo clean` and then
+restored without copying the target. It no longer retains all intermediates.
+Only explicit `NFPROGRESS_TAURI_KEEP_BUILD_CACHE=1` retains the entire target for
+diagnostics. Cargo incremental output is disabled for qualification as well as
+packaging. A per-architecture workspace lock refuses competing invocations.
+
+The fixed ARM/Intel workspaces and their node_modules are reused, rather than
+created per invocation; an unchanged package lock does not rerun npm ci. Their
+separate node_modules are necessary for independent parallel frontend builds and
+are never linked together. The registry and npm download caches stay shared.
+
+The existing `clean_generated.py` audits worktree-local legacy outputs. Review
+its exact targets before applying: retained bundles or dependencies may still be
+needed. Never apply it in another active worktree. Neither the managed cache
+cleaner nor release cleanup removes Git worktrees, user profiles, documents,
+backups or global registry/npm caches. Disk-audit measurements for the original
+retention bug are recorded in `build-disk-audit-2026-11-04.md`.

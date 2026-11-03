@@ -86,7 +86,7 @@ def _create_build_fixture(tmp_path: Path) -> tuple[Path, Path]:
             exit 0
           fi
         done
-        cp -R "$source_path"/. "$destination_path"/
+        cp -pR "$source_path"/. "$destination_path"/
         """,
     )
     _write_executable(
@@ -266,3 +266,101 @@ def test_test_build_profile_uses_distinct_artifact_prefix(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert (root / 'build-tauri-arm' / 'nfprogress-test-tauri-mac-arm-5.3.0.zip').is_file()
     assert (tmp_path / 'prepare.log').read_text(encoding='utf-8').splitlines() == [str(root)]
+
+
+def test_retained_bundle_does_not_retain_targets_and_repeat_reuses_dependencies(tmp_path):
+    root, bin_dir = _create_build_fixture(tmp_path)
+    env = os.environ | {
+        'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
+        'TEST_NPM_LOG': str(tmp_path / 'npm.log'),
+        'TEST_DMG_LOG': str(tmp_path / 'dmg.log'),
+        'NFPROGRESS_TAURI_KEEP_BUNDLE': '1',
+    }
+    frontend = root / '.tauri-build-workspaces/arm/frontend'
+    target = frontend / 'src-tauri/target'
+    for _ in range(2):
+        result = subprocess.run([str(root / 'scripts/build-tauri-local.sh'), 'arm'], env=env, capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (target / 'aarch64-apple-darwin/release/bundle/temporary-app-output').is_file()
+        assert not (root / '.tauri-build-workspaces/arm/.build.lock').exists()
+        assert not list(target.glob('debug'))
+    assert len((tmp_path / 'npm.log').read_text().splitlines()) == 1
+    # A packaging failure must also release its lock and clean intermediate output.
+    (root / 'scripts/build-tauri-dmg.sh').write_text('#!/bin/bash\nmkdir -p "$NFPROGRESS_TAURI_FRONTEND_DIR/src-tauri/target/debug"\nexit 23\n')
+    result = subprocess.run([str(root / 'scripts/build-tauri-local.sh'), 'arm'], env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 23, result.stdout + result.stderr
+    assert not target.exists()
+    assert not (root / '.tauri-build-workspaces/arm/.build.lock').exists()
+    assert (root / 'build-tauri-arm/nfprogress-tauri-mac-arm-5.3.0.zip').is_file()
+    # Early qualification failure used to occur before the cleanup trap existed.
+    (target / 'debug').mkdir(parents=True)
+    (target / 'debug/object.o').write_bytes(b'generated')
+    result = subprocess.run([str(root / 'scripts/build-tauri-local.sh'), 'arm'],
+                            env=env | {'NFPROGRESS_TAURI_RUN_FRONTEND_CHECKS': '1'},
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 2
+    assert not target.exists()
+    # A second invocation must never clean an active workspace.
+    lock = root / '.tauri-build-workspaces/arm/.build.lock'
+    lock.mkdir()
+    (target / 'debug').mkdir(parents=True)
+    sentinel = target / 'debug/active.o'
+    sentinel.write_bytes(b'active build')
+    result = subprocess.run([str(root / 'scripts/build-tauri-local.sh'), 'arm'],
+                            env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0 and 'already locked' in result.stderr
+    assert sentinel.read_bytes() == b'active build'
+
+
+def test_real_cargo_intermediates_are_removed_after_each_retained_bundle_build(tmp_path):
+    import shutil
+    import pytest
+
+    cargo = shutil.which('cargo')
+    if not cargo:
+        pytest.skip('Cargo is required for the real cleanup integration check')
+    root, bin_dir = _create_build_fixture(tmp_path)
+    source = root / 'frontend/src-tauri/src'
+    source.mkdir()
+    (source / 'lib.rs').write_text('pub fn probe() -> u32 { 14 }\n')
+    # All packaging tools remain isolated stubs; only Cargo compilation/cleanup is real.
+    _write_executable(bin_dir / 'cargo', f'#!/bin/bash\nexec "{cargo}" "$@"\n')
+    env = os.environ | {
+        'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
+        'TEST_NPM_LOG': str(tmp_path / 'npm.log'),
+        'TEST_DMG_LOG': str(tmp_path / 'dmg.log'),
+        'NFPROGRESS_TAURI_KEEP_BUNDLE': '1',
+    }
+    command = [str(root / 'scripts/build-tauri-local.sh'), 'arm']
+    subprocess.run(command, env=env, check=True, capture_output=True, timeout=30)
+    frontend = root / '.tauri-build-workspaces/arm/frontend'
+    target = frontend / 'src-tauri/target'
+    for _ in range(2):
+        subprocess.run([cargo, 'build', '--offline', '--manifest-path', str(frontend / 'src-tauri/Cargo.toml')],
+                       env=env | {'CARGO_TARGET_DIR': str(target), 'CARGO_INCREMENTAL': '0'},
+                       check=True, capture_output=True, timeout=30)
+        assert list((target / 'debug/deps').glob('*.rlib'))
+        result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=30)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert not (target / 'debug').exists()
+        assert (target / 'aarch64-apple-darwin/release/bundle/temporary-app-output').is_file()
+    assert len((tmp_path / 'npm.log').read_text().splitlines()) == 1
+
+
+def test_packaging_failure_preserves_previous_installer(tmp_path):
+    root, bin_dir = _create_build_fixture(tmp_path)
+    env = os.environ | {
+        'PATH': f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
+        'TEST_NPM_LOG': str(tmp_path / 'npm.log'),
+        'TEST_DMG_LOG': str(tmp_path / 'dmg.log'),
+    }
+    output = root / 'build-tauri-arm/nfprogress-tauri-mac-arm-5.3.0.zip'
+    output.parent.mkdir()
+    output.write_bytes(b'previous validated installer')
+    _write_executable(bin_dir / 'ditto', '#!/bin/bash\nexit 24\n')
+    result = subprocess.run([str(root / 'scripts/build-tauri-local.sh'), 'arm'], env=env,
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 24
+    assert output.read_bytes() == b'previous validated installer'
+    assert not (root / '.tauri-build-workspaces/arm/frontend/src-tauri/target').exists()
+    assert not (root / '.tauri-build-workspaces/arm/.build.lock').exists()
