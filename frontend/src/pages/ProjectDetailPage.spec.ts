@@ -234,7 +234,7 @@ describe('ProjectDetailPage progress sharing', () => {
       statusLabel: 'Активен',
       progressText: '25,000 символов / 100,000 символов',
       footerLabel: 'Apr 30, 2027',
-      footerDetail: 'Источников: 1',
+      footerDetail: 'Этапов: 1',
       theme: 'light',
     })
     expect(copyProgressImage).toHaveBeenNthCalledWith(2, {

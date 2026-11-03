@@ -17,6 +17,17 @@ const ionicStubs = {
 describe('StageDialog', () => {
   afterEach(() => vi.useRealTimers())
 
+  it.each([
+    { sharedSource: false, heading: 'Добавить этап' },
+    { sharedSource: true, heading: 'Добавить источник' },
+  ])('names the creation dialog for sharedSource=$sharedSource', ({ sharedSource, heading }) => {
+    const wrapper = mount(StageDialog, {
+      props: { open: true, projectUnit: 'symbols', sharedSource },
+      global: { plugins: [createPinia()], stubs: ionicStubs },
+    })
+    expect(wrapper.get('h2').text()).toBe(heading)
+  })
+
   it('keeps deadline and daily goal calculations live for a stage', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-26T12:00:00'))

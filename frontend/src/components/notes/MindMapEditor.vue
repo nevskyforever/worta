@@ -11,6 +11,7 @@ import {
   parseMindMapEvents,
   type MindMapInitialization,
 } from '@/components/notes/mindMapBridge'
+import { useProjectsStore } from '@/stores/projects'
 import { useLocaleStore } from '@/stores/locale'
 import type { JsonObject, MindMapResponse, NotesScope, XMindImportResponse } from '@/types/notes'
 
@@ -28,6 +29,11 @@ const emit = defineEmits<{
 
 const locale = useLocaleStore()
 const t = locale.translate
+const projectStore = useProjectsStore()
+const sharedSource = computed(() => {
+  const project = projectStore.currentProject?.id === props.map.project_id ? projectStore.currentProject : projectStore.projects.find(item => item.id === props.map.project_id)
+  return project?.name === 'Общий проект'
+})
 const frame = ref<HTMLIFrameElement | null>(null)
 const ready = ref(false)
 const saving = ref(false)
@@ -58,7 +64,7 @@ function initialPayload(): MindMapInitialization {
       ? (JSON.parse(JSON.stringify(props.map.data)) as JsonObject)
       : null,
     editorLabel: t('Редактор карты'),
-    emptyStageMapText: t('Карта не была создана при работе над источником.'),
+    emptyStageMapText: t(sharedSource.value ? 'Карта не была создана при работе над источником.' : 'Карта не была создана при работе над этапом.'),
     floatingNodeName: t('Свободный узел'),
     floatingNoteName: t('Новая заметка'),
     addFloatingNodeLabel: t('Добавить свободный узел'),
@@ -334,10 +340,10 @@ defineExpose({ focusNode, updateNodeNote, removeNodeNote, saveNow })
     </div>
 
     <p v-if="map.combined" class="mindmap-editor__notice">
-      {{ t('Показана объединённая карта проекта и источников.') }}
+      {{ t(sharedSource ? 'Показана объединённая карта проекта и источников.' : 'Показана объединённая карта проекта и этапов.') }}
     </p>
     <p v-if="map.has_empty_completed_stage_map" class="mindmap-editor__notice">
-      {{ t('У завершённого источника нет сохранённой карты; его ветвь доступна только для просмотра.') }}
+      {{ t(sharedSource ? 'У завершённого источника нет сохранённой карты; его ветвь доступна только для просмотра.' : 'У завершённого этапа нет сохранённой карты; его ветвь доступна только для просмотра.') }}
     </p>
     <p v-if="errorMessage" class="mindmap-editor__error" role="alert">{{ errorMessage }}</p>
 

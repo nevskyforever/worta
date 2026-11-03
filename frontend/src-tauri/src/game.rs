@@ -4832,6 +4832,86 @@ mod tests {
     }
 
     #[test]
+    fn purchase_sqlite_is_atomic_and_survives_reopen() {
+        let (mut db, path) = loss_database(100.0, 0);
+        db.execute(
+            "UPDATE storage_ownership SET owner='sqlite' WHERE subsystem='game'",
+            [],
+        )
+        .unwrap();
+        let mut state = loss_state(&db);
+        state["gamer"]["coins"] = json!(10000.0);
+        state["gamer"]["level"] = json!(100);
+        state["gamer"]["items"]["Предметы"] = json!({});
+        db.execute("UPDATE game_state SET payload_json=?1", [state.to_string()])
+            .unwrap();
+        let item = catalog_item("Предметы", "Лотерейный билет").unwrap();
+        GameApplicationService::inventory_sqlite(
+            &mut db,
+            "Предметы".into(),
+            item.key.into(),
+            1,
+            "buy",
+        )
+        .unwrap();
+        let purchased = loss_state(&db);
+        assert_eq!(purchased["gamer"]["coins"], json!(10000.0 - item.price));
+        assert_eq!(purchased["gamer"]["items"]["Предметы"][item.key], json!(1));
+        for count in [0, -1, i64::MAX] {
+            assert!(GameApplicationService::inventory_sqlite(
+                &mut db,
+                "Предметы".into(),
+                item.key.into(),
+                count,
+                "buy"
+            )
+            .is_err());
+            assert_eq!(loss_state(&db), purchased);
+        }
+        for (coins, quantity, expected_funds) in [(0.0, 1, true), (10000.0, 10000, false)] {
+            let mut blocked = purchased.clone();
+            blocked["gamer"]["coins"] = json!(coins);
+            blocked["gamer"]["items"]["Предметы"][item.key] = json!(quantity);
+            db.execute(
+                "UPDATE game_state SET payload_json=?1",
+                [blocked.to_string()],
+            )
+            .unwrap();
+            let error = GameApplicationService::inventory_sqlite(
+                &mut db,
+                "Предметы".into(),
+                item.key.into(),
+                1,
+                "buy",
+            )
+            .unwrap_err();
+            assert!(if expected_funds {
+                matches!(error, GameError::InsufficientFunds(_))
+            } else {
+                matches!(error, GameError::InvalidQuantity(_))
+            });
+            assert_eq!(loss_state(&db), blocked);
+        }
+        for payload in [
+            json!({}),
+            json!({"category":"Предметы","item_id":item.key,"count":1}),
+            json!({"category":"Предметы","itemId":item.key,"count":"1"}),
+        ] {
+            assert!(serde_json::from_value::<InventoryRequest>(payload).is_err());
+        }
+        db.execute(
+            "UPDATE game_state SET payload_json=?1",
+            [purchased.to_string()],
+        )
+        .unwrap();
+        drop(db);
+        let db = crate::sqlite::open_database(&path).unwrap();
+        assert_eq!(loss_state(&db), purchased);
+        drop(db);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn inventory_total_is_bounded_without_integer_overflow() {
         assert_eq!(checked_inventory_total(9_999, 1, None).unwrap(), 10_000);
         assert!(matches!(

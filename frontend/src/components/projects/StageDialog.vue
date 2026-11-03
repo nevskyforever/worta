@@ -192,7 +192,7 @@ async function submit(): Promise<void> {
   const goal = numberFrom(form.goal)
   const total = numberFrom(form.total)
   const personalGoal = numberFrom(form.personalGoal)
-  if (!name) errors.push(t('Введите название источника.'))
+  if (!name) errors.push(t(props.sharedSource ? 'Введите название источника.' : 'Введите название этапа.'))
   if (!props.sharedSource && !form.infinite && (!Number.isFinite(goal) || goal <= 0)) {
     errors.push(t('Цель должна быть больше нуля.'))
   }
@@ -288,7 +288,7 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
     <IonHeader class="workspace-dialog-header ion-no-border">
       <div>
         <p>{{ sharedSource ? t('Источники синхронизации') : t('Структура рукописи') }}</p>
-        <h2>{{ stage ? t('Редактировать источник') : t('Добавить источник') }}</h2>
+        <h2>{{ stage ? t(sharedSource ? 'Редактировать источник' : 'Редактировать этап') : t(sharedSource ? 'Добавить источник' : 'Добавить этап') }}</h2>
       </div>
       <button
         class="workspace-dialog-close"
@@ -314,7 +314,7 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
           <ul><li v-for="error in validationErrors" :key="error">{{ error }}</li></ul>
         </div>
         <div v-if="apiError" class="workspace-form-error" role="alert">
-          <strong>{{ t('Не удалось сохранить источник') }}</strong>
+          <strong>{{ t(sharedSource ? 'Не удалось сохранить источник' : 'Не удалось сохранить этап') }}</strong>
           <p>{{ apiError }}</p>
         </div>
 
@@ -374,7 +374,7 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
           />
         </label>
         <p class="stage-unit-note">
-          {{ t('Единица источника совпадает с проектом') }}: <strong>{{ projectUnitLabel }}</strong>
+          {{ t(sharedSource ? 'Единица источника совпадает с проектом' : 'Единица этапа совпадает с проектом') }}: <strong>{{ projectUnitLabel }}</strong>
         </p>
         <label v-if="!sharedSource" class="workspace-field workspace-field--wide" for="stage-work-method">
           <span>{{ t('Метод работы с проектом') }}</span>
@@ -389,7 +389,7 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
         <div v-if="!sharedSource" class="workspace-options workspace-field--wide">
           <label class="workspace-check">
             <input v-model="form.infinite" type="checkbox" @change="toggleInfinite" />
-            <span><strong>{{ t('Источник без конечной цели') }}</strong></span>
+            <span><strong>{{ t('Этап без конечной цели') }}</strong></span>
           </label>
           <label v-if="globalStreakEnabled" class="workspace-check">
             <input id="stage-streak-enabled" v-model="form.streakEnabled" name="streak_enabled" type="checkbox" />

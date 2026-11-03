@@ -56,8 +56,8 @@ const stagesSection = ref<HTMLElement | null>(null)
 let stageSizeObserver: ResizeObserver | undefined
 let stageMeasureFrame: number | undefined
 const fractionDigits = computed(() => props.project.unit === 'symbols' ? 0 : 2)
-const addButtonLabel = computed(() => t('Добавить источник'))
-const emptyActionLabel = computed(() => t('Создать первый источник'))
+const addButtonLabel = computed(() => t(sharedProject.value ? 'Добавить источник' : 'Добавить этап'))
+const emptyActionLabel = computed(() => t(sharedProject.value ? 'Создать первый источник' : 'Создать первый этап'))
 const removeButtonLabel = computed(() => sharedProject.value ? t('Удалить источник') : t('Удалить'))
 
 const sortedStages = computed(() => [...props.project.stages].sort((left, right) => {
@@ -82,7 +82,7 @@ function showStageStreak(stage: Project): boolean {
 function requestRemove(stage: Project): void {
   const confirmed = window.confirm(t(sharedProject.value
     ? 'Удалить источник «{name}» и всю его историю прогресса? Это действие нельзя отменить.'
-    : 'Удалить источник «{name}» и всю его историю прогресса? Это действие нельзя отменить.', { name: stage.name }))
+    : 'Удалить этап «{name}» и всю его историю прогресса? Это действие нельзя отменить.', { name: stage.name }))
   if (confirmed) emit('remove', stage)
 }
 function startDrag(event: DragEvent, stage: Project): void {
@@ -237,7 +237,7 @@ onBeforeUnmount(() => {
 <template>
   <section ref="stagesSection" class="stages-section" aria-labelledby="stages-heading">
     <div class="section-heading stage-section-heading">
-      <div><p>{{ t('Структура рукописи') }}</p><h2 id="stages-heading">{{ t('Источники') }}</h2></div>
+      <div><p>{{ t('Структура рукописи') }}</p><h2 id="stages-heading">{{ t(sharedProject ? 'Источники' : 'Этапы') }}</h2></div>
       <div class="stage-heading-actions">
         <label class="stage-sort" for="stage-sort">
           <span class="visually-hidden">{{ t('Сортировка') }}</span>
@@ -286,7 +286,7 @@ onBeforeUnmount(() => {
         @drop.prevent="dropStage($event, stage)"
         @contextmenu.prevent="openContext($event, stage)"
       >
-        <button class="stage-open-button" type="button" :aria-label="`${t('Источники')}: ${stage.name}`" @click="emit('open', stage)">
+        <button class="stage-open-button" type="button" :aria-label="`${t(sharedProject ? 'Источники' : 'Этапы')}: ${stage.name}`" @click="emit('open', stage)">
           <span class="stage-index" aria-hidden="true">{{ index + 1 }}</span>
           <div class="stage-title-row">
             <div>
@@ -295,7 +295,7 @@ onBeforeUnmount(() => {
               <p><AnimatedNumber :value="stage.total" :digits="fractionDigits" /> / <template v-if="stage.infinite || stage.goal === null">{{ t('Без лимита') }}</template><AnimatedNumber v-else :value="stage.goal" :digits="fractionDigits" /></p>
               <StreakBadge v-if="showStageStreak(stage)" class="stage-streak" :length="stage.streak_length" :status="stage.streak_status" scope="stage" compact />
             </div>
-            <ProgressRing :value="sharedProject && stage.infinite ? 100 : stageProgress(stage)" :infinite="stage.infinite" :full="sharedProject && stage.infinite" :label="`${t('Прогресс источника')} ${stage.name}`" />
+            <ProgressRing :value="sharedProject && stage.infinite ? 100 : stageProgress(stage)" :infinite="stage.infinite" :full="sharedProject && stage.infinite" :label="`${t(sharedProject ? 'Прогресс источника' : 'Прогресс этапа')} ${stage.name}`" />
           </div>
         </button>
         <div class="stage-actions">
@@ -317,11 +317,11 @@ onBeforeUnmount(() => {
     </TransitionGroup>
 
     <div v-else class="stages-empty">
-      <p>{{ sharedProject ? t('Подключите первый источник синхронизации.') : t('Разбейте рукопись на главы или другие рабочие источники.') }}</p>
+      <p>{{ sharedProject ? t('Подключите первый источник синхронизации.') : t('Разбейте рукопись на главы или другие рабочие этапы.') }}</p>
       <button v-if="!readOnly" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="emit('add')"><IonIcon :icon="addOutline" aria-hidden="true" />{{ emptyActionLabel }}</button>
     </div>
 
-    <ContextActionMenu :open="contextStage !== null" :x="contextPosition.x" :y="contextPosition.y" :label="contextStage ? `${t('Действия источника')}: ${contextStage.name}` : ''" :actions="contextActions" @close="contextStage = null" @select="selectContextAction" />
+    <ContextActionMenu :open="contextStage !== null" :x="contextPosition.x" :y="contextPosition.y" :label="contextStage ? `${t(sharedProject ? 'Действия источника' : 'Действия этапа')}: ${contextStage.name}` : ''" :actions="contextActions" @close="contextStage = null" @select="selectContextAction" />
   </section>
 </template>
 

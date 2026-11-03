@@ -198,17 +198,17 @@ export const gameApi = {
   },
 
   buyItem(payload: InventoryCommand): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_buy_item', nativeInventoryPayload(payload))
+    if (isDesktopGame()) return nativeCommand('game_buy_item', { payload: nativeInventoryPayload(payload) })
     return command('/inventory/buy', payload)
   },
 
   sellItem(payload: InventoryCommand): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_sell_item', nativeInventoryPayload(payload))
+    if (isDesktopGame()) return nativeCommand('game_sell_item', { payload: nativeInventoryPayload(payload) })
     return command('/inventory/sell', payload)
   },
 
   useItem(payload: InventoryCommand): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_use_item', nativeInventoryPayload(payload))
+    if (isDesktopGame()) return nativeCommand('game_use_item', { payload: nativeInventoryPayload(payload) })
     return command('/inventory/use', payload)
   },
 

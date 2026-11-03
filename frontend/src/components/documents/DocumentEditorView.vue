@@ -17,6 +17,7 @@ import LocalWordBindingPanel from './LocalWordBindingPanel.vue'
 import DocumentConflictResolver from './DocumentConflictResolver.vue'
 import NFDocumentEditor from './editor/NFDocumentEditor.vue'
 import NFEditorStatusControls from './editor/NFEditorStatusControls.vue'
+import { useProjectsStore } from '@/stores/projects'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
 
@@ -25,6 +26,11 @@ const router = useRouter()
 const locale = useLocaleStore()
 const notifications = useNotificationsStore()
 const t = locale.translate
+const projectStore = useProjectsStore()
+const sharedSource = computed(() => {
+  const project = projectStore.currentProject?.id === props.scope.projectId ? projectStore.currentProject : projectStore.projects.find(item => item.id === props.scope.projectId)
+  return project?.name === 'Общий проект'
+})
 type DocumentEditorExpose = {
   getEditor: () => Editor | null
   getJSON: () => TiptapDocument
@@ -465,7 +471,7 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
   <section class="document-editor-view">
     <header class="document-editor-view__header">
       <div class="document-editor-view__title">
-        <button class="document-editor-view__back" type="button" :title="scope.stageId ? t('Вернуться к источнику') : t('Вернуться к проекту')" :aria-label="scope.stageId ? t('Вернуться к источнику') : t('Вернуться к проекту')" @click="closeEditor">← {{ scope.stageId ? t('К источнику') : t('К проекту') }}</button>
+        <button class="document-editor-view__back" type="button" :title="scope.stageId ? t(sharedSource ? 'Вернуться к источнику' : 'Этап') : t('Вернуться к проекту')" :aria-label="scope.stageId ? t(sharedSource ? 'Вернуться к источнику' : 'Этап') : t('Вернуться к проекту')" @click="closeEditor">← {{ scope.stageId ? t(sharedSource ? 'К источнику' : 'Этап') : t('К проекту') }}</button>
         <div><p class="document-editor-view__eyebrow">Текст</p><h1>{{ title }}</h1></div>
       </div>
       <div class="document-editor-view__actions">

@@ -36,7 +36,7 @@ const t = locale.translate
 
 const title = computed(() => {
   if (props.scope === 'global') return t('Глобальный стрик')
-  if (props.scope === 'stage') return t('Стрик источника')
+  if (props.scope === 'stage') return t('Стрик этапа')
   return t('Стрик проекта')
 })
 
