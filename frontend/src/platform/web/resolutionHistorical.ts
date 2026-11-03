@@ -1,3 +1,4 @@
+import { inspectResolutionDag } from './resolutionDag'
 import type {MetadataHandoffInspection} from './historicalMetadataDependency'
 import {consumeHHistoryRequest,type HHistoryToken,type BrowserResolutionContinuationRuntime} from './resolutionContinuation'
 import {consumeGHistoryRequest,consumeQHistoryRequest,type GHistoryToken,type QHistoryToken,type BrowserResolutionPrefixRuntime} from './resolutionPrefix'
@@ -195,28 +196,45 @@ export async function verifyContinuationSources(s:BrowserSyncScope,v:ResolutionI
  for(const projectId of new Set(roots.map(r=>r.record.project_id))){
   const chain=roots.filter(r=>r.record.project_id===projectId).sort((a,b)=>a.record.server_sequence-b.record.server_sequence)
   if(chain.length<2)continue
-  if(chain.length!==2||chain.some(r=>r.record.strategy!=='choose_version'||r.record.retained_note_id!==null||r.record.transport_kind!=='content_note_resolution_v2'||r.record.note_id!==chain[0]!.record.note_id))throw new BrowserPersistenceError('unsupported_local_source')
-  const latest=chain[1]!.record
+  if(chain.some(r=>r.record.strategy!=='choose_version'||r.record.retained_note_id!==null||r.record.transport_kind!=='content_note_resolution_v2'||r.record.note_id!==chain[0]!.record.note_id))throw new BrowserPersistenceError('unsupported_local_source')
+  const latest=chain.at(-1)!.record
   const bytes=await openHistoricalJson(s,latest.project_id,latest.note_id,'note',latest.evidence_envelope,amk,current)
   let evidence:{head_before:unknown;source_before:{project:LocalProjectRecord;notes:LocalNoteRecord[]}}
   try{evidence=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes))}finally{bytes.fill(0)}
   // Reconstruct the exact pre-commit snapshot from authenticated owner evidence.
   // Never mint a head/source/proof to make the earlier generation validate.
   const prior={...v,
-   history:[...v.history.filter((raw:any)=>!(raw.record_kind==='resolution'&&raw.event_id===latest.event_id)&&!(raw.record_kind==='group_transition'&&raw.resolution_event_id===latest.event_id)&&!(raw.record_kind==='head'&&raw.project_id===latest.project_id&&raw.note_id===latest.note_id)),evidence.head_before],
-   rows:v.rows.map((raw:any)=>{if(raw.server_sequence>latest.server_sequence&&raw.state!=='received')throw new BrowserPersistenceError('unsupported_local_source');if(raw.event_id!==latest.event_id)return raw;const {resolution_proof:_proof,...row}=raw;return{...row,record_version:1,state:'received'}}),
+   history:[...v.history.filter((raw:any)=>{
+    if(raw.project_id!==latest.project_id||raw.note_id!==latest.note_id)return true
+    if(raw.record_kind==='resolution'&&raw.event_id===latest.event_id||raw.record_kind==='group_transition'&&raw.resolution_event_id===latest.event_id||raw.record_kind==='head')return false
+    if(raw.record_kind==='candidate'&&history.rows.some(r=>r.event_id===raw.event_id&&r.server_sequence>=latest.server_sequence))return false
+    if(raw.record_kind==='group'&&raw.members.some((m:any)=>m.server_sequence>=latest.server_sequence))return false
+    return true
+   }),evidence.head_before],
+   rows:v.rows.map((raw:any)=>{
+    const e=JSON.parse(raw.wire_item).event
+    if(raw.server_sequence<latest.server_sequence||e.project_id!==latest.project_id||e.entity_id!==latest.note_id)return raw
+    return{record_version:1,state:'received',account_id:raw.account_id,device_id:raw.device_id,event_id:raw.event_id,server_sequence:raw.server_sequence,protocol_version:raw.protocol_version,wire_item:raw.wire_item}
+   }),
    projects:v.projects.map((raw:any)=>raw.project_id===latest.project_id?evidence.source_before.project:raw),
    localNotes:[...(v.localNotes??[]).filter((raw:any)=>raw.project_id!==latest.project_id),...evidence.source_before.notes]}
-  const authenticated=await authenticateContinuationHistory(s,prior,amk,current)
-  await verifyContinuationSources(s,prior,authenticated,amk,current)
-  superseded.add(chain[0]!.record.event_id)
+  // The full history already authenticated these immutable leaves. Reuse them
+  // in the historical view instead of decrypting every older generation again.
+  const dag=inspectResolutionDag(s,prior.history)
+  const priorView={...history,dag,rows:prior.rows.map(r=>readFutureInboxRecord(r,s)),
+   resolutions:new Map([...history.resolutions].filter(([id])=>dag.events.get(id)?.record_kind==='resolution')),
+   opened:new Map([...history.opened].filter(([id])=>dag.events.get(id)?.record_kind==='candidate')),
+   groups:dag.history.filter((g):g is BrowserNoteConflictGroup=>g.record_kind==='group').map(group=>({group,
+    effective:dag.history.some(t=>t.record_kind==='group_transition'&&t.group_id===group.group_id&&t.project_id===group.project_id&&t.note_id===group.note_id&&t.bootstrap_id===group.bootstrap_id)?'resolved' as const:'open' as const}))}
+  await verifyContinuationSources(s,prior,priorView,amk,current)
+  for(const earlier of chain.slice(0,-1))superseded.add(earlier.record.event_id)
  }
  const projects=new Set<string>()
  for(const root of history.resolutions.values()){
   if(superseded.has(root.record.event_id))continue
   const r=root.record
-  // Accepted F produces one Resolution per project inventory. Additional applied
-  // Resolution author/consumer chains require separate acceptance, not guesses.
+  // Historical generations were verified against their authenticated pre-commit
+  // snapshots above. Only the latest root supplies current-source authority.
   if(projects.has(r.project_id))throw new BrowserPersistenceError('unsupported_local_source')
   projects.add(r.project_id)
   const project=validateLocalProjectRecord(v.projects.find((p:any)=>p.project_id===r.project_id),s)

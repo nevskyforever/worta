@@ -80,25 +80,33 @@ export async function applyReplayResolutionOwner(input: {
     }
     const tail=[]
     for(const row of rows.slice(sequence)){tail.push(await openReplayContent(scope,row,amk));check()}
-    if(tail.some(c=>c.event.version===2)){
-      const a=tail[0],b=tail[1],r=tail[2]
-      if(tail.length!==3||!a||!b||!r)return reject()
-      const first=a.event,second=b.event,result=r.event
-      if(first.version!==1||second.version!==1||result.version!==2)return reject()
-      if(first.mutation!=='update'||second.mutation!=='update'||a.device_id===b.device_id
-        ||first.header.parent_event_id!==resolution.event_id||second.header.parent_event_id!==resolution.event_id
-        ||first.header.revision!==4||second.header.revision!==4||result.header.revision!==5
-        ||result.resolution.strategy!=='choose_version'
-        ||!resolutionSame(result.resolution.resolved_event_ids,[first.header.event_id,second.header.event_id].sort()))return reject()
-      const selected=result.resolution.selected_event_id===first.header.event_id?first:result.resolution.selected_event_id===second.header.event_id?second:undefined
-      if(!selected||result.result.operation!=='upsert'||!resolutionSame(result.result.note,selected.note))return reject()
-    }else{
-      let parent=resolution.event_id,revision=3,deleted=false
-      for(const content of tail){
-        const event=content.event
-        if(event.version!==1||!['update','delete'].includes(event.mutation)||event.header.parent_event_id!==parent
-          ||event.header.revision!==revision+1||deleted&&event.mutation!=='delete')reject()
-        parent=event.header.event_id;revision=event.header.revision;deleted=event.mutation==='delete'
+    // Admission validates the repeating ordinary/fork/Resolution grammar only.
+    // It never manufactures candidates, groups, source revisions or apply proofs.
+    const nodes=new Map<string,{revision:number;deleted:boolean;parent:string|null;device:string;event:typeof tail[number]['event']|null}>()
+    nodes.set(resolution.event_id,{revision:3,deleted:false,parent:null,device:'',event:null})
+    let frontier=new Set([resolution.event_id])
+    for(const content of tail){
+      const event=content.event,h=event.header
+      if(nodes.has(h.event_id))return reject()
+      if(event.version===1){
+        const parent=nodes.get(h.parent_event_id!)
+        if(!parent||!['update','delete'].includes(event.mutation)||h.revision!==parent.revision+1||parent.deleted&&event.mutation!=='delete')return reject()
+        if(frontier.size===1&&frontier.has(h.parent_event_id!))frontier=new Set([h.event_id])
+        else{
+          const sibling=nodes.get([...frontier][0]!)
+          if(frontier.size!==1||!sibling||sibling.parent!==h.parent_event_id||sibling.device===content.device_id)return reject()
+          frontier.add(h.event_id)
+        }
+        nodes.set(h.event_id,{revision:h.revision,deleted:event.mutation==='delete',parent:h.parent_event_id,device:content.device_id,event})
+      }else{
+        const decision=event.resolution
+        if(decision.strategy!=='choose_version'||frontier.size!==2||!frontier.has(decision.selected_event_id)||!resolutionSame(decision.resolved_event_ids,[...frontier].sort()))return reject()
+        const parents=decision.resolved_event_ids.map(id=>nodes.get(id)!)
+        const selected=nodes.get(decision.selected_event_id)?.event
+        if(h.revision!==Math.max(...parents.map(p=>p.revision))+1||!selected||selected.version!==1
+          ||event.result.operation!==selected.header.operation||!resolutionSame(event.result.note,selected.note))return reject()
+        nodes.set(h.event_id,{revision:h.revision,deleted:event.result.operation==='delete',parent:null,device:content.device_id,event})
+        frontier=new Set([h.event_id])
       }
     }
     const genesis = opened[0]!, one = opened[1]!, two = opened[2]!

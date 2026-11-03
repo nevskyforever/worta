@@ -186,10 +186,10 @@ export class BrowserResolutionPlannerRuntime {
     const prior=successor?await step(authenticateContinuationHistory(s,v,amk,current)):undefined
     if(successor){
      const roots=prior!.resolutions
-     if(sequence!==v.cursor.pull_cursor||rows.length!==v.cursor.pull_cursor||rows.some((r,i)=>r.server_sequence!==i+1||r.server_sequence<sequence&&r.state==='received')
-       ||ids.length!==2||roots.size!==1||v.out.length||v.receipts.length||v.intents.length||v.localNotes.length!==1||v.projects.length!==1
+     if(rows.length!==v.cursor.pull_cursor||rows.some((r,i)=>r.server_sequence!==i+1||r.server_sequence<sequence&&r.state==='received')
+       ||ids.length!==2||roots.size<1||v.out.length||v.receipts.length||v.intents.length||v.localNotes.length!==1||v.projects.length!==1
        ||resolution.resolution.strategy!=='choose_version'||transportKind!=='content_note_resolution_v2'
-       ||[...roots.values()].some(r=>r.record.strategy!=='choose_version'||r.record.retained_note_id!==null||r.record.project_id!==h.project_id||r.record.note_id!==h.entity_id))fail('invalid_resolution')
+       ||[...roots.values()].some(r=>r.record.protocol_version!==3||r.record.transport_kind!=='content_note_resolution_v2'||r.record.strategy!=='choose_version'||r.record.retained_note_id!==null||r.record.project_id!==h.project_id||r.record.note_id!==h.entity_id))fail('invalid_resolution')
      await step(verifyContinuationSources(s,v,prior!,amk,current))
     }
     const history=successor?inspectResolutionDag(s,relevant).history:validateNoteHistorySet(s,relevant),dag=inspectResolutionDag(s,history),group=history.find((r):r is BrowserNoteConflictGroup=>r.record_kind==='group'&&(!successor||prior!.groups.some(g=>g.group.group_id===r.group_id&&g.effective==='open'))),head=history.find(r=>r.record_kind==='head')
@@ -208,6 +208,7 @@ export class BrowserResolutionPlannerRuntime {
       if(out.state!=='accepted'||out.protocol_version!==c.protocol_version||!same(w,JSON.parse(c.wire_item)))fail('invalid_resolution')
       if(inbound&&(inbound.server_sequence!==(receipt as any).server_sequence||!same(JSON.parse(inbound.wire_item).object,w.object)))fail('invalid_resolution')
      }else{
+      if(successor&&ids.includes(c.event_id)&&inbound&&inbound.server_sequence>=sequence)fail('invalid_resolution')
       if(!inbound||!['note_proven','note_conflict_preserved','content_note_proven','content_note_conflict_preserved'].includes(inbound.state))fail('missing_publication')
       const w=JSON.parse(inbound.wire_item),{device_id,server_sequence:_seq,...event}=w.event
       if(device_id!==c.source_device_id||c.protocol_version!==inbound.protocol_version||!same(c.record_version===2?w:{event,object:w.object},JSON.parse(c.wire_item)))fail('invalid_resolution')

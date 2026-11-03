@@ -39,7 +39,7 @@ it('applies a second choose-version through the real planner/apply owner and aut
 })
 
 it('rejects unknown parents before creating successor owner proofs',async()=>{
- const {f,sequence,planner}=await fixture(r=>{const ids=[r.resolution.resolved_event_ids[0]!,crypto.randomUUID()].sort();r.header.parent_event_id=ids[0]!;r.header.additional_parent_event_ids=ids.slice(1);r.resolution.resolved_event_ids=ids})
+ const {f,sequence,planner}=await fixture(r=>{const selected='selected_event_id'in r.resolution?r.resolution.selected_event_id:r.resolution.resolved_event_ids[0]!;const ids=[selected,crypto.randomUUID()].sort();r.header.parent_event_id=ids[0]!;r.header.additional_parent_event_ids=ids.slice(1);r.resolution.resolved_event_ids=ids})
  const before=f.before();await expect(planner.prepareSuccessor(scope,sequence)).rejects.toThrow();expect(f.before()).toEqual(before)
 })
 it('rejects a sibling proof joined to the closed conflict group',async()=>{
@@ -68,15 +68,47 @@ it('does not weaken the frozen initial Resolution planner',async()=>{
  await expect(planner.prepare(scope,sequence)).rejects.toThrow();expect(f.before()).toEqual(before)
 })
 
-it('retains a post-second-Resolution event without committing an unaccepted continuation',async()=>{
+it('applies and reauthenticates ordinary continuation after any accepted generation',async()=>{
  const {f,sequence,planner}=await fixture(),owner=planner.atomicApply(),p=await planner.prepareSuccessor(scope,sequence)
  await owner.commit(await owner.prepare(p.token))
  const parent=(f.f.db.inbox.at(-1) as any).event_id
  await contentRow(f.f as never,sequence+1,{parent,revision:6,mutation:'update',change:e=>{if(e.event.version===1)e.event.note.content_format='plain'}})
- const before=f.before();await expect(f.runtime.apply(scope,sequence+1)).rejects.toThrow();expect(f.before()).toEqual(before)
+ const wire=(f.f.db.inbox.at(-1) as any).wire_item
+ expect(await f.runtime.apply(scope,sequence+1)).toBe('applied')
+ expect((f.f.db.inbox.at(-1) as any).wire_item).toBe(wire)
+ expect(await f.runtime.history(scope)).toMatchObject({resolutions:2,closedGroups:2})
+ const saved=f.before();expect(await f.runtime.apply(scope,sequence+1)).toBe('already_applied');expect(f.before()).toEqual(saved)
 })
 it('revocation invalidates a prepared second Resolution before its transaction',async()=>{
  const {f,sequence,planner}=await fixture(),owner=planner.atomicApply(),p=await planner.prepareSuccessor(scope,sequence)
  const token=await owner.prepare(p.token),before=f.before();f.f.lock()
  await expect(owner.commit(token)).rejects.toThrow();expect(f.before()).toEqual(before)
 })
+
+async function appendGeneration(f:Awaited<ReturnType<typeof fixture>>['f'],planner:Awaited<ReturnType<typeof fixture>>['planner']){
+ const head=f.f.db.legacyNoteHistory.find((r:any)=>r.record_kind==='head') as any
+ const parent=f.f.db.legacyNoteHistory.find((r:any)=>r.event_id===head.linear_head_event_id) as any
+ const start=(f.f.db.cursors[0] as any).pull_cursor,revision=parent.header.revision+1
+ const a=await contentRow(f.f as never,start+1,{parent:parent.event_id,revision,mutation:'update',change:e=>{if(e.event.version===1)e.event.note.content_format='plain'}})
+ await f.runtime.apply(scope,start+1)
+ await contentRow(f.f as never,start+2,{parent:parent.event_id,revision,mutation:'update',change:e=>{e.device_id='88888888-8888-4888-8888-888888888888';if(e.event.version===1)e.event.note.content_format='plain'}})
+ await f.runtime.apply(scope,start+2)
+ const group=f.f.db.legacyNoteHistory.find((r:any)=>r.record_kind==='group'&&r.common_parent_event_id===parent.event_id) as any
+ const resolution=structuredClone(f.resolution),ids=group.tip_event_ids,sequence=start+3
+ Object.assign(resolution.header,{event_id:crypto.randomUUID(),parent_event_id:ids[0],additional_parent_event_ids:ids.slice(1),revision:revision+1})
+ resolution.resolution={conflict_group_id:group.group_id,conflict_generation:group.conflict_generation,resolved_event_ids:ids,strategy:'choose_version',selected_event_id:a.row.event_id}
+ if(a.e.event.version!==1)throw Error('ordinary fixture expected')
+ resolution.result={operation:'upsert',note:a.e.event.note as never}
+ const wrapper={...f.content,event:resolution},bytes=frameContentNote(wrapper),o=await encryptObjectBytes(amk,{userId:scope.canonicalUserId,projectId:'p',entityId:'content-note',entityType:'note'},bytes)
+ try{await f.f.sync.commitInboundPage(scope,sequence-1,JSON.stringify({protocol_version:3,encrypted_sync_version:3,items:[{event:{event_id:resolution.header.event_id,device_id:wrapper.device_id,server_sequence:sequence,project_id:'p',entity_id:'content-note',entity_type:'note',operation:'event',revision:resolution.header.revision,updated_at:resolution.header.updated_at,deleted_at:null},object:{crypto_version:1,aad_version:1,nonce:encodeBase64Url(o.nonce),ciphertext:encodeBase64Url(o.ciphertext)}}],next_cursor:sequence,has_more:false}))}finally{bytes.fill(0);o.nonce.fill(0);o.ciphertext.fill(0)}
+ const p=await planner.prepareSuccessor(scope,sequence),owner=planner.atomicApply()
+ await owner.commit(await owner.prepare(p.token))
+ return sequence
+}
+it.each([3,5])('repeats the same owner path for %s generations without a generation-specific branch',async count=>{
+ const {f,sequence,planner}=await fixture(),owner=planner.atomicApply(),p=await planner.prepareSuccessor(scope,sequence)
+ await owner.commit(await owner.prepare(p.token))
+ for(let generation=3;generation<=count;generation++)await appendGeneration(f,planner)
+ expect(await f.runtime.history(scope)).toMatchObject({resolutions:count,closedGroups:count})
+ const saved=f.before();expect(await owner.reconcile(scope,(f.f.db.cursors[0] as any).pull_cursor)).toEqual({status:'already_applied'});expect(f.before()).toEqual(saved)
+},30000)

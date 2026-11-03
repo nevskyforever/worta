@@ -7,7 +7,7 @@ import { chromium } from '@playwright/test'
 
 const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const directory = await mkdtemp(join(tmpdir(), 'worta-replay-conflict-'))
-const expectedCursor = fixture.repeated ? 7 : fixture.successor ? 5 + (fixture.interruptRevision ?? 4) - 4 : 4
+const expectedCursor = fixture.interruptSequence ? fixture.interruptSequence - 1 : fixture.repeated ? 7 : fixture.successor ? 5 + (fixture.interruptRevision ?? 4) - 4 : 4
 const expectedKind = fixture.repeated ? 'bounded_resolution_chain_applied' : fixture.successor ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied'
 let context, vite, offlineGate = false, lastGateAuthorization
 const gateRequests = []
@@ -98,14 +98,14 @@ try {
           items, next_cursor: items.length, has_more: false }))
         await store.finish(state)
       }
-      window.repeated = !!f.repeated; window.interruptRevision = f.interruptRevision ?? 4; window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
+      window.interruptEventId = f.interruptEventId; window.repeated = !!f.repeated; window.interruptRevision = f.interruptRevision ?? 4; window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
     }, fixture)
   }
   await attach(page)
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function(value, ...args) {
-      if (this.name === 'inbox' && (window.repeated ? value.state === 'note_resolution_proven' && value.resolution_proof.header.revision === 5 : window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
+      if (this.name === 'inbox' && (window.interruptEventId ? value.state === 'note_resolution_proven' && value.event_id === window.interruptEventId : window.repeated ? value.state === 'note_resolution_proven' && value.resolution_proof.header.revision === 5 : window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
       return put.call(this, value, ...args)
     }
     try { await adapter.run(); return { refused: false } } catch (error) { return { refused: true, error: String(error?.stack ?? error) } } finally { IDBObjectStore.prototype.put = put }
@@ -116,7 +116,7 @@ try {
   assert.equal(partial.rows.at(-1).state, 'received')
   assert.equal(partial.manifest.applied_cursor, expectedCursor)
   assert.equal(partial.noteHistory.some(r => ['resolution', 'group_transition'].includes(r.record_kind)), !!fixture.successor)
-  assert.equal(partial.sources[0].source_revision, fixture.repeated ? 5 : expectedCursor - 1)
+  assert.equal(partial.sources[0].source_revision, fixture.sourceBeforeAbort ?? (fixture.repeated ? 5 : expectedCursor - 1))
   await page.evaluate(() => adapter.store.close()); await context.close()
   page = await launch(); await attach(page)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), partial)
@@ -136,7 +136,7 @@ try {
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
   }
 
-  assert.equal(before.rows.at(-1).state, fixture.successor && !fixture.repeated ? 'content_note_proven' : 'note_resolution_proven')
+  assert.equal(before.rows.at(-1).state, fixture.finalDeleted || fixture.successor && !fixture.repeated ? 'content_note_proven' : 'note_resolution_proven')
   assert.deepEqual(before.rows.map(row => JSON.parse(row.wire_item)), fixture.items ?? fixture.stores.inbox.map(row => JSON.parse(row.wire_item)))
   if (fixture.selectedNote) {
     const actual = await page.evaluate(async f => {
@@ -246,7 +246,7 @@ try {
   }
   if (fixture.repeated) {
     const sequences = before.rows.filter(r => r.state === 'note_resolution_proven').map(r => r.server_sequence)
-    assert.equal(sequences.length, 2)
+    assert.equal(sequences.length, fixture.expectedResolutionCount ?? 2)
     for (const sequence of sequences) {
       assert.equal(await page.evaluate(async sequence => {
         const state = await adapter.store.read(), original = state.rows.find(r => r.server_sequence === sequence), damaged = structuredClone(original)

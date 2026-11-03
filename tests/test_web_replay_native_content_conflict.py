@@ -52,7 +52,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -175,28 +175,55 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
     if repeated:
-        for path_, identity_, text in ((a, ia, 'NATIVE_PRIVATE_SECOND_A'), (b, ib, 'NATIVE_PRIVATE_SECOND_B')):
-            content(tmp_path, path_, identity_, user, 'edit', note_id='native-conflict', patch={'content': text})
-        for path_, identity_ in ((a, ia), (b, ib)):
-            assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
-        for path_, identity_ in ((a, ia), (b, ib)):
-            receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
-            assert len(content(tmp_path, path_, identity_, user, 'conflicts')) == 1
-        decision = content(tmp_path, a, ia, user, 'conflicts')[0]
-        selected = decision['versions'][-1]
-        assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected['event_id'], now=NOW) == 'Applied'
-        assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
-        for path_, identity_ in ((a, ia), (b, ib)):
-            receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
-            assert content(tmp_path, path_, identity_, user, 'conflicts') == []
+        assert generations >= 2
+        roots = [{'event_id': transport.items[-1]['event']['event_id'], 'sequence': len(transport.items), 'source_before': 3}]
+        source_revision = 4
+        for generation in range(2, generations + 1):
+            if mixed:
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_LINEAR_{generation}'})
+                assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+                for path_, identity_ in ((a, ia), (b, ib)):
+                    receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                source_revision += 1
+            if mixed:
+                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
+            else:
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_GENERATION_{generation}_A'})
+            content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_GENERATION_{generation}_B'})
+            for path_, identity_ in ((a, ia), (b, ib)):
+                assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
+            source_revision += 1
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                assert len(content(tmp_path, path_, identity_, user, 'conflicts')) == 1
+            decision = content(tmp_path, a, ia, user, 'conflicts')[0]
+            selected = next(v for v in decision['versions'] if v['operation'] == 'upsert')
+            assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected['event_id'], now=NOW) == 'Applied'
+            assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+            roots.append({'event_id': transport.items[-1]['event']['event_id'], 'sequence': len(transport.items), 'source_before': source_revision})
+            source_revision += 1
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                assert content(tmp_path, path_, identity_, user, 'conflicts') == []
+        if mixed:
+            content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
+            assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+            fixture['finalDeleted'] = True
         fixture['anchor']['registry']['current_cursor'] = len(transport.items)
         fixture['items'] = transport.items
         fixture['repeated'] = True
         fixture['successor'] = True
-        fixture['selectedNote'] = selected['note']
+        fixture['selectedNote'] = {'deleted': True} if mixed else selected['note']
+        fixture['expectedResolutionCount'] = generations
+        interrupted = roots[len(roots) // 2]
+        fixture['interruptEventId'] = interrupted['event_id']
+        fixture['interruptSequence'] = interrupted['sequence']
+        fixture['sourceBeforeAbort'] = interrupted['source_before']
         path.write_text(json.dumps(fixture), encoding='utf-8')
         result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
-                                capture_output=True, text=True, timeout=180)
+                                capture_output=True, text=True, timeout=300)
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
@@ -217,3 +244,7 @@ def test_native_post_resolution_chain_and_delete_dispatch_in_chromium(tmp_path):
 
 def test_native_two_resolution_generations_dispatch_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, repeated=True)
+
+
+def test_native_repeating_resolution_dispatch_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, generations=4, mixed=True)

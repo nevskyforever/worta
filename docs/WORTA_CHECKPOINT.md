@@ -1,5 +1,82 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-03 — Slice 4/5: repeating choose-version dispatch, no generation cap
+
+Starting SHA `533ffb77ff507c292accb3978fc0e5a1e6a8f50e`, branch `6.0`.
+Requested repeating peer choose-version route: **LOCAL COMPLETE**. Slice 4 and
+full reader qualification remain PARTIAL.
+
+Removed the two-generation restrictions in the production planner, continuation
+owner, replay inventory and admission. One repeating path now handles ordinary
+peer update/delete, a two-peer fork from the current causal base, choose-version
+Resolution2 and subsequent events, with no third/fourth-generation implementation
+or generation-count allowlist. Existing account/event/byte/material limits still
+apply. A fork may follow an ordinary update rather than directly follow a
+Resolution. Choosing the live branch of a delete/edit conflict is explicit
+Resolution authority; ordinary update after a tombstone remains unsupported
+implicit resurrection and still rejects.
+
+The existing successor planner accepts any already authenticated number of
+preceding codec8 Content choose-version roots in the supported single-Note,
+peer-only cohort. It requires exact dense ordering and no earlier pending event,
+selects the effective open group, checks parent publication before the Resolution,
+frontier, selection, dependencies and current sources, and renews its private
+plan through the same entry at apply preparation. Historical authentication also
+checks each parent's server sequence precedes its Resolution. Initial planner,
+unsupported strategy, source/receipt, account and device barriers stay strict.
+
+Source verification works back through authenticated pre-commit owner evidence
+and validates the latest encrypted source. Historical views drop later outcomes
+and retain original received wire, using the recorded source_before/head_before;
+they never create persisted proofs or source counters. The same algorithm works
+for every generation. Already authenticated immutable leaves are reused within
+one snapshot instead of repeatedly decrypting all earlier events; historical DAG,
+head/source and closure checks still run. Group associations retain project,
+Note and bootstrap scope. Each real owner outcome and manifest coverage remain
+atomic. Full zero-origin v10 page reconciliation and restart authentication are
+unchanged in authority and cover all generations.
+
+Actual production Rust writers in independent SQLite databases generate FOUR
+Resolution generations in one loop. Between choices they publish a linear
+update and a concurrent delete/edit conflict, select the live version through
+the real native writer, then publish a final delete after the fourth Resolution.
+Chromium decrypts the final tombstone, preserves all ciphertext/proofs and tests
+multi-page input, exact duplicates, restart, corruption of every generation,
+wrong page/parent/group associations, incompatible history, logout and a native
+transaction abort at a middle Resolution with successful reopen/retry. Unit
+acceptance runs the same owner path for 3 and 5 generations and verifies
+continuation beyond the former second-generation boundary. The previous
+unknown-parent fixture now preserves its selected parent when substituting an
+unknown other parent, avoiding an unintended random codec-serialization failure.
+
+Validation: focused Rust Resolution tests **56 passed**; focused Vitest
+planner/apply/continuation/prefix/replay/transport/readiness **517 passed,
+2 optional tests skipped** (not counted as PASS); final related source/owner
+checks **146 passed**. Complete native Chromium regression **5 passed**
+(239.42 seconds), including the mixed four-generation case and all previous
+cases. A current compiled native headless bridge was reused through the existing
+test harness option for that regression; actual Rust owners/writers were used.
+Typecheck/build, diff checks and maintained quick acceptance PASS. Maintenance
+was dry-run only; no unrelated/user data deletion. Existing Rust/build warnings
+remain non-fatal. No backend change or protected server-to-browser recipient
+acceptance is claimed; this is the existing isolated integration transport.
+
+Strategy boundary: the frozen full ordinary1/Resolution2 reader claim includes
+choose_version, manual_merge, keep_both and delete. Low-level owners already
+have the other strategies, but this production replay cohort is authorized and
+accepted for choose_version. This task adds no strategy or proof format and
+makes no full-capability declaration. The wider strategy/lineage/source and
+server acceptance requirements still prevent closing the conservative readiness
+items. **Fully closed blockers: 0/10**; all ten existing blockers remain.
+
+Commit/push target `origin/6.0`. No capability PUT; `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`. Registration CLOSED,
+PUBLIC RELEASE BLOCKED. Main, AGENTS.md, CI and release scripts unchanged;
+CI is not manually dispatched or polled. Overall progress **89.36%**. The next
+necessary Slice 4 dependency is ordinary resurrection or author/self-echo
+qualification; repeating choose-version generation limits no longer block it.
+
+
 ## 2026-11-03 — Slice 4/5: two genuine choose-version Resolution generations
 
 Starting SHA `a0e873110ab69ad684bd812fb7b4bf2826823155`, branch `6.0`.

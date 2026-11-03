@@ -160,6 +160,7 @@ async function authenticateResolutionHistoryCore(scope:BrowserSyncScope,input:Re
     const parents:Array<{id:string;operation:'upsert'|'delete';note:NoteSyncRecord|NoteSyncTombstone;candidate:BrowserNoteCandidate}>=[]
     for(let i=0;i<e.parents.length;i++){
       const p=e.parents[i]!;exact(p,['event_id','revision','operation','history_digest','inbox_digest','publication_source','server_sequence','local_mutation_generation','frozen_version_digest','snapshot_digest'])
+      if(p.server_sequence>=r.server_sequence)bad()
       const c=dag.events.get(p.event_id),member=group.members.find(m=>m.event_id===p.event_id)
       if(p.event_id!==r.parent_event_ids[i]||!c||!member||c.record_kind!=='candidate'||c.project_id!==r.project_id||c.note_id!==r.note_id||c.bootstrap_id!==r.bootstrap_id||c.header.parent_event_id!==group.common_parent_event_id||c.header.revision!==group.tip_revision||p.revision!==c.header.revision||p.operation!==c.header.operation||p.history_digest!==c.record_digest)bad()
       // Common ancestors may themselves be Resolution outputs. Authenticate them first,

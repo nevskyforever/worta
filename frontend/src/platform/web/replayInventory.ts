@@ -69,7 +69,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
       ||!replaySame(before.sources,after.sources)||!replaySame(before.notes,after.notes)||!replaySame(before.bindings,after.bindings)||!replaySame(before.owners,after.owners)
       ||!group||group.record_kind!=='group'||group.members.length!==2||group.conflict_generation!==1
       ||!candidate||candidate.record_kind!=='candidate'||candidate.projection!==null||candidate.record_digest!==proof.candidate_digest
-      ||!old.some(r=>r.record_kind==='resolution'&&r.event_id===group.common_parent_event_id)
+      ||!old.some(r=>(r.record_kind==='resolution'||r.record_kind==='candidate')&&r.event_id===group.common_parent_event_id)
       ||!head||head.record_kind!=='head'||!newHead||newHead.record_kind!=='head'
       ||!replaySame(newHead,{...head,head_revision:head.head_revision+1,tip_event_ids:group.tip_event_ids})
       ||next.length!==old.length+2||old.filter(r=>r!==head).some(r=>!next.some(v=>replaySame(r,v))))fail()
@@ -219,7 +219,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const future = noteHistory.result.map(raw => readFutureHistoryRecord(raw, s))
       const resolutions = future.filter(r => r.record_kind === 'resolution').sort((a,b)=>a.server_sequence-b.server_sequence)
       const transitions = future.filter(r => r.record_kind === 'group_transition')
-      if (resolutions.length > 2 || resolutions.length !== transitions.length || version < 6 && resolutions.length) fail()
+      if (resolutions.length !== transitions.length || version < 6 && resolutions.length) fail()
       const closed = resolutions[0]
       for (const resolution of resolutions) {
         const transition=transitions.find(t=>t.resolution_event_id===resolution.event_id)

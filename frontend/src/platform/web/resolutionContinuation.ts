@@ -100,7 +100,6 @@ export class BrowserResolutionContinuationRuntime {
    const authenticated=await step(this.#history(s,v,amk,current)),history=authenticated.history,sourceRoute=await step(verifyHSource(s,v,history,amk,current,undefined,authenticated.mixedValidated))
    const future=readFutureInboxRecord(v.rows.find((r:any)=>r.server_sequence===sequence),s)
    if(future.state!=='received'||future.server_sequence>v.cursor.pull_cursor)fail('conflicting_record')
-   if(history.resolutions.size>1)fail('unsupported_local_source') // Two-generation replay is terminal until a later continuation contract is accepted.
    if(sourceRoute==='mixed'&&history.rows.some(r=>r.state==='received'&&r.server_sequence<sequence))fail('note_orphan')
    const row=validateBrowserInboxRecord(future,s),wire=JSON.parse(row.wire_item),content=row.protocol_version===3
    if(wire.event.device_id===s.deviceId||wire.event.entity_type!=='note'||content&&wire.event.operation!=='event'||!content&&!['upsert','delete'].includes(wire.event.operation))fail('unsupported_local_source')
