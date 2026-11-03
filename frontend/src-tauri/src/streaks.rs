@@ -423,7 +423,11 @@ mod tests {
         });
 
         assert_eq!(
-            canonical_local_status(local.as_object().unwrap(), "2026-09-20", entity.as_object().unwrap()),
+            canonical_local_status(
+                local.as_object().unwrap(),
+                "2026-09-20",
+                entity.as_object().unwrap()
+            ),
             "Active",
         );
         assert_eq!(

@@ -164,7 +164,9 @@ fn prepare_reference(
         return Err(MetadataError::Conflict);
     }
     let (bootstrap,revision,generation):(String,i64,i64)=tx.query_row("SELECT bootstrap_id,revision+1,generation+1 FROM cloud_sync_metadata_events WHERE account_id=?1 AND project_id=?2 AND event_id=?3 AND state='applied'",params![scope.account_id,project,ids[0]],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?;
-    if revision>9_007_199_254_740_991 || generation>9_007_199_254_740_991 { return Err(MetadataError::Invalid); }
+    if revision > 9_007_199_254_740_991 || generation > 9_007_199_254_740_991 {
+        return Err(MetadataError::Invalid);
+    }
     let event = metadata::new_event_id()?;
     let ordinal:i64=tx.query_row("SELECT COALESCE(MAX(local_ordinal),0)+1 FROM cloud_sync_outbox WHERE account_id=?1 AND device_id=?2",params![scope.account_id,scope.device_id],|r|r.get(0))?;
     tx.execute("INSERT INTO cloud_sync_outbox(event_id,account_id,device_id,project_id,entity_id,entity_type,operation,revision,updated_at,created_at,parent_event_id,local_ordinal,lifecycle) VALUES(?1,?2,?3,?4,?4,'project_metadata','upsert',?5,?6,?6,?7,?8,'unsealed')",params![event,scope.account_id,scope.device_id,project,revision,now,ids[0],ordinal])?;

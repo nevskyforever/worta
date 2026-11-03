@@ -232,70 +232,198 @@ fn apply_event(
 }
 
 #[cfg(test)]
-pub(crate) fn apply_ledger_rule_fixture(state: &mut Value, event_type: &str, delta: f64, context: &Map<String,Value>) -> Result<(),String> {
-    apply_event(state,event_type,"ledger-rule-fixture",delta,context,"p")
+pub(crate) fn apply_ledger_rule_fixture(
+    state: &mut Value,
+    event_type: &str,
+    delta: f64,
+    context: &Map<String, Value>,
+) -> Result<(), String> {
+    apply_event(
+        state,
+        event_type,
+        "ledger-rule-fixture",
+        delta,
+        context,
+        "p",
+    )
 }
 
 /// The immutable loss identity also keys notifications, including remote replay.
-pub(crate) fn append_loss_notifications(before:&Value,after:&mut Value,id:&str,now:&str)->Result<(),String>{
-    let length=after["global_streak"]["last_global_streak_lose_len"].as_u64().ok_or("invalid_game_payload")?;
-    let old=before["gamer"]["health"].as_f64().ok_or("invalid_game_payload")?;
-    let new=after["gamer"]["health"].as_f64().ok_or("invalid_game_payload")?;
-    let damage=old.max(0.0).min(length as f64*5.0);
-    let old_potions=before["gamer"]["items"]["Зелья"]["Зелье воскрешения"].as_u64().unwrap_or(0);
-    let new_potions=after["gamer"]["items"]["Зелья"]["Зелье воскрешения"].as_u64().unwrap_or(0);
-    let revived=old_potions==new_potions+1 && new>0.0;
-    let root=after.as_object_mut().ok_or("invalid_game_payload")?;
-    let notices=root.entry("notifications").or_insert_with(||json!({"new":[],"read":[]}));
-    let existing=notices["new"].as_array().into_iter().flatten().chain(notices["read"].as_array().into_iter().flatten())
-        .filter_map(|v|v["fields"]["notification_id"].as_str()).map(str::to_owned).collect::<std::collections::HashSet<_>>();
-    let unread=notices["new"].as_array_mut().ok_or("invalid_game_payload")?;
-    let messages=[(format!("streak-loss:{id}"),format!("🥺 СТРИК ПОТЕРЯН: {length} д. Урон: {damage} HP. Здоровье: {old} → {new} HP."),true),
-        (format!("streak-revival:{id}"),format!("💀 Зелье воскрешения спасло вас! Здоровье восстановлено до {new} HP."),revived)];
-    for (key,text,emit) in messages {if emit&&!existing.contains(&key){unread.push(json!({"__type__":"Notification","fields":{"notification_id":key,"text":text,"tag":"game","date_create":now}}));}}
+pub(crate) fn append_loss_notifications(
+    before: &Value,
+    after: &mut Value,
+    id: &str,
+    now: &str,
+) -> Result<(), String> {
+    let length = after["global_streak"]["last_global_streak_lose_len"]
+        .as_u64()
+        .ok_or("invalid_game_payload")?;
+    let old = before["gamer"]["health"]
+        .as_f64()
+        .ok_or("invalid_game_payload")?;
+    let new = after["gamer"]["health"]
+        .as_f64()
+        .ok_or("invalid_game_payload")?;
+    let damage = old.max(0.0).min(length as f64 * 5.0);
+    let old_potions = before["gamer"]["items"]["Зелья"]["Зелье воскрешения"]
+        .as_u64()
+        .unwrap_or(0);
+    let new_potions = after["gamer"]["items"]["Зелья"]["Зелье воскрешения"]
+        .as_u64()
+        .unwrap_or(0);
+    let revived = old_potions == new_potions + 1 && new > 0.0;
+    let root = after.as_object_mut().ok_or("invalid_game_payload")?;
+    let notices = root
+        .entry("notifications")
+        .or_insert_with(|| json!({"new":[],"read":[]}));
+    let existing = notices["new"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .chain(notices["read"].as_array().into_iter().flatten())
+        .filter_map(|v| v["fields"]["notification_id"].as_str())
+        .map(str::to_owned)
+        .collect::<std::collections::HashSet<_>>();
+    let unread = notices["new"]
+        .as_array_mut()
+        .ok_or("invalid_game_payload")?;
+    let messages = [
+        (
+            format!("streak-loss:{id}"),
+            format!("🥺 СТРИК ПОТЕРЯН: {length} д. Урон: {damage} HP. Здоровье: {old} → {new} HP."),
+            true,
+        ),
+        (
+            format!("streak-revival:{id}"),
+            format!("💀 Зелье воскрешения спасло вас! Здоровье восстановлено до {new} HP."),
+            revived,
+        ),
+    ];
+    for (key, text, emit) in messages {
+        if emit && !existing.contains(&key) {
+            unread.push(json!({"__type__":"Notification","fields":{"notification_id":key,"text":text,"tag":"game","date_create":now}}));
+        }
+    }
     Ok(())
 }
 
 /// Calendar maintenance is also invoked when no Progress event exists.
 /// An emptied series is the durable processed-loss marker; the immutable cloud
 /// action adds its stable identity when Game synchronization is active.
-pub(crate) fn refresh_global_loss(connection: &Connection, day: &str, now: &str) -> Result<bool,String> {
-    if !GameApplicationService::enabled(connection) { return Ok(false); }
-    let raw=connection.query_row("SELECT payload_json FROM game_state WHERE id=1",[],|r|r.get::<_,String>(0)).optional().map_err(|e|e.to_string())?;
-    let Some(raw)=raw else { return Ok(false); };
-    let before:Value=serde_json::from_str(&raw).map_err(|e|e.to_string())?;
-    let streak=crate::game_projection::streak_base(&before["global_streak"],true)?;
-    if streak["enabled"]!=true || streak["history"].as_array().is_none_or(|h|h.is_empty()) { return Ok(false); }
-    let last=streak["history"].as_array().and_then(|h|h.last()).and_then(|v|v["day"].as_str()).and_then(crate::streaks::date_days).ok_or("invalid_game_payload")?;
-    if crate::streaks::date_days(day).is_none_or(|today|today<last+2) { return Ok(false); }
-    let lost=crate::game_codec::loss_after(&streak,day)?;
-    let mut after=if let Some(after)=crate::game_writer::capture_loss(connection,&before,day,now)? { after } else {
-        let mut after=before.clone();
-        let g=after["gamer"].as_object_mut().ok_or("invalid_game_payload")?;
-        let mut inventory=Vec::new();
-        if let Some(categories)=g.get("items").and_then(Value::as_object) {
-            for (category,items) in categories { if let Some(items)=items.as_object() { for (key,count) in items { if count.as_u64().is_some_and(|n|n>0) { inventory.push(json!({"category":category,"item_id":key,"count":count})); } } } }
+pub(crate) fn refresh_global_loss(
+    connection: &Connection,
+    day: &str,
+    now: &str,
+) -> Result<bool, String> {
+    if !GameApplicationService::enabled(connection) {
+        return Ok(false);
+    }
+    let raw = connection
+        .query_row("SELECT payload_json FROM game_state WHERE id=1", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(raw) = raw else {
+        return Ok(false);
+    };
+    let before: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let streak = crate::game_projection::streak_base(&before["global_streak"], true)?;
+    if streak["enabled"] != true || streak["history"].as_array().is_none_or(|h| h.is_empty()) {
+        return Ok(false);
+    }
+    let last = streak["history"]
+        .as_array()
+        .and_then(|h| h.last())
+        .and_then(|v| v["day"].as_str())
+        .and_then(crate::streaks::date_days)
+        .ok_or("invalid_game_payload")?;
+    if crate::streaks::date_days(day).is_none_or(|today| today < last + 2) {
+        return Ok(false);
+    }
+    let lost = crate::game_codec::loss_after(&streak, day)?;
+    let mut after = if let Some(after) =
+        crate::game_writer::capture_loss(connection, &before, day, now)?
+    {
+        after
+    } else {
+        let mut after = before.clone();
+        let g = after["gamer"]
+            .as_object_mut()
+            .ok_or("invalid_game_payload")?;
+        let mut inventory = Vec::new();
+        if let Some(categories) = g.get("items").and_then(Value::as_object) {
+            for (category, items) in categories {
+                if let Some(items) = items.as_object() {
+                    for (key, count) in items {
+                        if count.as_u64().is_some_and(|n| n > 0) {
+                            inventory
+                                .push(json!({"category":category,"item_id":key,"count":count}));
+                        }
+                    }
+                }
+            }
         }
-        let max=number_field(g,"max_health",100.0).max(0.0);
-        let mut base=json!({"health":format!("{:.6}",number_field(g,"health",max).clamp(0.0,max)),"max_health":format!("{max:.6}"),"inventory":inventory});
-        crate::game_sync::loss_health(&mut base,lost["lost_length"].as_u64().ok_or("invalid_game_payload")?)?;
-        g.insert("health".into(),json!(base["health"].as_str().ok_or("invalid_game_payload")?.parse::<f64>().map_err(|_|"invalid_game_payload")?));
-        let potion=base["inventory"].as_array().and_then(|v|v.iter().find(|v|v["category"]=="Зелья"&&v["item_id"]=="Зелье воскрешения")).map(|v|v["count"].clone()).unwrap_or(json!(0));
+        let max = number_field(g, "max_health", 100.0).max(0.0);
+        let mut base = json!({"health":format!("{:.6}",number_field(g,"health",max).clamp(0.0,max)),"max_health":format!("{max:.6}"),"inventory":inventory});
+        crate::game_sync::loss_health(
+            &mut base,
+            lost["lost_length"].as_u64().ok_or("invalid_game_payload")?,
+        )?;
+        g.insert(
+            "health".into(),
+            json!(base["health"]
+                .as_str()
+                .ok_or("invalid_game_payload")?
+                .parse::<f64>()
+                .map_err(|_| "invalid_game_payload")?),
+        );
+        let potion = base["inventory"]
+            .as_array()
+            .and_then(|v| {
+                v.iter()
+                    .find(|v| v["category"] == "Зелья" && v["item_id"] == "Зелье воскрешения")
+            })
+            .map(|v| v["count"].clone())
+            .unwrap_or(json!(0));
         // Preserve every unrelated legacy inventory entry and extension.
-        if g.get("items").and_then(|v|v.get("Зелья")).and_then(Value::as_object).is_some_and(|v|v.contains_key("Зелье воскрешения")) {
-            g["items"]["Зелья"]["Зелье воскрешения"]=potion;
+        if g.get("items")
+            .and_then(|v| v.get("Зелья"))
+            .and_then(Value::as_object)
+            .is_some_and(|v| v.contains_key("Зелье воскрешения"))
+        {
+            g["items"]["Зелья"]["Зелье воскрешения"] = potion;
         }
-        after["global_streak"]=crate::game_projection::streak_fields(&lost,true)?;
+        after["global_streak"] = crate::game_projection::streak_fields(&lost, true)?;
         after
     };
     // capture_loss already froze its exact payload; timestamp is local-only and
     // maintained by the common materializer below, before an intent is retained.
-    after["gamer"]["last_health_recovery_at"]=json!({"__type__":"datetime","value":now});
-    let id=if let Some(account)=connection.query_row("SELECT canonical_user_id FROM cloud_account_bindings LIMIT 1",[],|r|r.get::<_,String>(0)).optional().map_err(|e|e.to_string())? {
-        crate::game_sync::loss_id(&account,&streak)
-    } else {format!("{}:{}",lost["lost_day"].as_str().unwrap_or(day),lost["lost_length"].as_u64().unwrap_or(0))};
-    append_loss_notifications(&before,&mut after,&id,now)?;
-    connection.execute("UPDATE game_state SET schema_version=2,payload_json=?1,updated_at=?2 WHERE id=1",params![after.to_string(),now]).map_err(|e|e.to_string())?;
+    after["gamer"]["last_health_recovery_at"] = json!({"__type__":"datetime","value":now});
+    let id = if let Some(account) = connection
+        .query_row(
+            "SELECT canonical_user_id FROM cloud_account_bindings LIMIT 1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+    {
+        crate::game_sync::loss_id(&account, &streak)
+    } else {
+        format!(
+            "{}:{}",
+            lost["lost_day"].as_str().unwrap_or(day),
+            lost["lost_length"].as_u64().unwrap_or(0)
+        )
+    };
+    append_loss_notifications(&before, &mut after, &id, now)?;
+    connection
+        .execute(
+            "UPDATE game_state SET schema_version=2,payload_json=?1,updated_at=?2 WHERE id=1",
+            params![after.to_string(), now],
+        )
+        .map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -306,14 +434,24 @@ pub fn process_pending_events(
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
-    let day=crate::streaks::logical_writing_day(&transaction)?;
-    let now=GameApplicationService::now(&transaction).map_err(|e|e.to_string())?;
-    let now=format!("{}.000000Z",now.get(..19).ok_or("invalid_game_payload")?);
-    refresh_global_loss(&transaction,&day,&now)?;
+    let day = crate::streaks::logical_writing_day(&transaction)?;
+    let now = GameApplicationService::now(&transaction).map_err(|e| e.to_string())?;
+    let now = format!("{}.000000Z", now.get(..19).ok_or("invalid_game_payload")?);
+    refresh_global_loss(&transaction, &day, &now)?;
     let mut statement = transaction
         .prepare("SELECT event_id,event_type,project_id,delta_symbols,context_json,version,attempt_count,stage_id,progress_id FROM domain_events WHERE consumer='game' AND processed_at IS NULL AND status != 'failed' ORDER BY created_at,event_id LIMIT ?1")
         .map_err(|error| error.to_string())?;
-    let rows: Vec<(String, String, String, Option<f64>, String, i64, i64, Option<String>, Option<String>)> = statement
+    let rows: Vec<(
+        String,
+        String,
+        String,
+        Option<f64>,
+        String,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+    )> = statement
         .query_map([limit.max(1)], |row| {
             Ok((
                 row.get(0)?,
@@ -333,8 +471,21 @@ pub fn process_pending_events(
     drop(statement);
 
     let mut summary = ProcessSummary::default();
-    for (event_id, event_type, project_id, delta, context_json, version, attempts, stage_id, progress_id) in rows {
-        transaction.execute_batch("SAVEPOINT game_domain_action").map_err(|error|error.to_string())?;
+    for (
+        event_id,
+        event_type,
+        project_id,
+        delta,
+        context_json,
+        version,
+        attempts,
+        stage_id,
+        progress_id,
+    ) in rows
+    {
+        transaction
+            .execute_batch("SAVEPOINT game_domain_action")
+            .map_err(|error| error.to_string())?;
         let result = (|| {
             if version != EVENT_VERSION {
                 return Err(format!("unsupported event version: {version}"));
@@ -353,17 +504,42 @@ pub fn process_pending_events(
                 .map_err(|error| error.to_string())?;
             let mut state: Value =
                 serde_json::from_str(&raw_state).map_err(|error| error.to_string())?;
-            if !crate::game_writer::already_recorded(&transaction,&event_id,&project_id,stage_id.as_deref(),progress_id.as_deref(),delta.unwrap_or(0.0))? {
-            apply_event(
-                &mut state,
-                &event_type,
+            if !crate::game_writer::already_recorded(
+                &transaction,
                 &event_id,
-                delta.unwrap_or(0.0),
-                context,
                 &project_id,
-            )?;
-            let now:String=transaction.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%S.000000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-            crate::game_writer::capture_domain(&transaction,&event_id,&event_type,&project_id,stage_id.as_deref(),progress_id.as_deref(),delta.unwrap_or(0.0),&raw_state,&state,context,&now)?;
+                stage_id.as_deref(),
+                progress_id.as_deref(),
+                delta.unwrap_or(0.0),
+            )? {
+                apply_event(
+                    &mut state,
+                    &event_type,
+                    &event_id,
+                    delta.unwrap_or(0.0),
+                    context,
+                    &project_id,
+                )?;
+                let now: String = transaction
+                    .query_row(
+                        "SELECT strftime('%Y-%m-%dT%H:%M:%S.000000Z','now')",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                crate::game_writer::capture_domain(
+                    &transaction,
+                    &event_id,
+                    &event_type,
+                    &project_id,
+                    stage_id.as_deref(),
+                    progress_id.as_deref(),
+                    delta.unwrap_or(0.0),
+                    &raw_state,
+                    &state,
+                    context,
+                    &now,
+                )?;
             }
             transaction.execute(
                 "UPDATE game_state SET schema_version=?1,payload_json=?2,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=1",
@@ -376,9 +552,13 @@ pub fn process_pending_events(
             Ok(())
         })();
         if result.is_err() {
-            transaction.execute_batch("ROLLBACK TO game_domain_action").map_err(|error|error.to_string())?;
+            transaction
+                .execute_batch("ROLLBACK TO game_domain_action")
+                .map_err(|error| error.to_string())?;
         }
-        transaction.execute_batch("RELEASE game_domain_action").map_err(|error|error.to_string())?;
+        transaction
+            .execute_batch("RELEASE game_domain_action")
+            .map_err(|error| error.to_string())?;
         match result {
             Ok(()) => summary.processed += 1,
             Err(error) => {
@@ -805,15 +985,21 @@ fn integer_field(object: &Map<String, Value>, key: &str, default: i64) -> i64 {
 
 const MAX_DEVELOPER_STREAK_LENGTH: i64 = 10_000;
 
-fn developer_streak_key(kind: &str, project_id: Option<&str>, stage_id: Option<&str>) -> GameResult<Option<String>> {
+fn developer_streak_key(
+    kind: &str,
+    project_id: Option<&str>,
+    stage_id: Option<&str>,
+) -> GameResult<Option<String>> {
     match kind {
         "global" if project_id.is_none() && stage_id.is_none() => Ok(None),
         "project" if project_id.is_some() && stage_id.is_none() => {
             Ok(Some(format!("project:{}", project_id.unwrap())))
         }
-        "stage" if project_id.is_some() && stage_id.is_some() => {
-            Ok(Some(format!("stage:{}:{}", project_id.unwrap(), stage_id.unwrap())))
-        }
+        "stage" if project_id.is_some() && stage_id.is_some() => Ok(Some(format!(
+            "stage:{}:{}",
+            project_id.unwrap(),
+            stage_id.unwrap()
+        ))),
         _ => Err(GameError::Validation("Некорректная цель стрика.".into())),
     }
 }
@@ -832,7 +1018,11 @@ fn current_streak_length(fields: &Map<String, Value>, history_key: &str) -> i64 
     crate::streaks::streak_summary(fields.get(history_key)).1 as i64
 }
 
-fn restore_streak_length(fields: &Map<String, Value>, history_key: &str, loss_key: &str) -> GameResult<i64> {
+fn restore_streak_length(
+    fields: &Map<String, Value>,
+    history_key: &str,
+    loss_key: &str,
+) -> GameResult<i64> {
     let current = current_streak_length(fields, history_key);
     if current > 0 {
         return Ok(current);
@@ -2478,18 +2668,27 @@ impl GameApplicationService {
     where
         F: FnOnce(&mut Value, &mut OsGameRng, &str) -> GameResult<(Option<String>, Option<Value>)>,
     {
-        Self::mutate_portable(developer_override,None,mutator)
+        Self::mutate_portable(developer_override, None, mutator)
     }
 
-    fn mutate_portable<F>(developer_override: bool, inventory:Option<crate::game_writer::InventoryIntent>, mutator: F) -> GameResult<GameCommandResponse>
+    fn mutate_portable<F>(
+        developer_override: bool,
+        inventory: Option<crate::game_writer::InventoryIntent>,
+        mutator: F,
+    ) -> GameResult<GameCommandResponse>
     where
         F: FnOnce(&mut Value, &mut OsGameRng, &str) -> GameResult<(Option<String>, Option<Value>)>,
     {
         let mut connection = crate::open_projects_database().map_err(GameError::Database)?;
-        Self::mutate_portable_sqlite(&mut connection,developer_override,inventory,mutator)
+        Self::mutate_portable_sqlite(&mut connection, developer_override, inventory, mutator)
     }
 
-    pub(crate) fn mutate_portable_sqlite<F>(connection:&mut Connection, developer_override: bool, inventory:Option<crate::game_writer::InventoryIntent>, mutator: F) -> GameResult<GameCommandResponse>
+    pub(crate) fn mutate_portable_sqlite<F>(
+        connection: &mut Connection,
+        developer_override: bool,
+        inventory: Option<crate::game_writer::InventoryIntent>,
+        mutator: F,
+    ) -> GameResult<GameCommandResponse>
     where
         F: FnOnce(&mut Value, &mut OsGameRng, &str) -> GameResult<(Option<String>, Option<Value>)>,
     {
@@ -2504,17 +2703,36 @@ impl GameApplicationService {
             .transaction()
             .map_err(|error| GameError::Database(error.to_string()))?;
         let mut state = Self::load(&tx)?;
-        let before_raw:String=tx.query_row("SELECT payload_json FROM game_state WHERE id=1",[],|r|r.get(0)).map_err(|e|GameError::Database(e.to_string()))?;
+        let before_raw: String = tx
+            .query_row("SELECT payload_json FROM game_state WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .map_err(|e| GameError::Database(e.to_string()))?;
         let now = Self::now(&tx)?;
         let effects_now = Self::local_now(&tx)?;
         let mut rng = OsGameRng;
         let (message, result) = mutator(&mut state, &mut rng, &now)?;
         if developer_override {
-            crate::game_sync::record_developer_override(&tx,&state,&now).map_err(GameError::Database)?;
+            crate::game_sync::record_developer_override(&tx, &state, &now)
+                .map_err(GameError::Database)?;
         }
-        if let Some(intent)=inventory {
-            let portable_now:String=tx.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%S.000000Z','now')",[],|r|r.get(0)).map_err(|e|GameError::Database(e.to_string()))?;
-            crate::game_writer::capture_inventory(&tx,&intent,&before_raw,&state,result.as_ref(),&portable_now).map_err(GameError::Database)?;
+        if let Some(intent) = inventory {
+            let portable_now: String = tx
+                .query_row(
+                    "SELECT strftime('%Y-%m-%dT%H:%M:%S.000000Z','now')",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(|e| GameError::Database(e.to_string()))?;
+            crate::game_writer::capture_inventory(
+                &tx,
+                &intent,
+                &before_raw,
+                &state,
+                result.as_ref(),
+                &portable_now,
+            )
+            .map_err(GameError::Database)?;
         }
         tx.execute(
             "UPDATE game_state SET schema_version=?1,payload_json=?2,updated_at=?3 WHERE id=1",
@@ -2646,20 +2864,25 @@ impl GameApplicationService {
         count: i64,
         operation: &str,
     ) -> GameResult<GameCommandResponse> {
-        let mut connection=crate::open_projects_database().map_err(GameError::Database)?;
-        Self::inventory_sqlite(&mut connection,category,item_id,count,operation)
+        let mut connection = crate::open_projects_database().map_err(GameError::Database)?;
+        Self::inventory_sqlite(&mut connection, category, item_id, count, operation)
     }
 
     pub(crate) fn inventory_sqlite(
-        connection:&mut Connection,
+        connection: &mut Connection,
         category: String,
         item_id: String,
         count: i64,
         operation: &str,
     ) -> GameResult<GameCommandResponse> {
         let count = checked_count(count)?;
-        let intent=crate::game_writer::InventoryIntent{operation:operation.into(),category:category.clone(),item_id:item_id.clone(),count};
-        Self::mutate_portable_sqlite(connection,false,Some(intent),move |state, rng, now| {
+        let intent = crate::game_writer::InventoryIntent {
+            operation: operation.into(),
+            category: category.clone(),
+            item_id: item_id.clone(),
+            count,
+        };
+        Self::mutate_portable_sqlite(connection, false, Some(intent), move |state, rng, now| {
             let gamer = gamer_object(state)?;
             let item = catalog_item(&category, &item_id)
                 .ok_or_else(|| GameError::NotFound("Предмет не найден.".into()))?;
@@ -3061,17 +3284,24 @@ fn validate_developer_streak_target(
                     |row| row.get::<_, bool>(0),
                 )
                 .map_err(|error| GameError::Database(error.to_string()))?;
-            exists.then_some(key).ok_or_else(|| GameError::NotFound("Проект не найден.".into()))
+            exists
+                .then_some(key)
+                .ok_or_else(|| GameError::NotFound("Проект не найден.".into()))
         }
         "stage" => {
             let exists = connection
                 .query_row(
                     "SELECT EXISTS(SELECT 1 FROM stages WHERE id=?1 AND project_id=?2)",
-                    [request.stage_id.as_deref().unwrap(), request.project_id.as_deref().unwrap()],
+                    [
+                        request.stage_id.as_deref().unwrap(),
+                        request.project_id.as_deref().unwrap(),
+                    ],
                     |row| row.get::<_, bool>(0),
                 )
                 .map_err(|error| GameError::Database(error.to_string()))?;
-            exists.then_some(key).ok_or_else(|| GameError::NotFound("Источник не найден в выбранном проекте.".into()))
+            exists.then_some(key).ok_or_else(|| {
+                GameError::NotFound("Источник не найден в выбранном проекте.".into())
+            })
         }
         _ => unreachable!("developer_streak_key validates the target type"),
     }
@@ -3080,14 +3310,21 @@ fn validate_developer_streak_target(
 fn developer_streak_fields_mut<'a>(
     root: &'a mut Value,
     key: Option<&str>,
-) -> GameResult<(&'a mut Map<String, Value>, &'static str, &'static str, &'static str)> {
+) -> GameResult<(
+    &'a mut Map<String, Value>,
+    &'static str,
+    &'static str,
+    &'static str,
+)> {
     let root = game_object(root)?;
     if let Some(key) = key {
         let states = root
             .entry("project_game_state")
             .or_insert_with(|| Value::Object(Map::new()))
             .as_object_mut()
-            .ok_or_else(|| GameError::InvalidState("Состояние локальных стриков некорректно.".into()))?;
+            .ok_or_else(|| {
+                GameError::InvalidState("Состояние локальных стриков некорректно.".into())
+            })?;
         let fields = states
             .get_mut(key)
             .and_then(Value::as_object_mut)
@@ -3098,8 +3335,15 @@ fn developer_streak_fields_mut<'a>(
             .entry("global_streak")
             .or_insert_with(|| Value::Object(Map::new()))
             .as_object_mut()
-            .ok_or_else(|| GameError::InvalidState("Состояние глобального стрика некорректно.".into()))?;
-        Ok((fields, "global_streaks", "global_streak_status", "last_global_streak_lose_len"))
+            .ok_or_else(|| {
+                GameError::InvalidState("Состояние глобального стрика некорректно.".into())
+            })?;
+        Ok((
+            fields,
+            "global_streaks",
+            "global_streak_status",
+            "last_global_streak_lose_len",
+        ))
     }
 }
 
@@ -3113,9 +3357,14 @@ impl GameApplicationService {
         let connection = crate::open_projects_database().map_err(GameError::Database)?;
         Self::owner(&connection)?;
         let root = Self::load(&connection)?;
-        let logical_day = crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
-        let root_map = root.as_object().ok_or_else(|| GameError::InvalidState("Game state is not an object".into()))?;
-        let states = root_map.get("project_game_state").and_then(Value::as_object);
+        let logical_day =
+            crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
+        let root_map = root
+            .as_object()
+            .ok_or_else(|| GameError::InvalidState("Game state is not an object".into()))?;
+        let states = root_map
+            .get("project_game_state")
+            .and_then(Value::as_object);
         let global = root_map.get("global_streak").and_then(Value::as_object);
         let mut targets = Vec::new();
         if let Some(fields) = global {
@@ -3130,16 +3379,30 @@ impl GameApplicationService {
         let mut statement = connection.prepare(
             "SELECT id, NULL, name FROM projects UNION ALL SELECT id, project_id, name FROM stages ORDER BY project_id, name",
         ).map_err(|error| GameError::Database(error.to_string()))?;
-        let rows = statement.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?))
-        }).map_err(|error| GameError::Database(error.to_string()))?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|error| GameError::Database(error.to_string()))?;
         for row in rows {
-            let (id, parent_id, name) = row.map_err(|error| GameError::Database(error.to_string()))?;
+            let (id, parent_id, name) =
+                row.map_err(|error| GameError::Database(error.to_string()))?;
             let (kind, key, project_id, stage_id) = match parent_id {
-                Some(project_id) => ("stage", format!("stage:{project_id}:{id}"), project_id, Some(id)),
+                Some(project_id) => (
+                    "stage",
+                    format!("stage:{project_id}:{id}"),
+                    project_id,
+                    Some(id),
+                ),
                 None => ("project", format!("project:{id}"), id, None),
             };
-            let fields = states.and_then(|states| states.get(&key)).and_then(Value::as_object);
+            let fields = states
+                .and_then(|states| states.get(&key))
+                .and_then(Value::as_object);
             let empty = Map::new();
             let fields = fields.unwrap_or(&empty);
             let (last, length, _) = crate::streaks::streak_summary(fields.get("streaks"));
@@ -3153,26 +3416,45 @@ impl GameApplicationService {
         Ok(json!({"logical_day":logical_day,"targets":targets}))
     }
 
-    pub fn developer_create_streak_series(request: DeveloperStreakRequest) -> GameResult<GameCommandResponse> {
+    pub fn developer_create_streak_series(
+        request: DeveloperStreakRequest,
+    ) -> GameResult<GameCommandResponse> {
         if !crate::developer_mode_available() {
-            return Err(GameError::PrerequisiteMissing("Режим разработчика недоступен в release-сборке.".into()));
+            return Err(GameError::PrerequisiteMissing(
+                "Режим разработчика недоступен в release-сборке.".into(),
+            ));
         }
         let length = request.length.unwrap_or(0);
         if !(1..=MAX_DEVELOPER_STREAK_LENGTH).contains(&length) {
-            return Err(GameError::Validation("Количество дней должно быть от 1 до 10000.".into()));
+            return Err(GameError::Validation(
+                "Количество дней должно быть от 1 до 10000.".into(),
+            ));
         }
         let connection = crate::open_projects_database().map_err(GameError::Database)?;
         Self::owner(&connection)?;
         let key = validate_developer_streak_target(&connection, &request)?;
-        let logical_day = crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
+        let logical_day =
+            crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
         let yesterday = crate::streaks::date_days(&logical_day)
-            .ok_or_else(|| GameError::Validation("Некорректный писательский день.".into()))? - 1;
+            .ok_or_else(|| GameError::Validation("Некорректный писательский день.".into()))?
+            - 1;
         Self::mutate_classified(true, move |state, _rng, _now| {
-            let (fields, history_key, status_key, _) = developer_streak_fields_mut(state, key.as_deref())?;
-            fields.insert(history_key.into(), Value::Array(streak_series_ending_at(yesterday, length)));
+            let (fields, history_key, status_key, _) =
+                developer_streak_fields_mut(state, key.as_deref())?;
+            fields.insert(
+                history_key.into(),
+                Value::Array(streak_series_ending_at(yesterday, length)),
+            );
             fields.insert(status_key.into(), Value::String("Active".into()));
-            let max_key = if key.is_some() { "max_streak" } else { "max_global_streak" };
-            fields.insert(max_key.into(), json!(integer_field(fields, max_key, 0).max(length)));
+            let max_key = if key.is_some() {
+                "max_streak"
+            } else {
+                "max_global_streak"
+            };
+            fields.insert(
+                max_key.into(),
+                json!(integer_field(fields, max_key, 0).max(length)),
+            );
             if key.is_some() {
                 fields.insert("last_streak_lost_date".into(), Value::Null);
                 fields.insert("last_streak_lose_len".into(), json!(0));
@@ -3184,29 +3466,55 @@ impl GameApplicationService {
         })
     }
 
-    pub fn developer_restore_streak(request: DeveloperStreakRequest) -> GameResult<GameCommandResponse> {
+    pub fn developer_restore_streak(
+        request: DeveloperStreakRequest,
+    ) -> GameResult<GameCommandResponse> {
         if !crate::developer_mode_available() {
-            return Err(GameError::PrerequisiteMissing("Режим разработчика недоступен в release-сборке.".into()));
+            return Err(GameError::PrerequisiteMissing(
+                "Режим разработчика недоступен в release-сборке.".into(),
+            ));
         }
         let connection = crate::open_projects_database().map_err(GameError::Database)?;
         Self::owner(&connection)?;
         let key = validate_developer_streak_target(&connection, &request)?;
         let root = Self::load(&connection)?;
         let fields = if let Some(key) = key.as_deref() {
-            root.get("project_game_state").and_then(Value::as_object).and_then(|states| states.get(key)).and_then(Value::as_object)
-        } else { root.get("global_streak").and_then(Value::as_object) }
+            root.get("project_game_state")
+                .and_then(Value::as_object)
+                .and_then(|states| states.get(key))
+                .and_then(Value::as_object)
+        } else {
+            root.get("global_streak").and_then(Value::as_object)
+        }
         .ok_or_else(|| GameError::NotFound("Состояние выбранного стрика не найдено.".into()))?;
-        let (history_key, loss_key) = if key.is_some() { ("streaks", "last_streak_lose_len") } else { ("global_streaks", "last_global_streak_lose_len") };
+        let (history_key, loss_key) = if key.is_some() {
+            ("streaks", "last_streak_lose_len")
+        } else {
+            ("global_streaks", "last_global_streak_lose_len")
+        };
         let length = restore_streak_length(fields, history_key, loss_key)?;
-        let logical_day = crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
+        let logical_day =
+            crate::streaks::logical_writing_day(&connection).map_err(GameError::Database)?;
         let yesterday = crate::streaks::date_days(&logical_day)
-            .ok_or_else(|| GameError::Validation("Некорректный писательский день.".into()))? - 1;
+            .ok_or_else(|| GameError::Validation("Некорректный писательский день.".into()))?
+            - 1;
         Self::mutate_classified(true, move |state, _rng, _now| {
-            let (fields, history_key, status_key, _) = developer_streak_fields_mut(state, key.as_deref())?;
-            fields.insert(history_key.into(), Value::Array(streak_series_ending_at(yesterday, length)));
+            let (fields, history_key, status_key, _) =
+                developer_streak_fields_mut(state, key.as_deref())?;
+            fields.insert(
+                history_key.into(),
+                Value::Array(streak_series_ending_at(yesterday, length)),
+            );
             fields.insert(status_key.into(), Value::String("Active".into()));
-            let max_key = if key.is_some() { "max_streak" } else { "max_global_streak" };
-            fields.insert(max_key.into(), json!(integer_field(fields, max_key, 0).max(length)));
+            let max_key = if key.is_some() {
+                "max_streak"
+            } else {
+                "max_global_streak"
+            };
+            fields.insert(
+                max_key.into(),
+                json!(integer_field(fields, max_key, 0).max(length)),
+            );
             if key.is_some() {
                 fields.insert("last_streak_lost_date".into(), Value::Null);
                 fields.insert("last_streak_lose_len".into(), json!(0));
@@ -4247,53 +4555,144 @@ mod tests {
         index: usize,
     }
 
-    fn loss_database(health:f64,potions:u64) -> (Connection,std::path::PathBuf) {
-        let path=std::env::temp_dir().join(format!("game-loss-{}.db",crate::project_metadata_sync::new_event_id().unwrap()));
-        let db=crate::sqlite::open_database(&path).unwrap();
-        let mut source=json!({"gamer":serde_json::from_str::<Value>(include_str!("../../src/cloud/__fixtures__/gameLegacyDefaultsV1.json")).unwrap(),"global_streak":{"global_streaks":["2026-10-01","2026-10-02","2026-10-03"],"max_global_streak":3,"global_streak_status":"Go"}});
-        source["gamer"]["health"]=json!(health);
-        source["gamer"]["items"]["Зелья"]=json!({"Зелье воскрешения":potions,"Микро зелье здоровья":2});
-        db.execute("INSERT INTO game_state VALUES(1,2,?1,'now')",[source.to_string()]).unwrap();
-        (db,path)
+    fn loss_database(health: f64, potions: u64) -> (Connection, std::path::PathBuf) {
+        let path = std::env::temp_dir().join(format!(
+            "game-loss-{}.db",
+            crate::project_metadata_sync::new_event_id().unwrap()
+        ));
+        let db = crate::sqlite::open_database(&path).unwrap();
+        let mut source = json!({"gamer":serde_json::from_str::<Value>(include_str!("../../src/cloud/__fixtures__/gameLegacyDefaultsV1.json")).unwrap(),"global_streak":{"global_streaks":["2026-10-01","2026-10-02","2026-10-03"],"max_global_streak":3,"global_streak_status":"Go"}});
+        source["gamer"]["health"] = json!(health);
+        source["gamer"]["items"]["Зелья"] =
+            json!({"Зелье воскрешения":potions,"Микро зелье здоровья":2});
+        db.execute(
+            "INSERT INTO game_state VALUES(1,2,?1,'now')",
+            [source.to_string()],
+        )
+        .unwrap();
+        (db, path)
     }
-    fn loss_state(db:&Connection)->Value {
-        serde_json::from_str(&db.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap()).unwrap()
+    fn loss_state(db: &Connection) -> Value {
+        serde_json::from_str(
+            &db.query_row("SELECT payload_json FROM game_state", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+        )
+        .unwrap()
     }
     #[test]
     fn global_loss_calendar_once_restart_and_new_independent_series() {
-        let (mut db,path)=loss_database(100.0,0);
-        for day in ["2026-10-03","2026-10-04"] {assert!(!refresh_global_loss(&db,day,"2026-10-04T00:00:00.000000Z").unwrap());}
-        {let tx=db.transaction().unwrap();assert!(refresh_global_loss(&tx,"2026-10-05","2026-10-05T00:00:00.000000Z").unwrap());tx.commit().unwrap();}
-        assert_eq!(loss_state(&db)["gamer"]["health"],85.0);
-        assert_eq!(loss_state(&db)["global_streak"]["last_global_streak_lose_len"],3);
-        assert_eq!(loss_state(&db)["notifications"]["new"].as_array().unwrap().len(),1);
-        assert!(loss_state(&db)["notifications"]["new"][0]["fields"]["text"].as_str().unwrap().contains("Урон: 15 HP. Здоровье: 100 → 85 HP"));
-        let fields=loss_state(&db)["global_streak"].as_object().unwrap().clone();
-        assert_eq!(crate::streaks::canonical_global_status(&fields,"2026-10-05"),"Lose 3");
-        assert_eq!(crate::streaks::canonical_global_status(&fields,"2026-10-06"),"No");
-        for day in ["2026-10-05","2026-10-06","2026-10-10"] {assert!(!refresh_global_loss(&db,day,"2026-10-10T00:00:00.000000Z").unwrap());}
-        drop(db);let mut db=crate::sqlite::open_database(&path).unwrap();
-        assert_eq!(loss_state(&db)["gamer"]["health"],85.0);
-        assert_eq!(loss_state(&db)["notifications"]["new"].as_array().unwrap().len(),1);
-        let mut next=loss_state(&db);next["global_streak"]["global_streaks"]=json!(["2026-10-11","2026-10-12"]);
-        db.execute("UPDATE game_state SET payload_json=?1",[next.to_string()]).unwrap();
-        {let tx=db.transaction().unwrap();assert!(refresh_global_loss(&tx,"2026-10-14","2026-10-14T00:00:00.000000Z").unwrap());tx.commit().unwrap();}
-        assert_eq!(loss_state(&db)["gamer"]["health"],75.0);
-        assert_eq!(loss_state(&db)["gamer"]["items"]["Зелья"]["Микро зелье здоровья"],2);
-        drop(db);std::fs::remove_file(path).unwrap();
+        let (mut db, path) = loss_database(100.0, 0);
+        for day in ["2026-10-03", "2026-10-04"] {
+            assert!(!refresh_global_loss(&db, day, "2026-10-04T00:00:00.000000Z").unwrap());
+        }
+        {
+            let tx = db.transaction().unwrap();
+            assert!(refresh_global_loss(&tx, "2026-10-05", "2026-10-05T00:00:00.000000Z").unwrap());
+            tx.commit().unwrap();
+        }
+        assert_eq!(loss_state(&db)["gamer"]["health"], 85.0);
+        assert_eq!(
+            loss_state(&db)["global_streak"]["last_global_streak_lose_len"],
+            3
+        );
+        assert_eq!(
+            loss_state(&db)["notifications"]["new"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(loss_state(&db)["notifications"]["new"][0]["fields"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Урон: 15 HP. Здоровье: 100 → 85 HP"));
+        let fields = loss_state(&db)["global_streak"]
+            .as_object()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            crate::streaks::canonical_global_status(&fields, "2026-10-05"),
+            "Lose 3"
+        );
+        assert_eq!(
+            crate::streaks::canonical_global_status(&fields, "2026-10-06"),
+            "No"
+        );
+        for day in ["2026-10-05", "2026-10-06", "2026-10-10"] {
+            assert!(!refresh_global_loss(&db, day, "2026-10-10T00:00:00.000000Z").unwrap());
+        }
+        drop(db);
+        let mut db = crate::sqlite::open_database(&path).unwrap();
+        assert_eq!(loss_state(&db)["gamer"]["health"], 85.0);
+        assert_eq!(
+            loss_state(&db)["notifications"]["new"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let mut next = loss_state(&db);
+        next["global_streak"]["global_streaks"] = json!(["2026-10-11", "2026-10-12"]);
+        db.execute("UPDATE game_state SET payload_json=?1", [next.to_string()])
+            .unwrap();
+        {
+            let tx = db.transaction().unwrap();
+            assert!(refresh_global_loss(&tx, "2026-10-14", "2026-10-14T00:00:00.000000Z").unwrap());
+            tx.commit().unwrap();
+        }
+        assert_eq!(loss_state(&db)["gamer"]["health"], 75.0);
+        assert_eq!(
+            loss_state(&db)["gamer"]["items"]["Зелья"]["Микро зелье здоровья"],
+            2
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn global_loss_lethal_damage_revives_once_or_clamps_to_zero() {
-        for (health,potions,expected,left) in [(10.0,2,100.0,1),(15.0,1,100.0,0),(10.0,0,0.0,0),(0.0,0,0.0,0)] {
-            let (mut db,path)=loss_database(health,potions);
-            {let tx=db.transaction().unwrap();assert!(refresh_global_loss(&tx,"2026-10-05","2026-10-05T00:00:00.000000Z").unwrap());tx.commit().unwrap();}
-            assert_eq!(loss_state(&db)["gamer"]["health"],expected);
-            assert_eq!(loss_state(&db)["notifications"]["new"].as_array().unwrap().len(),if potions>0 {2}else{1});
-            if potions>0 { assert!(loss_state(&db)["notifications"]["new"][1]["fields"]["text"].as_str().unwrap().contains("Зелье воскрешения")); }
-            assert_eq!(loss_state(&db)["gamer"]["items"]["Зелья"]["Зелье воскрешения"],left);
-            assert!(!refresh_global_loss(&db,"2026-10-06","2026-10-06T00:00:00.000000Z").unwrap());
-            assert_eq!(loss_state(&db)["gamer"]["items"]["Зелья"]["Зелье воскрешения"],left);
-            drop(db);std::fs::remove_file(path).unwrap();
+        for (health, potions, expected, left) in [
+            (10.0, 2, 100.0, 1),
+            (15.0, 1, 100.0, 0),
+            (10.0, 0, 0.0, 0),
+            (0.0, 0, 0.0, 0),
+        ] {
+            let (mut db, path) = loss_database(health, potions);
+            {
+                let tx = db.transaction().unwrap();
+                assert!(
+                    refresh_global_loss(&tx, "2026-10-05", "2026-10-05T00:00:00.000000Z").unwrap()
+                );
+                tx.commit().unwrap();
+            }
+            assert_eq!(loss_state(&db)["gamer"]["health"], expected);
+            assert_eq!(
+                loss_state(&db)["notifications"]["new"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                if potions > 0 { 2 } else { 1 }
+            );
+            if potions > 0 {
+                assert!(loss_state(&db)["notifications"]["new"][1]["fields"]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Зелье воскрешения"));
+            }
+            assert_eq!(
+                loss_state(&db)["gamer"]["items"]["Зелья"]["Зелье воскрешения"],
+                left
+            );
+            assert!(
+                !refresh_global_loss(&db, "2026-10-06", "2026-10-06T00:00:00.000000Z").unwrap()
+            );
+            assert_eq!(
+                loss_state(&db)["gamer"]["items"]["Зелья"]["Зелье воскрешения"],
+                left
+            );
+            drop(db);
+            std::fs::remove_file(path).unwrap();
         }
     }
     #[test]
@@ -4302,10 +4701,13 @@ mod tests {
             "global_streaks": [], "last_global_streak_lose_len": 149,
             "last_global_streak_lost_date": tagged_streak_day(20_000),
             "max_global_streak": 120,
-        }).as_object().unwrap().clone();
-        let length = restore_streak_length(
-            &global, "global_streaks", "last_global_streak_lose_len",
-        ).unwrap();
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let length =
+            restore_streak_length(&global, "global_streaks", "last_global_streak_lose_len")
+                .unwrap();
         let history = Value::Array(streak_series_ending_at(20_100, length));
         let (last, actual_length, freeze) = crate::streaks::streak_summary(Some(&history));
 
@@ -4323,7 +4725,9 @@ mod tests {
         let (last, length, freeze) = crate::streaks::streak_summary(Some(&history));
 
         assert_eq!(entries.len(), 10);
-        assert!(entries.iter().all(|entry| entry.get("__type__") == Some(&json!("date"))));
+        assert!(entries
+            .iter()
+            .all(|entry| entry.get("__type__") == Some(&json!("date"))));
         assert_eq!(last, Some(yesterday));
         assert_eq!(length, 10);
         assert!(!freeze);

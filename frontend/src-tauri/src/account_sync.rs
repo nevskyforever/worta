@@ -55,8 +55,10 @@ pub(crate) fn preserve(
         || item.entity_id.is_empty()
         || item.entity_id.len() > 512
         || !matches!(item.operation.as_str(), "upsert" | "delete")
-        || item.entity_type == "account_game" && (item.operation != "upsert"
-            || item.deleted_at.is_some() || item.entity_id != format!("game:{}",item.event_id))
+        || item.entity_type == "account_game"
+            && (item.operation != "upsert"
+                || item.deleted_at.is_some()
+                || item.entity_id != format!("game:{}", item.event_id))
         || !(1..=9_007_199_254_740_991).contains(&item.revision)
         || (item.operation == "delete") != item.deleted_at.is_some()
         || !valid_uuid(&item.event_id)
@@ -100,7 +102,11 @@ pub(crate) struct ReceivedAccountItem {
     aad_version: i64,
     nonce: Vec<u8>,
     ciphertext: Vec<u8>,
-    source_device_id:String, operation:String, revision:i64, updated_at:String, deleted_at:Option<String>,
+    source_device_id: String,
+    operation: String,
+    revision: i64,
+    updated_at: String,
+    deleted_at: Option<String>,
 }
 pub(crate) fn received(
     connection: &Connection,
@@ -132,7 +138,11 @@ pub(crate) fn received(
                 aad_version: r.get(7)?,
                 nonce: r.get(8)?,
                 ciphertext: r.get(9)?,
-                source_device_id:r.get(10)?,operation:r.get(11)?,revision:r.get(12)?,updated_at:r.get(13)?,deleted_at:r.get(14)?,
+                source_device_id: r.get(10)?,
+                operation: r.get(11)?,
+                revision: r.get(12)?,
+                updated_at: r.get(13)?,
+                deleted_at: r.get(14)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -148,17 +158,32 @@ pub(crate) fn block(
     ciphertext: &[u8],
     code: &str,
 ) -> Result<(), NoteSyncError> {
-    if !crate::frame_compression::CODES.contains(&code) && !matches!(
-        code,
-        "account_entity_codec_not_activated" | "decrypt_failed" | "account_scope_rejected" | "invalid_catalog_frame" | "catalog_dependency_missing" | "catalog_parent_unknown" | "catalog_membership_changed" | "catalog_project_unproven" | "catalog_folder_has_members" | "catalog_resource_limit" | "catalog_dependency_conflict" | "unsupported_catalog_source"
-    ) {
+    if !crate::frame_compression::CODES.contains(&code)
+        && !matches!(
+            code,
+            "account_entity_codec_not_activated"
+                | "decrypt_failed"
+                | "account_scope_rejected"
+                | "invalid_catalog_frame"
+                | "catalog_dependency_missing"
+                | "catalog_parent_unknown"
+                | "catalog_membership_changed"
+                | "catalog_project_unproven"
+                | "catalog_folder_has_members"
+                | "catalog_resource_limit"
+                | "catalog_dependency_conflict"
+                | "unsupported_catalog_source"
+        )
+    {
         return Err(invalid());
     }
     let tx = connection.unchecked_transaction()?;
-    let code=if crate::frame_compression::CODES.contains(&code) {
-        crate::note_sync::record_frame_compression_blocker(&tx,&scope.account_id,event_id,code)?;
+    let code = if crate::frame_compression::CODES.contains(&code) {
+        crate::note_sync::record_frame_compression_blocker(&tx, &scope.account_id, event_id, code)?;
         "invalid_catalog_frame"
-    }else{code};
+    } else {
+        code
+    };
     validate_pull_scope(
         &tx,
         &scope.account_id,
@@ -314,9 +339,10 @@ mod tests {
             "account_scope_rejected"
         );
         assert_eq!(
-            c.query_row("SELECT code FROM cloud_catalog_inbox_blockers", [], |r| r
-                .get::<_, String>(0))
-                .unwrap(),
+            c.query_row("SELECT code FROM cloud_catalog_inbox_blockers", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
             "catalog_resource_limit"
         );
         assert_eq!(
@@ -455,19 +481,69 @@ mod tests {
     }
 
     #[test]
-    fn account_compression_blocker_preserves_exact_local_code_without_schema_change(){
-        let path=std::env::temp_dir().join(format!("account-compression-{}.db",crate::project_metadata_sync::new_event_id().unwrap()));
-        let mut c=Connection::open(&path).unwrap();setup(&c);
-        note_sync::commit_mixed_sync_inbound_page(&mut c,&command()).unwrap();
-        let row=received(&c,&scope(),8,0).unwrap().remove(0);
-        block(&c,&scope(),&row.event_id,&row.nonce,&row.ciphertext,"compression_invalid_stream").unwrap();
-        let key=format!("frame_compression_blocker:{}",serde_json::json!([scope().account_id,row.event_id]));
-        drop(c);let c=Connection::open(&path).unwrap();crate::sqlite::apply_migrations(&c).unwrap();
-        let value:String=c.query_row("SELECT value FROM application_metadata WHERE key=?1",[&key],|r|r.get(0)).unwrap();
-        assert_eq!(value,"{\"code\":\"compression_invalid_stream\"}");
-        assert!(block(&c,&scope(),&row.event_id,&[9;24],&row.ciphertext,"compression_length_mismatch").is_err());
-        assert_eq!(c.query_row("SELECT value FROM application_metadata WHERE key=?1",[&key],|r|r.get::<_,String>(0)).unwrap(),value);
-        let mut c=c;let ack=note_sync::prepare_note_sync_ack(&mut c,&PrepareNoteSyncAckCommand{account_id:scope().account_id,canonical_user_id:USER.into(),device_id:DEVICE.into()}).unwrap();
-        assert_eq!(ack.candidate_cursor,0);drop(c);std::fs::remove_file(path).unwrap();
+    fn account_compression_blocker_preserves_exact_local_code_without_schema_change() {
+        let path = std::env::temp_dir().join(format!(
+            "account-compression-{}.db",
+            crate::project_metadata_sync::new_event_id().unwrap()
+        ));
+        let mut c = Connection::open(&path).unwrap();
+        setup(&c);
+        note_sync::commit_mixed_sync_inbound_page(&mut c, &command()).unwrap();
+        let row = received(&c, &scope(), 8, 0).unwrap().remove(0);
+        block(
+            &c,
+            &scope(),
+            &row.event_id,
+            &row.nonce,
+            &row.ciphertext,
+            "compression_invalid_stream",
+        )
+        .unwrap();
+        let key = format!(
+            "frame_compression_blocker:{}",
+            serde_json::json!([scope().account_id, row.event_id])
+        );
+        drop(c);
+        let c = Connection::open(&path).unwrap();
+        crate::sqlite::apply_migrations(&c).unwrap();
+        let value: String = c
+            .query_row(
+                "SELECT value FROM application_metadata WHERE key=?1",
+                [&key],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(value, "{\"code\":\"compression_invalid_stream\"}");
+        assert!(block(
+            &c,
+            &scope(),
+            &row.event_id,
+            &[9; 24],
+            &row.ciphertext,
+            "compression_length_mismatch"
+        )
+        .is_err());
+        assert_eq!(
+            c.query_row(
+                "SELECT value FROM application_metadata WHERE key=?1",
+                [&key],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            value
+        );
+        let mut c = c;
+        let ack = note_sync::prepare_note_sync_ack(
+            &mut c,
+            &PrepareNoteSyncAckCommand {
+                account_id: scope().account_id,
+                canonical_user_id: USER.into(),
+                device_id: DEVICE.into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(ack.candidate_cursor, 0);
+        drop(c);
+        std::fs::remove_file(path).unwrap();
     }
 }

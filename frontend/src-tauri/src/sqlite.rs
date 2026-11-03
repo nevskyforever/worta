@@ -20,14 +20,19 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 38;
 /// Reuse schema37's visit records; event IDs are unique across entity families.
 /// Call inside the reader's transaction, before handing encrypted rows to TS.
 pub(crate) fn record_sync_reader_visits<'a>(
-    db: &Connection, account: &str, ids: impl IntoIterator<Item = &'a str>,
+    db: &Connection,
+    account: &str,
+    ids: impl IntoIterator<Item = &'a str>,
 ) -> rusqlite::Result<()> {
     let mut ordinal: i64 = db.query_row(
         "SELECT COALESCE(MAX(ordinal),0) FROM cloud_game_reader_visits WHERE account_id=?1",
-        [account], |r| r.get(0),
+        [account],
+        |r| r.get(0),
     )?;
     for id in ids {
-        ordinal = ordinal.checked_add(1).filter(|n| *n <= 9007199254740991)
+        ordinal = ordinal
+            .checked_add(1)
+            .filter(|n| *n <= 9007199254740991)
             .ok_or(rusqlite::Error::InvalidQuery)?;
         db.execute(
             "INSERT INTO cloud_game_reader_visits VALUES(?1,?2,?3) ON CONFLICT(account_id,event_id) DO UPDATE SET ordinal=excluded.ordinal",
@@ -37,10 +42,11 @@ pub(crate) fn record_sync_reader_visits<'a>(
     Ok(())
 }
 
-
 /// Every ordinary Rust connection is fail-closed.  The remote-apply command
 /// installs its scoped verifier only after opening its dedicated connection.
-pub(crate) fn register_fail_closed_remote_apply_guard(connection: &Connection) -> Result<(), StorageError> {
+pub(crate) fn register_fail_closed_remote_apply_guard(
+    connection: &Connection,
+) -> Result<(), StorageError> {
     connection.create_scalar_function(
         "note_sync_remote_apply_authorized",
         1,
@@ -60,26 +66,65 @@ mod c16_c17_migration_tests {
         register_fail_closed_remote_apply_guard(&connection).unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         connection.execute_batch(DOMAIN_EVENTS_SCHEMA).unwrap();
-        connection.execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);").unwrap();
+        connection
+            .execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);")
+            .unwrap();
         for (_, sql) in MIGRATIONS.iter().take(15) {
             connection.execute_batch(sql).unwrap();
         }
-        connection.execute("INSERT INTO schema_info VALUES(15)", []).unwrap();
+        connection
+            .execute("INSERT INTO schema_info VALUES(15)", [])
+            .unwrap();
         connection.execute(
             "INSERT INTO projects(id,name,infinite,unit,status,payload_json) VALUES('p','Project',1,'symbols','активен','{}')",
             [],
         ).unwrap();
-        connection.execute("INSERT INTO project_order(project_id,position) VALUES('p',0)", []).unwrap();
+        connection
+            .execute(
+                "INSERT INTO project_order(project_id,position) VALUES('p',0)",
+                [],
+            )
+            .unwrap();
         connection.execute(
             "INSERT INTO cloud_sync_state(account_id,device_id,pull_cursor,ack_cursor,created_at,updated_at) VALUES('a','123e4567-e89b-42d3-a456-426614174001',0,0,'now','now')",
             [],
         ).unwrap();
 
-        assert_eq!(apply_migrations(&connection).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(connection.query_row("SELECT schema_version FROM schema_info", [], |row| row.get::<_, i64>(0)).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(connection.query_row("SELECT count(*) FROM projects", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_project_bootstraps", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT schema_version FROM schema_info", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM projects", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_project_bootstraps",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -88,62 +133,113 @@ mod c16_c17_migration_tests {
         register_fail_closed_remote_apply_guard(&connection).unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         connection.execute_batch(DOMAIN_EVENTS_SCHEMA).unwrap();
-        connection.execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);").unwrap();
+        connection
+            .execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);")
+            .unwrap();
         for (_, sql) in MIGRATIONS.iter().take(16) {
             connection.execute_batch(sql).unwrap();
         }
-        connection.execute("INSERT INTO schema_info VALUES(16)", []).unwrap();
-        connection.execute(
-            "INSERT INTO cloud_sync_inbox(
+        connection
+            .execute("INSERT INTO schema_info VALUES(16)", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_inbox(
                 account_id,event_id,server_sequence,device_id,project_id,entity_id,
                 entity_type,operation,sync_revision,updated_at,deleted_at,state,received_at
              ) VALUES('account','123e4567-e89b-42d3-a456-426614174010',1,
                       '123e4567-e89b-42d3-a456-426614174001','project','note',
                       'note','upsert',1,'2026-09-25T00:00:00.000000Z',NULL,'received','now')",
-            [],
-        ).unwrap();
+                [],
+            )
+            .unwrap();
 
-        assert_eq!(apply_migrations(&connection).unwrap(), CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         assert_eq!(connection.query_row(
             "SELECT state FROM cloud_sync_inbox WHERE event_id='123e4567-e89b-42d3-a456-426614174010'",
             [], |row| row.get::<_, String>(0),
         ).unwrap(), "received");
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM cloud_sync_note_conflict_groups", [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap(), 0);
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM cloud_sync_note_causal_history", [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap(), 0);
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM cloud_sync_note_pending_resolutions", [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_conflict_groups",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_causal_history",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_pending_resolutions",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
     fn populated_schema_17_advances_to_latest_and_reopens() {
         let path = std::env::temp_dir().join(format!(
-            "nfprogress-schema19-from17-{}-{}.db", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+            "nfprogress-schema19-from17-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
         ));
         let connection = Connection::open(&path).unwrap();
         register_fail_closed_remote_apply_guard(&connection).unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         connection.execute_batch(DOMAIN_EVENTS_SCHEMA).unwrap();
-        connection.execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);").unwrap();
-        for (_, sql) in MIGRATIONS.iter().take(17) { connection.execute_batch(sql).unwrap(); }
-        connection.execute("INSERT INTO schema_info VALUES(17)", []).unwrap();
-        assert_eq!(apply_migrations(&connection).unwrap(), CURRENT_SCHEMA_VERSION);
+        connection
+            .execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);")
+            .unwrap();
+        for (_, sql) in MIGRATIONS.iter().take(17) {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection
+            .execute("INSERT INTO schema_info VALUES(17)", [])
+            .unwrap();
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         drop(connection);
         let reopened = open_database(&path).unwrap();
-        assert_eq!(reopened.query_row(
-            "SELECT schema_version FROM schema_info", [], |row| row.get::<_, i64>(0)
-        ).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(reopened.query_row(
-            "SELECT count(*) FROM cloud_sync_note_pending_resolutions", [], |row| row.get::<_, i64>(0)
-        ).unwrap(), 0);
+        assert_eq!(
+            reopened
+                .query_row("SELECT schema_version FROM schema_info", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_pending_resolutions",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         drop(reopened);
         std::fs::remove_file(path).unwrap();
     }
@@ -151,28 +247,59 @@ mod c16_c17_migration_tests {
     #[test]
     fn populated_schema_18_advances_to_latest_and_reopens() {
         let path = std::env::temp_dir().join(format!(
-            "nfprogress-schema19-from18-{}-{}.db", std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+            "nfprogress-schema19-from18-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
         ));
         let connection = Connection::open(&path).unwrap();
         register_fail_closed_remote_apply_guard(&connection).unwrap();
         connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         connection.execute_batch(DOMAIN_EVENTS_SCHEMA).unwrap();
-        connection.execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);").unwrap();
-        for (_, sql) in MIGRATIONS.iter().take(18) { connection.execute_batch(sql).unwrap(); }
-        connection.execute("INSERT INTO schema_info VALUES(18)", []).unwrap();
-        assert_eq!(apply_migrations(&connection).unwrap(), CURRENT_SCHEMA_VERSION);
+        connection
+            .execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);")
+            .unwrap();
+        for (_, sql) in MIGRATIONS.iter().take(18) {
+            connection.execute_batch(sql).unwrap();
+        }
+        connection
+            .execute("INSERT INTO schema_info VALUES(18)", [])
+            .unwrap();
+        assert_eq!(
+            apply_migrations(&connection).unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
         drop(connection);
         let reopened = open_database(&path).unwrap();
-        assert_eq!(reopened.query_row(
-            "SELECT schema_version FROM schema_info", [], |row| row.get::<_, i64>(0)
-        ).unwrap(), CURRENT_SCHEMA_VERSION);
-        assert_eq!(reopened.query_row(
-            "SELECT count(*) FROM cloud_sync_note_resolution_outbox", [], |row| row.get::<_, i64>(0)
-        ).unwrap(), 0);
-        assert_eq!(reopened.query_row(
-            "SELECT count(*) FROM cloud_sync_note_resolution_dependencies", [], |row| row.get::<_, i64>(0)
-        ).unwrap(), 0);
+        assert_eq!(
+            reopened
+                .query_row("SELECT schema_version FROM schema_info", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            CURRENT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_resolution_outbox",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_note_resolution_dependencies",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         drop(reopened);
         std::fs::remove_file(path).unwrap();
     }
@@ -181,20 +308,39 @@ mod c16_c17_migration_tests {
     fn populated_schema_19_through_23_advance_to_latest_and_reopen() {
         for version in [19usize, 20usize, 21usize, 22usize, 23usize] {
             let path = std::env::temp_dir().join(format!(
-                "nfprogress-schema24-from{version}-{}-{}.db", std::process::id(),
-                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+                "nfprogress-schema24-from{version}-{}-{}.db",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
             ));
             let connection = Connection::open(&path).unwrap();
             register_fail_closed_remote_apply_guard(&connection).unwrap();
             connection.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
             connection.execute_batch(DOMAIN_EVENTS_SCHEMA).unwrap();
-            connection.execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);").unwrap();
-            for (_, sql) in MIGRATIONS.iter().take(version) { connection.execute_batch(sql).unwrap(); }
-            connection.execute("INSERT INTO schema_info VALUES(?1)", [version as i64]).unwrap();
-            assert_eq!(apply_migrations(&connection).unwrap(), CURRENT_SCHEMA_VERSION);
+            connection
+                .execute_batch("CREATE TABLE schema_info(schema_version INTEGER NOT NULL);")
+                .unwrap();
+            for (_, sql) in MIGRATIONS.iter().take(version) {
+                connection.execute_batch(sql).unwrap();
+            }
+            connection
+                .execute("INSERT INTO schema_info VALUES(?1)", [version as i64])
+                .unwrap();
+            assert_eq!(
+                apply_migrations(&connection).unwrap(),
+                CURRENT_SCHEMA_VERSION
+            );
             drop(connection);
             let reopened = open_database(&path).unwrap();
-            assert_eq!(reopened.query_row("SELECT schema_version FROM schema_info", [], |row| row.get::<_, i64>(0)).unwrap(), CURRENT_SCHEMA_VERSION);
+            assert_eq!(
+                reopened
+                    .query_row("SELECT schema_version FROM schema_info", [], |row| row
+                        .get::<_, i64>(0))
+                    .unwrap(),
+                CURRENT_SCHEMA_VERSION
+            );
             drop(reopened);
             std::fs::remove_file(path).unwrap();
         }
@@ -254,12 +400,20 @@ impl PrivilegedRemoteApplyConnection {
             FunctionFlags::SQLITE_UTF8,
             move |context| {
                 let candidate = context.get::<String>(0)?;
-                Ok(verifier.lock().map(|active| {
-                    active.as_ref().is_some_and(|values| values.contains(&candidate))
-                }).unwrap_or(false))
+                Ok(verifier
+                    .lock()
+                    .map(|active| {
+                        active
+                            .as_ref()
+                            .is_some_and(|values| values.contains(&candidate))
+                    })
+                    .unwrap_or(false))
             },
         )?;
-        Ok(Self { connection, capability })
+        Ok(Self {
+            connection,
+            capability,
+        })
     }
 
     pub(crate) fn authorize_once<T>(
@@ -279,7 +433,9 @@ impl PrivilegedRemoteApplyConnection {
             }
             *active = Some(HashSet::from([capability.clone()]));
         }
-        let _active = ActiveRemoteApplyCapability { state: self.capability.clone() };
+        let _active = ActiveRemoteApplyCapability {
+            state: self.capability.clone(),
+        };
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -390,9 +546,7 @@ impl PrivilegedRemoteApplyConnection {
     /// capability and must consume its authorization before commit.
     pub(crate) fn execute_planned_many_once<P, T, E>(
         &mut self,
-        plan: impl FnOnce(
-            &Transaction<'_>,
-        ) -> Result<(Vec<OwnedRemoteApplyAuthorization>, P), E>,
+        plan: impl FnOnce(&Transaction<'_>) -> Result<(Vec<OwnedRemoteApplyAuthorization>, P), E>,
         operation: impl FnOnce(&Transaction<'_>, P) -> Result<T, E>,
     ) -> Result<T, E>
     where
@@ -413,16 +567,20 @@ impl PrivilegedRemoteApplyConnection {
         let active = if authorizations.is_empty() {
             None
         } else {
-            let mut state = self.capability.lock().map_err(|_| E::from(
-                StorageError::RemoteApplyAuthorization("capability state unavailable".to_string())
-            ))?;
+            let mut state = self.capability.lock().map_err(|_| {
+                E::from(StorageError::RemoteApplyAuthorization(
+                    "capability state unavailable".to_string(),
+                ))
+            })?;
             if state.is_some() {
                 return Err(E::from(StorageError::RemoteApplyAuthorization(
                     "capability already active".to_string(),
                 )));
             }
             *state = Some(capabilities.iter().cloned().collect());
-            let active = ActiveRemoteApplyCapability { state: self.capability.clone() };
+            let active = ActiveRemoteApplyCapability {
+                state: self.capability.clone(),
+            };
             for (authorization, capability) in authorizations.iter().zip(&capabilities) {
                 transaction.execute(
                     "INSERT INTO cloud_sync_remote_apply_authorizations(
@@ -844,9 +1002,15 @@ pub(crate) fn validate_database(connection: &Connection) -> Result<(), StorageEr
         "cloud_sync_note_resolution_upload_receipts",
         "cloud_sync_note_applied_resolutions",
         "cloud_sync_note_applied_resolution_parents",
-        "cloud_progress_migrations","cloud_progress_candidates","cloud_progress_events",
-        "cloud_progress_tips","cloud_progress_projection","cloud_progress_apply_ledger",
-        "cloud_progress_local_candidates","cloud_progress_decisions","cloud_progress_capture_cursor",
+        "cloud_progress_migrations",
+        "cloud_progress_candidates",
+        "cloud_progress_events",
+        "cloud_progress_tips",
+        "cloud_progress_projection",
+        "cloud_progress_apply_ledger",
+        "cloud_progress_local_candidates",
+        "cloud_progress_decisions",
+        "cloud_progress_capture_cursor",
         "cloud_progress_write_intents",
     ];
     if required.iter().any(|table| !table_names.contains(*table)) {
@@ -1035,41 +1199,87 @@ mod tests {
         const DEVICE: &str = "123e4567-e89b-42d3-a456-426614174001";
         fn listed(db: &Connection, kind: &str, after: i64) -> Vec<serde_json::Value> {
             match kind {
-                "map" => crate::map_sync::received(db,"test",after,8).unwrap(),
-                "document" => crate::document_sync::received(db,"test",after,8).unwrap(),
-                "progress" => crate::progress_sync::received(db,"test",after,8).unwrap(),
-                "note" => crate::note_sync::list_received_note_sync_inbox_page(db,
+                "map" => crate::map_sync::received(db, "test", after, 8).unwrap(),
+                "document" => crate::document_sync::received(db, "test", after, 8).unwrap(),
+                "progress" => crate::progress_sync::received(db, "test", after, 8).unwrap(),
+                "note" => crate::note_sync::list_received_note_sync_inbox_page(
+                    db,
                     &crate::note_sync::ListReceivedNoteSyncInboxPageCommand {
-                        account_id:"test".into(),device_id:DEVICE.into(),canonical_user_id:USER.into(),
-                        kind:crate::note_sync::ReceivedNoteSyncInboxPageKind::Content,limit:8,after_server_sequence:after,
-                    }).unwrap().into_iter().map(|row|serde_json::to_value(row).unwrap()).collect(),
+                        account_id: "test".into(),
+                        device_id: DEVICE.into(),
+                        canonical_user_id: USER.into(),
+                        kind: crate::note_sync::ReceivedNoteSyncInboxPageKind::Content,
+                        limit: 8,
+                        after_server_sequence: after,
+                    },
+                )
+                .unwrap()
+                .into_iter()
+                .map(|row| serde_json::to_value(row).unwrap())
+                .collect(),
                 _ => unreachable!(),
             }
         }
-        for kind in ["note","map","document","progress"] {
-            let path=std::env::temp_dir().join(format!("reader-{kind}-{}.db",crate::project_metadata_sync::new_event_id().unwrap()));
-            let db=open_database(&path).unwrap();
+        for kind in ["note", "map", "document", "progress"] {
+            let path = std::env::temp_dir().join(format!(
+                "reader-{kind}-{}.db",
+                crate::project_metadata_sync::new_event_id().unwrap()
+            ));
+            let db = open_database(&path).unwrap();
             db.execute("INSERT INTO cloud_sync_state(account_id,device_id,created_at,updated_at) VALUES('test',?1,'now','now')",[DEVICE]).unwrap();
-            db.execute("INSERT INTO cloud_account_bindings VALUES('test',?1,'now','now')",[USER]).unwrap();
+            db.execute(
+                "INSERT INTO cloud_account_bindings VALUES('test',?1,'now','now')",
+                [USER],
+            )
+            .unwrap();
             for sequence in 1..=40 {
-                let id=crate::project_metadata_sync::new_event_id().unwrap();
+                let id = crate::project_metadata_sync::new_event_id().unwrap();
                 db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES('test',?1,?2,?3,'p',?1,?4,'event',1,'2026-10-01T00:00:00.000000Z','orphan','now')",rusqlite::params![id,sequence,DEVICE,kind]).unwrap();
-                db.execute("INSERT INTO cloud_sync_event_objects VALUES('test',?1,1,1,?2,?3,'now')",rusqlite::params![id,vec![4u8;24],vec![5u8;32]]).unwrap();
+                db.execute(
+                    "INSERT INTO cloud_sync_event_objects VALUES('test',?1,1,1,?2,?3,'now')",
+                    rusqlite::params![id, vec![4u8; 24], vec![5u8; 32]],
+                )
+                .unwrap();
             }
-            let mut after=0;
+            let mut after = 0;
             for _ in 0..4 {
-                let rows=listed(&db,kind,after);assert_eq!(rows.len(),8);
-                after=rows.last().unwrap()["server_sequence"].as_i64().unwrap();
+                let rows = listed(&db, kind, after);
+                assert_eq!(rows.len(), 8);
+                after = rows.last().unwrap()["server_sequence"].as_i64().unwrap();
             }
-            assert_eq!(after,32);
+            assert_eq!(after, 32);
             drop(db);
-            let db=open_database(&path).unwrap();
-            let next=listed(&db,kind,0);
-            assert_eq!(next.iter().map(|r|r["server_sequence"].as_i64().unwrap()).collect::<Vec<_>>(),(33..=40).collect::<Vec<_>>());
-            assert_eq!(db.query_row("SELECT ack_cursor FROM cloud_sync_state",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-            assert_eq!(db.query_row("SELECT count(*) FROM cloud_sync_inbox WHERE state='orphan'",[],|r|r.get::<_,i64>(0)).unwrap(),40);
-            assert_eq!(db.query_row("SELECT count(*) FROM cloud_sync_outbox",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-            drop(db);std::fs::remove_file(path).unwrap();
+            let db = open_database(&path).unwrap();
+            let next = listed(&db, kind, 0);
+            assert_eq!(
+                next.iter()
+                    .map(|r| r["server_sequence"].as_i64().unwrap())
+                    .collect::<Vec<_>>(),
+                (33..=40).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                db.query_row("SELECT ack_cursor FROM cloud_sync_state", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            assert_eq!(
+                db.query_row(
+                    "SELECT count(*) FROM cloud_sync_inbox WHERE state='orphan'",
+                    [],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                40
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM cloud_sync_outbox", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+            drop(db);
+            std::fs::remove_file(path).unwrap();
         }
     }
     use super::*;
@@ -1080,23 +1290,29 @@ mod tests {
     fn bound_note_database() -> Connection {
         let connection = Connection::open_in_memory().unwrap();
         apply_migrations(&connection).unwrap();
-        connection.execute(
-            "INSERT INTO projects(id,name,infinite,unit,status,payload_json)
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,infinite,unit,status,payload_json)
              VALUES('project','Project',0,'symbols','active','{}')",
-            [],
-        ).unwrap();
-        connection.execute(
-            "INSERT INTO cloud_sync_state(
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_state(
                 account_id,device_id,pull_cursor,ack_cursor,created_at,updated_at
              ) VALUES('account',?1,0,0,'now','now')",
-            [TEST_DEVICE_ID],
-        ).unwrap();
-        connection.execute(
-            "INSERT INTO cloud_sync_project_bindings(
+                [TEST_DEVICE_ID],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_project_bindings(
                 project_id,account_id,created_at,updated_at
              ) VALUES('project','account','now','now')",
-            [],
-        ).unwrap();
+                [],
+            )
+            .unwrap();
         connection
     }
 
@@ -1109,7 +1325,8 @@ mod tests {
             "color": "default", "pinned": false, "archived": false,
             "sort_order": 0, "tags": [], "created_at": "created",
             "updated_at": updated_at, "revision": 0, "metadata": {}
-        }).to_string()
+        })
+        .to_string()
     }
 
     fn upsert_authorization<'a>(
@@ -1131,57 +1348,95 @@ mod tests {
     fn ordinary_connection_and_sql_only_authorization_are_fail_closed() {
         let connection = bound_note_database();
         let payload = note_payload("remote", "one");
-        connection.execute(
-            "INSERT INTO cloud_sync_remote_apply_authorizations VALUES(
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_remote_apply_authorizations VALUES(
                 ?1,'account','project','note','upsert',?2,NULL,'forged')",
-            rusqlite::params![TEST_EVENT_ID, payload],
-        ).unwrap();
-        assert!(connection.execute(
-            "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
+                rusqlite::params![TEST_EVENT_ID, payload],
+            )
+            .unwrap();
+        assert!(connection
+            .execute(
+                "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
              VALUES('note','project',NULL,'one',?1)",
-            [&payload],
-        ).is_err());
-        assert_eq!(connection.query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_remote_apply_authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+                [&payload],
+            )
+            .is_err());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_remote_apply_authorizations",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
     }
 
     #[test]
     fn matching_local_intent_still_allows_write_without_remote_authorization() {
         let connection = bound_note_database();
         let payload = note_payload("local", "one");
-        connection.execute(
-            "INSERT INTO cloud_sync_outbox(
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_outbox(
                 event_id,account_id,device_id,project_id,entity_id,entity_type,
                 operation,revision,updated_at,deleted_at,created_at,parent_event_id,
                 local_ordinal,lifecycle
              ) VALUES(?1,'account',?2,'project','note','note','upsert',1,
                 'one',NULL,'one',NULL,1,'unsealed')",
-            rusqlite::params![TEST_EVENT_ID, TEST_DEVICE_ID],
-        ).unwrap();
-        connection.execute(
-            "INSERT INTO cloud_sync_note_intents(
+                rusqlite::params![TEST_EVENT_ID, TEST_DEVICE_ID],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO cloud_sync_note_intents(
                 event_id,mutation_generation,snapshot_json,seal_state,
                 seal_attempt_count,state_updated_at
              ) VALUES(?1,1,?2,'pending',0,'one')",
-            rusqlite::params![TEST_EVENT_ID, payload],
-        ).unwrap();
+                rusqlite::params![TEST_EVENT_ID, payload],
+            )
+            .unwrap();
 
-        connection.execute(
-            "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
+        connection
+            .execute(
+                "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
              VALUES('note','project',NULL,'one',?1)",
-            [&payload],
-        ).unwrap();
+                [&payload],
+            )
+            .unwrap();
 
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0),
-        ).unwrap(), 1);
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM cloud_sync_note_intents", [], |row| row.get::<_, i64>(0),
-        ).unwrap(), 1);
-        assert_eq!(connection.query_row(
-            "SELECT count(*) FROM cloud_sync_remote_apply_authorizations", [],
-            |row| row.get::<_, i64>(0),
-        ).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0),)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_note_intents", [], |row| {
+                    row.get::<_, i64>(0)
+                },)
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_remote_apply_authorizations",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -1189,20 +1444,39 @@ mod tests {
         let connection = bound_note_database();
         let mut privileged = PrivilegedRemoteApplyConnection::from_connection(connection).unwrap();
         let payload = note_payload("remote", "one");
-        privileged.authorize_once(upsert_authorization(&payload, None), |transaction| {
-            transaction.execute(
-                "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
+        privileged
+            .authorize_once(upsert_authorization(&payload, None), |transaction| {
+                transaction.execute(
+                    "INSERT INTO notes(id,project_id,stage_id,updated_at,payload_json)
                  VALUES('note','project',NULL,'one',?1)",
-                [&payload],
-            )?;
-            Ok(())
-        }).unwrap();
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM cloud_sync_remote_apply_authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+                    [&payload],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_remote_apply_authorizations",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         assert!(privileged.capability.lock().unwrap().is_none());
-        assert!(privileged.connection().execute(
-            "UPDATE notes SET updated_at='direct' WHERE id='note'", [],
-        ).is_err());
+        assert!(privileged
+            .connection()
+            .execute("UPDATE notes SET updated_at='direct' WHERE id='note'", [],)
+            .is_err());
     }
 
     #[test]
@@ -1210,16 +1484,18 @@ mod tests {
         let connection = bound_note_database();
         let mut privileged = PrivilegedRemoteApplyConnection::from_connection(connection).unwrap();
         let first = note_payload("first", "one");
-        privileged.authorize_once(upsert_authorization(&first, None), |transaction| {
-            transaction.execute(
-                "INSERT INTO notes VALUES('note','project',NULL,'one',?1)", [&first],
-            )?;
-            Ok(())
-        }).unwrap();
+        privileged
+            .authorize_once(upsert_authorization(&first, None), |transaction| {
+                transaction.execute(
+                    "INSERT INTO notes VALUES('note','project',NULL,'one',?1)",
+                    [&first],
+                )?;
+                Ok(())
+            })
+            .unwrap();
         let second = note_payload("second", "two");
-        let result = privileged.authorize_once(
-            upsert_authorization(&second, Some(&first)),
-            |transaction| {
+        let result =
+            privileged.authorize_once(upsert_authorization(&second, Some(&first)), |transaction| {
                 transaction.execute(
                     "UPDATE notes SET updated_at='two',payload_json=?1 WHERE id='note'",
                     [&second],
@@ -1229,13 +1505,30 @@ mod tests {
                     [&second],
                 )?;
                 Ok(())
-            },
-        );
+            });
         assert!(result.is_err());
-        assert_eq!(privileged.connection().query_row(
-            "SELECT payload_json FROM notes WHERE id='note'", [], |row| row.get::<_, String>(0),
-        ).unwrap(), first);
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM cloud_sync_remote_apply_authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row(
+                    "SELECT payload_json FROM notes WHERE id='note'",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            first
+        );
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_remote_apply_authorizations",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         assert!(privileged.capability.lock().unwrap().is_none());
     }
 
@@ -1244,22 +1537,41 @@ mod tests {
         let connection = bound_note_database();
         let mut privileged = PrivilegedRemoteApplyConnection::from_connection(connection).unwrap();
         let payload = note_payload("remote", "one");
-        let result: Result<(), StorageError> = privileged.authorize_once(
-            upsert_authorization(&payload, None),
-            |transaction| {
+        let result: Result<(), StorageError> =
+            privileged.authorize_once(upsert_authorization(&payload, None), |transaction| {
                 transaction.execute(
-                    "INSERT INTO notes VALUES('note','project',NULL,'one',?1)", [&payload],
+                    "INSERT INTO notes VALUES('note','project',NULL,'one',?1)",
+                    [&payload],
                 )?;
                 Err(rusqlite::Error::ExecuteReturnedResults)
-            },
-        );
+            });
         assert!(result.is_err());
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM cloud_sync_remote_apply_authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_remote_apply_authorizations",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            0
+        );
         assert!(privileged.capability.lock().unwrap().is_none());
-        assert!(privileged.connection().execute(
-            "INSERT INTO notes VALUES('note','project',NULL,'one',?1)", [&payload],
-        ).is_err());
+        assert!(privileged
+            .connection()
+            .execute(
+                "INSERT INTO notes VALUES('note','project',NULL,'one',?1)",
+                [&payload],
+            )
+            .is_err());
     }
 
     #[test]
@@ -1274,30 +1586,73 @@ mod tests {
                BEGIN SELECT RAISE(ABORT, 'not authorized'); END;\
              CREATE TRIGGER notes_consume AFTER INSERT ON notes BEGIN DELETE FROM authorizations; END;",
         ).unwrap();
-        connection.execute("INSERT INTO authorizations VALUES ('capability')", []).unwrap();
-        assert!(connection.execute("INSERT INTO notes VALUES ('ordinary')", []).is_err());
+        connection
+            .execute("INSERT INTO authorizations VALUES ('capability')", [])
+            .unwrap();
+        assert!(connection
+            .execute("INSERT INTO notes VALUES ('ordinary')", [])
+            .is_err());
 
         let capability = Arc::new(Mutex::new(Some("capability".to_string())));
         let state = capability.clone();
-        connection.create_scalar_function(
-            "note_sync_remote_apply_authorized", 1, FunctionFlags::SQLITE_UTF8, move |ctx| {
-                Ok(state.lock().unwrap().as_deref() == Some(ctx.get::<String>(0)?.as_str()))
-            },
-        ).unwrap();
-        assert_eq!(connection.query_row("PRAGMA trusted_schema", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        connection.execute("DELETE FROM authorizations", []).unwrap();
+        connection
+            .create_scalar_function(
+                "note_sync_remote_apply_authorized",
+                1,
+                FunctionFlags::SQLITE_UTF8,
+                move |ctx| {
+                    Ok(state.lock().unwrap().as_deref() == Some(ctx.get::<String>(0)?.as_str()))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .query_row("PRAGMA trusted_schema", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        connection
+            .execute("DELETE FROM authorizations", [])
+            .unwrap();
         let rollback = connection.unchecked_transaction().unwrap();
-        rollback.execute("INSERT INTO authorizations VALUES ('capability')", []).unwrap();
-        rollback.execute("INSERT INTO notes VALUES ('rolled-back')", []).unwrap();
+        rollback
+            .execute("INSERT INTO authorizations VALUES ('capability')", [])
+            .unwrap();
+        rollback
+            .execute("INSERT INTO notes VALUES ('rolled-back')", [])
+            .unwrap();
         rollback.rollback().unwrap();
-        assert_eq!(connection.query_row("SELECT count(*) FROM authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM authorizations", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
         let transaction = connection.unchecked_transaction().unwrap();
-        transaction.execute("INSERT INTO authorizations VALUES ('capability')", []).unwrap();
-        transaction.execute("INSERT INTO notes VALUES ('applied')", []).unwrap();
+        transaction
+            .execute("INSERT INTO authorizations VALUES ('capability')", [])
+            .unwrap();
+        transaction
+            .execute("INSERT INTO notes VALUES ('applied')", [])
+            .unwrap();
         transaction.commit().unwrap();
-        assert_eq!(connection.query_row("SELECT count(*) FROM authorizations", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert!(connection.execute("INSERT INTO notes VALUES ('replay')", []).is_err());
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM authorizations", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(connection
+            .execute("INSERT INTO notes VALUES ('replay')", [])
+            .is_err());
     }
 
     #[test]

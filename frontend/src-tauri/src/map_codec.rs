@@ -685,10 +685,22 @@ fn encode_inner(event: &Event) -> Result<Vec<u8>> {
 }
 pub fn decode(frame: &[u8]) -> Result<Event> {
     let normalized;
-    let frame = if frame.len()>=20 && frame[11]!=0 && [9].contains(&frame[9]) && [1].contains(&frame[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(frame,&[9],&[1],MAX_FRAME_BYTES-20).map_err(str::to_string)?;
+    let frame = if frame.len() >= 20
+        && frame[11] != 0
+        && [9].contains(&frame[9])
+        && [1].contains(&frame[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            frame,
+            &[9],
+            &[1],
+            MAX_FRAME_BYTES - 20,
+        )
+        .map_err(str::to_string)?;
         normalized.as_slice()
-    } else {frame};
+    } else {
+        frame
+    };
 
     if frame.len() > MAX_FRAME_BYTES {
         return Err("map_resource_limit".into());

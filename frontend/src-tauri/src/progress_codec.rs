@@ -269,10 +269,18 @@ pub fn encode(e: &Event) -> Result<Vec<u8>> {
 }
 pub fn decode(f: &[u8]) -> Result<Event> {
     let normalized;
-    let f = if f.len()>=20 && f[11]!=0 && [11].contains(&f[9]) && [1].contains(&f[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(f,&[11],&[1],MAX_FRAME_BYTES-20).map_err(str::to_string)?;
+    let f = if f.len() >= 20 && f[11] != 0 && [11].contains(&f[9]) && [1].contains(&f[10]) {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            f,
+            &[11],
+            &[1],
+            MAX_FRAME_BYTES - 20,
+        )
+        .map_err(str::to_string)?;
         normalized.as_slice()
-    } else {f};
+    } else {
+        f
+    };
 
     if f.len() > MAX_FRAME_BYTES {
         return Err("progress_resource_limit".into());

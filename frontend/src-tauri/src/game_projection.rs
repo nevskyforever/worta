@@ -336,8 +336,11 @@ pub(crate) fn streak_fields(base: &Value, global: bool) -> Result<Value> {
         fields[2].into(),
         json!(if base["enabled"] == false {
             "Off".to_string()
-        } else if history.is_empty() && !base["lost_day"].is_null() && base["lost_length"].as_u64().unwrap_or(0)>0 {
-            format!("Lose {}",base["lost_length"].as_u64().unwrap_or(0))
+        } else if history.is_empty()
+            && !base["lost_day"].is_null()
+            && base["lost_length"].as_u64().unwrap_or(0) > 0
+        {
+            format!("Lose {}", base["lost_length"].as_u64().unwrap_or(0))
         } else if history.is_empty() {
             "No".to_string()
         } else {

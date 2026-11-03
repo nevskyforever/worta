@@ -12,41 +12,41 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, State};
 
 mod account_binding;
+mod account_catalog;
+mod account_sync;
 #[cfg(test)]
 mod c15_headless_test_bridge;
+mod content_note_sync;
+mod content_note_writer;
 mod diagnostics;
+mod document_codec;
+mod document_sync;
 mod documents;
+mod frame_compression;
 mod game;
+mod game_codec;
+mod game_control;
+mod game_migration;
+mod game_projection;
+mod game_sync;
+mod game_transport;
+mod game_writer;
+mod map_codec;
+mod map_sync;
 mod mindmap;
 #[allow(dead_code)]
 mod note_sync;
-mod account_sync;
-mod account_catalog;
 mod note_sync_plaintext;
-mod content_note_sync;
-mod content_note_writer;
-mod frame_compression;
-mod document_codec;
-mod document_sync;
+mod profile_transfer;
 mod progress_codec;
-mod game_codec;
-mod game_sync;
-mod game_writer;
-mod game_transport;
-mod game_control;
-mod game_projection;
-mod game_migration;
 mod progress_sync;
-mod map_codec;
-mod map_sync;
+mod project_cover_sync;
 #[allow(dead_code)]
 mod project_metadata_sync;
-mod project_cover_sync;
-mod stage_sync;
-mod profile_transfer;
 #[allow(dead_code)]
 mod project_repository;
 mod sqlite;
+mod stage_sync;
 mod streaks;
 
 use project_repository::{
@@ -279,9 +279,15 @@ fn delete_document(scope: documents::DocumentScope) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn resolve_external_binding(command:documents::ExternalDecisionCommand)->Result<serde_json::Value,String>{documents::resolve_external_binding(command)}
+fn resolve_external_binding(
+    command: documents::ExternalDecisionCommand,
+) -> Result<serde_json::Value, String> {
+    documents::resolve_external_binding(command)
+}
 #[tauri::command]
-fn poll_external_binding(scope:documents::DocumentScope)->Result<serde_json::Value,String>{documents::poll_external_binding(scope)}
+fn poll_external_binding(scope: documents::DocumentScope) -> Result<serde_json::Value, String> {
+    documents::poll_external_binding(scope)
+}
 
 #[tauri::command]
 fn bind_document_file(
@@ -378,10 +384,26 @@ fn remove_document_sync(
 }
 
 #[tauri::command]
-fn refresh_external_progress(project_id:String,stage_id:Option<String>)->Result<documents::SyncRunResult,String>{documents::refresh_external_progress(documents::SyncScopeCommand{project_id,stage_id})}
+fn refresh_external_progress(
+    project_id: String,
+    stage_id: Option<String>,
+) -> Result<documents::SyncRunResult, String> {
+    documents::refresh_external_progress(documents::SyncScopeCommand {
+        project_id,
+        stage_id,
+    })
+}
 
 #[tauri::command]
-fn confirm_external_progress(project_id:String,stage_id:Option<String>)->Result<documents::SyncRunResult,String>{documents::confirm_external_progress(documents::SyncScopeCommand{project_id,stage_id})}
+fn confirm_external_progress(
+    project_id: String,
+    stage_id: Option<String>,
+) -> Result<documents::SyncRunResult, String> {
+    documents::confirm_external_progress(documents::SyncScopeCommand {
+        project_id,
+        stage_id,
+    })
+}
 
 #[tauri::command]
 fn run_document_sync(
@@ -760,28 +782,52 @@ fn project_payload(
 ) -> Result<serde_json::Value, String> {
     // Refresh derived rows from immutable facts after metadata/rule changes.
     // This does not capture or publish any local history.
-    let scopes:Vec<(String,String,String,Option<String>)>={
+    let scopes: Vec<(String, String, String, Option<String>)> = {
         let mut stmt=connection.prepare("SELECT m.account_id,b.canonical_user_id,s.device_id,m.stage_id FROM cloud_progress_migrations m JOIN cloud_account_bindings b ON b.local_account_id=m.account_id JOIN cloud_sync_state s ON s.account_id=m.account_id WHERE m.project_id=?1 AND m.lifecycle='active'").map_err(|_|"progress_storage_unavailable")?;
-        let rows=stmt.query_map([project_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(|_|"progress_storage_unavailable")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"progress_storage_unavailable")?;rows
+        let rows = stmt
+            .query_map([project_id], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .map_err(|_| "progress_storage_unavailable")?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|_| "progress_storage_unavailable")?;
+        rows
     };
-    if !scopes.is_empty(){let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|_|"progress_storage_unavailable")?;
-        for(account_id,canonical_user_id,device_id,stage_id)in scopes{
-            let scope=project_metadata_sync::MetadataScope{account_id,canonical_user_id,device_id};
-            match progress_sync::rebuild(&mut privileged,&scope,project_id,stage_id.as_deref()) {
-                Ok(())=>{},
-                Err(code)if code=="progress_publication_pending"=>{},
-                Err(code)if code=="project_metadata_authority_unresolved"=>{
-                    let view=project_metadata_sync::authority_view(connection,&scope.account_id,project_id).map_err(|e|e.to_string())?;
+    if !scopes.is_empty() {
+        let mut privileged = sqlite::open_privileged_remote_apply_database(
+            &sqlite_data_root()?.join("nfprogress.db"),
+        )
+        .map_err(|_| "progress_storage_unavailable")?;
+        for (account_id, canonical_user_id, device_id, stage_id) in scopes {
+            let scope = project_metadata_sync::MetadataScope {
+                account_id,
+                canonical_user_id,
+                device_id,
+            };
+            match progress_sync::rebuild(&mut privileged, &scope, project_id, stage_id.as_deref()) {
+                Ok(()) => {}
+                Err(code) if code == "progress_publication_pending" => {}
+                Err(code) if code == "project_metadata_authority_unresolved" => {
+                    let view = project_metadata_sync::authority_view(
+                        connection,
+                        &scope.account_id,
+                        project_id,
+                    )
+                    .map_err(|e| e.to_string())?;
                     let local_edit:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_metadata_decisions WHERE account_id=?1 AND project_id=?2 AND event_id=?3 AND kind='edit')",rusqlite::params![scope.account_id,project_id,view.pending_event_id],|r|r.get(0)).map_err(|_|"progress_storage_unavailable")?;
-                    if view.state!="resolution_pending"||!local_edit{return Err(code);}
+                    if view.state != "resolution_pending" || !local_edit {
+                        return Err(code);
+                    }
                     // A local Metadata edit awaits echo. Keep the last proven
                     // Progress view; this read does not apply or ACK that edit.
-                },
-                Err(code)if code=="stage_dependency_missing" && stage_id.is_some()=>{
+                }
+                Err(code) if code == "stage_dependency_missing" && stage_id.is_some() => {
                     let pending_completion:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_structural_events e JOIN cloud_sync_structural_decisions d USING(account_id,event_id) JOIN cloud_sync_outbox o USING(account_id,event_id) JOIN stages s ON s.id=e.entity_id AND s.project_id=e.project_id WHERE e.account_id=?1 AND e.project_id=?2 AND e.entity_id=?3 AND e.entity_type='stage' AND e.operation='update' AND e.state='unsealed' AND o.device_id=?4 AND json_extract(CAST(substr(e.canonical_frame,21) AS TEXT),'$.stage.status')='завершен' AND s.status='завершен')",rusqlite::params![scope.account_id,project_id,stage_id,scope.device_id],|r|r.get(0)).map_err(|_|"progress_storage_unavailable")?;
-                    if !pending_completion{return Err(code);}
-                },
-                Err(code)=>return Err(code),
+                    if !pending_completion {
+                        return Err(code);
+                    }
+                }
+                Err(code) => return Err(code),
             }
         }
     }
@@ -798,7 +844,7 @@ fn project_payload(
         .into_iter()
         .map(|stage| {
             let mut value = stage.payload;
-            value["id"]=serde_json::json!(stage.id);
+            value["id"] = serde_json::json!(stage.id);
             let entries = repository
                 .list_progress(project_id, Some(&stage.id))
                 .map_err(|error| error.to_string())?;
@@ -819,8 +865,20 @@ fn project_payload(
     );
     payload["stages"] = serde_json::Value::Array(stages_payload);
     drop(repository);
-    if let Some(heads)=progress_sync::local_heads(connection,project_id,None)?{payload["progress_heads"]=serde_json::json!(heads);}
-    if let Some(stages)=payload["stages"].as_array_mut(){for stage in stages{let id=stage["id"].as_str().ok_or("progress_scope_mismatch")?.to_string();if let Some(heads)=progress_sync::local_heads(connection,project_id,Some(&id))?{stage["progress_heads"]=serde_json::json!(heads);}}}
+    if let Some(heads) = progress_sync::local_heads(connection, project_id, None)? {
+        payload["progress_heads"] = serde_json::json!(heads);
+    }
+    if let Some(stages) = payload["stages"].as_array_mut() {
+        for stage in stages {
+            let id = stage["id"]
+                .as_str()
+                .ok_or("progress_scope_mismatch")?
+                .to_string();
+            if let Some(heads) = progress_sync::local_heads(connection, project_id, Some(&id))? {
+                stage["progress_heads"] = serde_json::json!(heads);
+            }
+        }
+    }
     Ok(payload)
 }
 
@@ -901,8 +959,17 @@ fn refresh_project_totals_in_transaction(
         .and_then(serde_json::Value::as_array)
         .is_some_and(|items| !items.is_empty())
         .into();
-    payload["remaining"]=if infinite{serde_json::Value::Null}else{serde_json::json!((goal.unwrap_or(total)-total).max(0.0))};
-    payload["added_today"]=serde_json::json!(payload["stages"].as_array().unwrap().iter().map(|s|s["added_today"].as_f64().unwrap_or(0.0)).sum::<f64>());
+    payload["remaining"] = if infinite {
+        serde_json::Value::Null
+    } else {
+        serde_json::json!((goal.unwrap_or(total) - total).max(0.0))
+    };
+    payload["added_today"] = serde_json::json!(payload["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["added_today"].as_f64().unwrap_or(0.0))
+        .sum::<f64>());
     payload["total"] = total.into();
     payload["progress"] = if infinite || goal.unwrap_or(0.0) <= 0.0 {
         0.0.into()
@@ -1010,7 +1077,9 @@ fn require_note_relation(
             )
             .map_err(|error| format!("Не удалось проверить состояние SQLite mirror: {error}"))?;
         if status != "healthy" {
-            return Err("SQLite mirror проектов недоступен для проверки связи заметки.".to_string());
+            return Err(
+                "SQLite mirror проектов недоступен для проверки связи заметки.".to_string(),
+            );
         }
     }
     connection
@@ -1762,18 +1831,20 @@ fn reconcile_loaded_map_view_in_connection(
         .transaction()
         .map_err(|error| error.to_string())?;
     if combined {
-        if !map_sync::admitted(&tx, project_id, None).map_err(|e|e.to_string())? {
-        if let Some(map) = stored_map(&project.payload)
-            .map(mindmap::normalize)
-            .transpose()?
-        {
-            if reconcile_map_notes(&tx, project_id, None, &map, &now)? {
-                update_stored_map(&tx, project_id, None, &map, &now, true)?;
+        if !map_sync::admitted(&tx, project_id, None).map_err(|e| e.to_string())? {
+            if let Some(map) = stored_map(&project.payload)
+                .map(mindmap::normalize)
+                .transpose()?
+            {
+                if reconcile_map_notes(&tx, project_id, None, &map, &now)? {
+                    update_stored_map(&tx, project_id, None, &map, &now, true)?;
+                }
             }
         }
-        }
         for stage in &stages {
-            if map_sync::admitted(&tx, project_id, Some(&stage.id)).map_err(|e|e.to_string())? { continue; }
+            if map_sync::admitted(&tx, project_id, Some(&stage.id)).map_err(|e| e.to_string())? {
+                continue;
+            }
             if let Some(map) = stored_map(&stage.payload)
                 .map(mindmap::normalize)
                 .transpose()?
@@ -1793,14 +1864,14 @@ fn reconcile_loaded_map_view_in_connection(
         } else {
             (stored_map(&project.payload), None)
         };
-        if !map_sync::admitted(&tx, project_id, owner_stage_id).map_err(|e|e.to_string())? {
-        if let Some(map) = map.map(mindmap::normalize).transpose()? {
-            if reconcile_map_notes(&tx, project_id, owner_stage_id, &map, &now)? {
-                update_stored_map(&tx, project_id, owner_stage_id, &map, &now, true)?;
+        if !map_sync::admitted(&tx, project_id, owner_stage_id).map_err(|e| e.to_string())? {
+            if let Some(map) = map.map(mindmap::normalize).transpose()? {
+                if reconcile_map_notes(&tx, project_id, owner_stage_id, &map, &now)? {
+                    update_stored_map(&tx, project_id, owner_stage_id, &map, &now, true)?;
+                }
             }
         }
     }
-        }
     tx.commit().map_err(|error| error.to_string())
 }
 
@@ -1810,10 +1881,16 @@ fn map_response(project_id: String, stage_id: Option<String>) -> Result<serde_js
     map_response_in_connection(&mut connection, project_id, stage_id)
 }
 
-fn map_response_in_connection(connection: &mut rusqlite::Connection, project_id: String, stage_id: Option<String>) -> Result<serde_json::Value, String> {
+fn map_response_in_connection(
+    connection: &mut rusqlite::Connection,
+    project_id: String,
+    stage_id: Option<String>,
+) -> Result<serde_json::Value, String> {
     require_projects_owner(connection)?;
     // Keep rendered owners and CAS evidence in one read snapshot.
-    connection.execute_batch("BEGIN DEFERRED").map_err(|e| e.to_string())?;
+    connection
+        .execute_batch("BEGIN DEFERRED")
+        .map_err(|e| e.to_string())?;
     let repository = ProjectsRepository::new(connection);
     let project = repository
         .get_project(&project_id)
@@ -1862,8 +1939,11 @@ fn map_response_in_connection(connection: &mut rusqlite::Connection, project_id:
             stage.status == "завершен"
                 && !mindmap::has_content(stored_map(&stage.payload).as_ref(), &stage.name)
         });
-    let expected_heads=map_sync::expected(connection,&project_id,stage_id.as_deref(),combined).map_err(|e|e.to_string())?;
-    connection.execute_batch("COMMIT").map_err(|e| e.to_string())?;
+    let expected_heads = map_sync::expected(connection, &project_id, stage_id.as_deref(), combined)
+        .map_err(|e| e.to_string())?;
+    connection
+        .execute_batch("COMMIT")
+        .map_err(|e| e.to_string())?;
     Ok(
         serde_json::json!({"expected_heads":expected_heads,"project_id": project_id, "stage_id": stage_id, "name": name, "data": data, "combined": combined, "read_only": status == "завершен", "has_empty_completed_stage_map": empty_completed, "notes": notes}),
     )
@@ -1926,10 +2006,20 @@ fn save_map_in_connection(
             .and_then(|value| value.as_bool())
             .unwrap_or(false)
         && !stages.is_empty();
-    map_sync::check_expected(&tx, &command.project_id, command.stage_id.as_deref(), combined, command.expected_heads.as_ref(), &now).map_err(|e|e.to_string())?;
+    map_sync::check_expected(
+        &tx,
+        &command.project_id,
+        command.stage_id.as_deref(),
+        combined,
+        command.expected_heads.as_ref(),
+        &now,
+    )
+    .map_err(|e| e.to_string())?;
     if combined {
         let (project_map, stage_maps) = split_combined_map(&project, &stages, &command.data)?;
-        if !map_sync::local_edit(&tx,&command.project_id,None,&project_map,None,&now).map_err(|e|e.to_string())? {
+        if !map_sync::local_edit(&tx, &command.project_id, None, &project_map, None, &now)
+            .map_err(|e| e.to_string())?
+        {
             let project_map = mindmap::normalize(project_map)?;
             let changed = reconcile_map_notes(&tx, &command.project_id, None, &project_map, &now)?;
             update_stored_map(&tx, &command.project_id, None, &project_map, &now, changed)?;
@@ -1939,7 +2029,18 @@ fn save_map_in_connection(
                 if stage.status == "завершен" {
                     continue;
                 }
-                if map_sync::local_edit(&tx,&command.project_id,Some(&stage.id),stage_map,None,&now).map_err(|e|e.to_string())? {continue}
+                if map_sync::local_edit(
+                    &tx,
+                    &command.project_id,
+                    Some(&stage.id),
+                    stage_map,
+                    None,
+                    &now,
+                )
+                .map_err(|e| e.to_string())?
+                {
+                    continue;
+                }
                 let stage_map = mindmap::normalize(stage_map.clone())?;
                 let changed = reconcile_map_notes(
                     &tx,
@@ -1959,8 +2060,17 @@ fn save_map_in_connection(
             }
         }
     } else {
-        if map_sync::local_edit(&tx,&command.project_id,command.stage_id.as_deref(),&command.data,None,&now).map_err(|e|e.to_string())? {
-            return tx.commit().map_err(|e|e.to_string());
+        if map_sync::local_edit(
+            &tx,
+            &command.project_id,
+            command.stage_id.as_deref(),
+            &command.data,
+            None,
+            &now,
+        )
+        .map_err(|e| e.to_string())?
+        {
+            return tx.commit().map_err(|e| e.to_string());
         }
         let changed = reconcile_map_notes(
             &tx,
@@ -2146,7 +2256,11 @@ fn list_notes(project_id: String, stage_id: Option<String>) -> Result<serde_json
     list_notes_in_connection(&connection, project_id, stage_id)
 }
 
-fn list_notes_in_connection(connection: &rusqlite::Connection, project_id: String, stage_id: Option<String>) -> Result<serde_json::Value, String> {
+fn list_notes_in_connection(
+    connection: &rusqlite::Connection,
+    project_id: String,
+    stage_id: Option<String>,
+) -> Result<serde_json::Value, String> {
     require_sqlite_notes_owner(connection)?;
     let mut notes = Vec::new();
     if let Some(stage_id) = stage_id.as_deref() {
@@ -2236,10 +2350,13 @@ fn list_unsealed_note_sync_intents(
 }
 
 #[tauri::command]
-fn preflight_cloud_project_bootstrap(project_id: String) -> Result<Vec<note_sync::NoteSyncPreflightIssue>, String> {
+fn preflight_cloud_project_bootstrap(
+    project_id: String,
+) -> Result<Vec<note_sync::NoteSyncPreflightIssue>, String> {
     let connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::preflight_note_sync_project(&connection, &project_id).map_err(|error| error.to_string())
+    note_sync::preflight_note_sync_project(&connection, &project_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2248,7 +2365,8 @@ fn prepare_cloud_project_bootstrap(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::prepare_cloud_project_bootstrap(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::prepare_cloud_project_bootstrap(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2257,7 +2375,8 @@ fn confirm_cloud_project_registration(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::confirm_cloud_project_registration(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::confirm_cloud_project_registration(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2266,7 +2385,8 @@ fn capture_initial_note_sync_intents(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::capture_initial_note_sync_intents(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::capture_initial_note_sync_intents(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2275,7 +2395,8 @@ fn read_initial_note_cohort_status(
 ) -> Result<note_sync::CloudProjectInitialCohortStatus, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::read_initial_note_cohort_status(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::read_initial_note_cohort_status(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2284,7 +2405,8 @@ fn mark_cloud_project_bootstrap_completing(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::mark_cloud_project_bootstrap_completing(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::mark_cloud_project_bootstrap_completing(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2293,7 +2415,8 @@ fn mark_cloud_project_bootstrap_ready(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::mark_cloud_project_bootstrap_ready(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::mark_cloud_project_bootstrap_ready(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2303,7 +2426,8 @@ fn set_cloud_project_bootstrap_paused(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::set_cloud_project_bootstrap_paused(&mut connection, &command, paused).map_err(|error| error.to_string())
+    note_sync::set_cloud_project_bootstrap_paused(&mut connection, &command, paused)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2312,7 +2436,8 @@ fn list_cloud_project_bootstraps(
 ) -> Result<Vec<note_sync::CloudProjectBootstrapRecord>, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::list_cloud_project_bootstraps(&mut connection, &account_id).map_err(|error| error.to_string())
+    note_sync::list_cloud_project_bootstraps(&mut connection, &account_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2321,7 +2446,8 @@ fn import_remote_cloud_project(
 ) -> Result<note_sync::CloudProjectBootstrapRecord, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    note_sync::import_remote_cloud_project(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::import_remote_cloud_project(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2356,24 +2482,35 @@ fn commit_sealed_note_sync_event(
 }
 
 #[tauri::command]
-fn list_unsealed_note_resolution_intents(account_id: String, limit: u32) -> Result<Vec<note_sync::UnsealedNoteResolutionIntent>, String> {
+fn list_unsealed_note_resolution_intents(
+    account_id: String,
+    limit: u32,
+) -> Result<Vec<note_sync::UnsealedNoteResolutionIntent>, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::list_unsealed_note_resolution_intents(&mut connection, &account_id, limit).map_err(|error| error.to_string())
+    note_sync::list_unsealed_note_resolution_intents(&mut connection, &account_id, limit)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn commit_sealed_note_resolution_event(command: note_sync::CommitSealedNoteResolutionCommand) -> Result<note_sync::CommitSealedNoteResolutionResult, String> {
+fn commit_sealed_note_resolution_event(
+    command: note_sync::CommitSealedNoteResolutionCommand,
+) -> Result<note_sync::CommitSealedNoteResolutionResult, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::commit_sealed_note_resolution_event(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::commit_sealed_note_resolution_event(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn read_note_resolution_readiness(account_id: String, event_id: String) -> Result<note_sync::NoteResolutionReadiness, String> {
+fn read_note_resolution_readiness(
+    account_id: String,
+    event_id: String,
+) -> Result<note_sync::NoteResolutionReadiness, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::read_note_resolution_readiness(&mut connection, &account_id, &event_id).map_err(|error| error.to_string())
+    note_sync::read_note_resolution_readiness(&mut connection, &account_id, &event_id)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2382,7 +2519,8 @@ fn list_sealed_note_resolution_uploads(
 ) -> Result<Vec<note_sync::SealedNoteResolutionUploadItem>, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::list_sealed_note_resolution_uploads(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::list_sealed_note_resolution_uploads(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2391,7 +2529,8 @@ fn commit_note_resolution_upload_acceptance(
 ) -> Result<Vec<note_sync::CommitNoteResolutionUploadAcceptanceResult>, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::commit_note_resolution_upload_acceptance(&mut connection, &command).map_err(|error| error.to_string())
+    note_sync::commit_note_resolution_upload_acceptance(&mut connection, &command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2427,7 +2566,8 @@ fn ensure_cloud_account_binding_on_connection(
     command: &account_binding::EnsureCloudAccountBindingCommand,
 ) -> Result<account_binding::EnsureCloudAccountBindingResult, String> {
     require_sqlite_notes_owner(connection)?;
-    account_binding::ensure_cloud_account_binding(connection, command).map_err(|error| error.to_string())
+    account_binding::ensure_cloud_account_binding(connection, command)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2480,8 +2620,7 @@ fn prepare_note_sync_ack(
 ) -> Result<note_sync::NoteSyncAckCandidate, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::prepare_note_sync_ack(&mut connection, &command)
-        .map_err(|error| error.to_string())
+    note_sync::prepare_note_sync_ack(&mut connection, &command).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2490,8 +2629,7 @@ fn commit_note_sync_ack(
 ) -> Result<note_sync::CommitNoteSyncAckResult, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::commit_note_sync_ack(&mut connection, &command)
-        .map_err(|error| error.to_string())
+    note_sync::commit_note_sync_ack(&mut connection, &command).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2542,17 +2680,29 @@ fn apply_verified_received_note(
 }
 
 #[tauri::command]
-fn apply_verified_received_content_note(command: note_sync::ApplyVerifiedReceivedNoteIpcCommand) -> Result<String,String> {
-    let ordinary=open_notes_database(true)?;
-    require_sqlite_notes_owner(&ordinary)?; drop(ordinary);
-    let mut connection=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|e|e.to_string())?;
-    note_sync::apply_verified_received_content_note_ipc(&mut connection,command).map_err(|e|e.to_string())
+fn apply_verified_received_content_note(
+    command: note_sync::ApplyVerifiedReceivedNoteIpcCommand,
+) -> Result<String, String> {
+    let ordinary = open_notes_database(true)?;
+    require_sqlite_notes_owner(&ordinary)?;
+    drop(ordinary);
+    let mut connection =
+        sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db"))
+            .map_err(|e| e.to_string())?;
+    note_sync::apply_verified_received_content_note_ipc(&mut connection, command)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn record_content_note_blocker(command: note_sync::ApplyVerifiedReceivedNoteIpcCommand,code:String) -> Result<(),String> {
-    let mut connection=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|e|e.to_string())?;
-    note_sync::record_content_note_blocker(&mut connection,&command,&code).map_err(|e|e.to_string())
+fn record_content_note_blocker(
+    command: note_sync::ApplyVerifiedReceivedNoteIpcCommand,
+    code: String,
+) -> Result<(), String> {
+    let mut connection =
+        sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db"))
+            .map_err(|e| e.to_string())?;
+    note_sync::record_content_note_blocker(&mut connection, &command, &code)
+        .map_err(|e| e.to_string())
 }
 
 /// Dormant peer-only resolution-v2 apply boundary. TypeScript supplies
@@ -2600,285 +2750,1061 @@ fn commit_note_sync_inbound_page(
 }
 
 #[tauri::command]
-fn commit_v3_sync_inbound_page(command: note_sync::CommitMixedSyncInboundPageCommand)
-    -> Result<note_sync::CommitNoteSyncInboundPageResult, String> {
+fn commit_v3_sync_inbound_page(
+    command: note_sync::CommitMixedSyncInboundPageCommand,
+) -> Result<note_sync::CommitNoteSyncInboundPageResult, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
-    note_sync::commit_mixed_sync_inbound_page(&mut connection, &command).map_err(|e|e.to_string())
+    note_sync::commit_mixed_sync_inbound_page(&mut connection, &command).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn map_sync_command(scope:project_metadata_sync::MetadataScope,request:map_sync::Request)->Result<serde_json::Value,String>{
-    let mut db=metadata_connection(&scope)?;
+fn map_sync_command(
+    scope: project_metadata_sync::MetadataScope,
+    request: map_sync::Request,
+) -> Result<serde_json::Value, String> {
+    let mut db = metadata_connection(&scope)?;
     use map_sync::Request::*;
-    let result=(||->Result<serde_json::Value,map_sync::Error>{
+    let result = (|| -> Result<serde_json::Value, map_sync::Error> {
         match request {
-            View{project_id}=>map_sync::view(&db,&scope,&project_id),
-            Begin{project_id,now}=>map_sync::begin(&mut db,&scope,&project_id,&now),
-            Pending{sealed,now}=>{map_sync::advance(&mut db,&scope.account_id,&now)?;Ok(serde_json::json!(map_sync::pending(&db,&scope.account_id,&scope.device_id,sealed)?))},
-            Seal{event_id,frame,nonce,ciphertext}=>{map_sync::seal(&mut db,&scope.account_id,&event_id,&frame,&nonce,&ciphertext)?;Ok(serde_json::Value::Null)},
-            Receipt{event_id,server_sequence,duplicate,now}=>{map_sync::receipt(&mut db,&scope.account_id,&scope.device_id,&event_id,server_sequence,duplicate,&now)?;Ok(serde_json::Value::Null)},
-            Block{event_id,nonce,ciphertext,code}=>{if !frame_compression::CODES.contains(&code.as_str()) && !matches!(code.as_str(),"invalid_map_payload"|"decrypt_failed"){return Err(map_sync::Error::from("invalid_map_blocker".to_string()))}db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='map' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext])?;Ok(serde_json::Value::Null)},
-            Received{after,limit}=>Ok(serde_json::json!(map_sync::received(&db,&scope.account_id,after,limit)?)),
-            Apply{frame,nonce,ciphertext}=>{drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root().map_err(map_sync::Error::from)?.join("nfprogress.db"))?;Ok(serde_json::json!(map_sync::apply(&mut privileged,&scope,&frame,&nonce,&ciphertext)?))},
-            Import{decision,keep_local,now}=>{drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root().map_err(map_sync::Error::from)?.join("nfprogress.db"))?;Ok(serde_json::json!(map_sync::import_choice(&mut privileged,&scope,&decision,keep_local,&now)?))},
-            Decide{decision,now}=>Ok(serde_json::json!(map_sync::decide(&mut db,&scope,&decision,&now)?)),
-            Delete{project_id,stage_id,expected,now}=>{let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;map_sync::check_expected(&tx,&project_id,stage_id.as_deref(),false,Some(&expected),&now)?;if !map_sync::local_edit(&tx,&project_id,stage_id.as_deref(),&serde_json::Value::Null,None,&now)?{return Err(map_sync::Error::from("map_authority_required".to_string()))}tx.commit()?;Ok(serde_json::Value::Null)},
+            View { project_id } => map_sync::view(&db, &scope, &project_id),
+            Begin { project_id, now } => map_sync::begin(&mut db, &scope, &project_id, &now),
+            Pending { sealed, now } => {
+                map_sync::advance(&mut db, &scope.account_id, &now)?;
+                Ok(serde_json::json!(map_sync::pending(
+                    &db,
+                    &scope.account_id,
+                    &scope.device_id,
+                    sealed
+                )?))
+            }
+            Seal {
+                event_id,
+                frame,
+                nonce,
+                ciphertext,
+            } => {
+                map_sync::seal(
+                    &mut db,
+                    &scope.account_id,
+                    &event_id,
+                    &frame,
+                    &nonce,
+                    &ciphertext,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
+            Receipt {
+                event_id,
+                server_sequence,
+                duplicate,
+                now,
+            } => {
+                map_sync::receipt(
+                    &mut db,
+                    &scope.account_id,
+                    &scope.device_id,
+                    &event_id,
+                    server_sequence,
+                    duplicate,
+                    &now,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
+            Block {
+                event_id,
+                nonce,
+                ciphertext,
+                code,
+            } => {
+                if !frame_compression::CODES.contains(&code.as_str())
+                    && !matches!(code.as_str(), "invalid_map_payload" | "decrypt_failed")
+                {
+                    return Err(map_sync::Error::from("invalid_map_blocker".to_string()));
+                }
+                db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='map' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext])?;
+                Ok(serde_json::Value::Null)
+            }
+            Received { after, limit } => Ok(serde_json::json!(map_sync::received(
+                &db,
+                &scope.account_id,
+                after,
+                limit
+            )?)),
+            Apply {
+                frame,
+                nonce,
+                ciphertext,
+            } => {
+                drop(db);
+                let mut privileged = sqlite::open_privileged_remote_apply_database(
+                    &sqlite_data_root()
+                        .map_err(map_sync::Error::from)?
+                        .join("nfprogress.db"),
+                )?;
+                Ok(serde_json::json!(map_sync::apply(
+                    &mut privileged,
+                    &scope,
+                    &frame,
+                    &nonce,
+                    &ciphertext
+                )?))
+            }
+            Import {
+                decision,
+                keep_local,
+                now,
+            } => {
+                drop(db);
+                let mut privileged = sqlite::open_privileged_remote_apply_database(
+                    &sqlite_data_root()
+                        .map_err(map_sync::Error::from)?
+                        .join("nfprogress.db"),
+                )?;
+                Ok(serde_json::json!(map_sync::import_choice(
+                    &mut privileged,
+                    &scope,
+                    &decision,
+                    keep_local,
+                    &now
+                )?))
+            }
+            Decide { decision, now } => Ok(serde_json::json!(map_sync::decide(
+                &mut db, &scope, &decision, &now
+            )?)),
+            Delete {
+                project_id,
+                stage_id,
+                expected,
+                now,
+            } => {
+                let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                map_sync::check_expected(
+                    &tx,
+                    &project_id,
+                    stage_id.as_deref(),
+                    false,
+                    Some(&expected),
+                    &now,
+                )?;
+                if !map_sync::local_edit(
+                    &tx,
+                    &project_id,
+                    stage_id.as_deref(),
+                    &serde_json::Value::Null,
+                    None,
+                    &now,
+                )? {
+                    return Err(map_sync::Error::from("map_authority_required".to_string()));
+                }
+                tx.commit()?;
+                Ok(serde_json::Value::Null)
+            }
         }
-    })();result.map_err(|e|e.to_string())
+    })();
+    result.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_current_writing_day()->Result<String,String>{let db=open_projects_database()?;streaks::logical_writing_day(&db)}
+fn get_current_writing_day() -> Result<String, String> {
+    let db = open_projects_database()?;
+    streaks::logical_writing_day(&db)
+}
 
 #[tauri::command]
-fn game_sync_command(scope:project_metadata_sync::MetadataScope,request:game_control::Request)->Result<serde_json::Value,String>{
-    let mut db=open_projects_database()?;require_projects_owner(&db)?;
-    game_control::assert_scope(&db,&scope)?;
+fn game_sync_command(
+    scope: project_metadata_sync::MetadataScope,
+    request: game_control::Request,
+) -> Result<serde_json::Value, String> {
+    let mut db = open_projects_database()?;
+    require_projects_owner(&db)?;
+    game_control::assert_scope(&db, &scope)?;
     match request {
-        game_control::Request::Apply{frame,nonce,ciphertext,project}=>{
-            drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|_|"game_storage_error")?;
-            Ok(serde_json::json!(game_sync::apply(&mut privileged,&scope,&frame,&nonce,&ciphertext,project)?))
-        },
-        game_control::Request::Rebuild{owner_key}=>{
-            drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|_|"game_storage_error")?;
-            game_sync::rebuild(&mut privileged,&scope,&owner_key)?;Ok(serde_json::Value::Null)
-        },
-        ordinary=>game_control::ordinary(&mut db,&scope,ordinary),
-    }
-}
-
-#[tauri::command]
-fn progress_sync_command(scope:project_metadata_sync::MetadataScope,request:progress_sync::Request)->Result<serde_json::Value,String>{
-    let mut db=open_projects_database()?;require_projects_owner(&db)?;
-    project_metadata_sync::assert_runtime_scope(&db,&scope.account_id,&scope.canonical_user_id,&scope.device_id).map_err(|_|"progress_scope_mismatch")?;
-    use progress_sync::Request::*;
-    match request{
-        View{project_id}=>progress_sync::view(&db,&scope,&project_id),
-        Begin{project_id,now}=>{progress_sync::capture(&mut db,&scope,&project_id,&now)?;progress_sync::view(&db,&scope,&project_id)},
-        Pending{sealed,now}=>{progress_sync::continue_capture(&mut db,&scope.account_id,&now)?;Ok(serde_json::json!(progress_sync::pending(&db,&scope.account_id,&scope.device_id,sealed)?))},
-        Seal{event_id,frame,nonce,ciphertext}=>{progress_sync::seal(&mut db,&scope.account_id,&scope.device_id,&event_id,&frame,&nonce,&ciphertext)?;Ok(serde_json::Value::Null)},
-        Receipt{event_id,server_sequence,duplicate,now}=>{progress_sync::receipt(&mut db,&scope.account_id,&scope.device_id,&event_id,server_sequence,duplicate,&now)?;Ok(serde_json::Value::Null)},
-        Received{after,limit}=>Ok(serde_json::json!(progress_sync::received(&db,&scope.account_id,after,limit)?)),
-        Apply{frame,nonce,ciphertext}=>{drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|_|"progress_storage_unavailable")?;Ok(serde_json::json!(progress_sync::apply(&mut privileged,&scope,&frame,&nonce,&ciphertext)?))},
-        Decide{decision,now}=>Ok(serde_json::json!(progress_sync::decide(&mut db,&scope,&decision,&now)?)),
-        Rebuild{project_id,stage_id}=>{drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|_|"progress_storage_unavailable")?;progress_sync::rebuild(&mut privileged,&scope,&project_id,stage_id.as_deref())?;Ok(serde_json::Value::Null)},
-        Block{event_id,nonce,ciphertext,code}=>{if !frame_compression::CODES.contains(&code.as_str()) && !matches!(code.as_str(),"invalid_progress_payload"|"decrypt_failed"|"progress_codec_unsupported"|"progress_resource_limit"|"progress_scope_mismatch"){return Err("invalid_progress_blocker".into())}db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='progress' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext]).map_err(|_|"progress_storage_unavailable")?;Ok(serde_json::Value::Null)},
-    }
-}
-
-#[tauri::command]
-fn document_sync_command(scope:project_metadata_sync::MetadataScope,request:document_sync::Request)->Result<serde_json::Value,String>{
-    let mut db=metadata_connection(&scope)?;
-    use document_sync::Request::*;
-    let result=(||->Result<serde_json::Value,document_sync::Error>{
-        match request {
-            View{project_id}=>document_sync::view(&db,&scope,&project_id),
-            Begin{project_id,now}=>document_sync::begin(&mut db,&scope,&project_id,&now),
-            Pending{sealed,now}=>{document_sync::advance(&mut db,&scope.account_id,&now)?;Ok(serde_json::json!(document_sync::pending(&db,&scope.account_id,&scope.device_id,sealed)?))},
-            Seal{event_id,frame,nonce,ciphertext}=>{document_sync::seal(&mut db,&scope.account_id,&event_id,&frame,&nonce,&ciphertext)?;Ok(serde_json::Value::Null)},
-            Receipt{event_id,server_sequence,duplicate,now}=>{document_sync::receipt(&mut db,&scope.account_id,&scope.device_id,&event_id,server_sequence,duplicate,&now)?;Ok(serde_json::Value::Null)},
-            Block{event_id,nonce,ciphertext,code}=>{if !frame_compression::CODES.contains(&code.as_str()) && !matches!(code.as_str(),"invalid_document_payload"|"decrypt_failed"|"document_codec_unsupported"|"document_resource_limit"|"document_unsupported_extension"|"document_unsupported_structure"|"document_scope_mismatch"){return Err(document_sync::Error::from("invalid_document_blocker".to_string()))}db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='document' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext])?;Ok(serde_json::Value::Null)},
-            Received{after,limit}=>Ok(serde_json::json!(document_sync::received(&db,&scope.account_id,after,limit)?)),
-            Apply{frame,nonce,ciphertext}=>{drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root().map_err(document_sync::Error::from)?.join("nfprogress.db"))?;Ok(serde_json::json!(document_sync::apply(&mut privileged,&scope,&frame,&nonce,&ciphertext)?))},
-            Decide{decision,now}=>Ok(serde_json::json!(document_sync::decide(&mut db,&scope,&decision,&now)?)),
-            Move{project_id,document_id,stage_id,expected,now}=>{document_sync::assert_project_scope(&db,&scope,&project_id)?;document_sync::move_scope(&mut db,&project_id,&document_id,stage_id.as_deref(),&expected,&now)?;Ok(serde_json::Value::Null)},
-            Delete{project_id,document_id,expected,now}=>{document_sync::assert_project_scope(&db,&scope,&project_id)?;let tx=db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;if !document_sync::normal(&tx,&project_id,&document_id,serde_json::Value::Null,Some(&expected),&now)?{return Err(document_sync::Error::from("document_authority_required".to_string()))}tx.commit()?;Ok(serde_json::Value::Null)},
+        game_control::Request::Apply {
+            frame,
+            nonce,
+            ciphertext,
+            project,
+        } => {
+            drop(db);
+            let mut privileged = sqlite::open_privileged_remote_apply_database(
+                &sqlite_data_root()?.join("nfprogress.db"),
+            )
+            .map_err(|_| "game_storage_error")?;
+            Ok(serde_json::json!(game_sync::apply(
+                &mut privileged,
+                &scope,
+                &frame,
+                &nonce,
+                &ciphertext,
+                project
+            )?))
         }
-    })();result.map_err(|e|e.to_string())
-}
-
-#[tauri::command]
-fn read_account_catalog(scope:project_metadata_sync::MetadataScope)->Result<serde_json::Value,String>{let db=metadata_connection(&scope)?;account_catalog::authority(&db,&scope).map_err(|e|e.to_string())}
-#[tauri::command]
-fn begin_account_catalog(scope:project_metadata_sync::MetadataScope,now:String)->Result<serde_json::Value,String>{let mut db=metadata_connection(&scope)?;account_catalog::begin(&mut db,&scope,&now).map_err(|e|e.to_string())}
-#[tauri::command]
-fn decide_account_catalog(scope:project_metadata_sync::MetadataScope,decision:account_catalog::Decision,now:String)->Result<String,String>{let mut db=metadata_connection(&scope)?;account_catalog::decide(&mut db,&scope,&decision,&now).map_err(|e|e.to_string())}
-#[tauri::command]
-fn pending_account_catalog(scope:project_metadata_sync::MetadataScope,sealed:bool,now:String)->Result<Vec<serde_json::Value>,String>{let mut db=metadata_connection(&scope)?;account_catalog::reconcile_connections(&mut db,&scope,&now).map_err(|e|e.to_string())?;account_catalog::pending(&db,&scope,sealed).map_err(|e|e.to_string())}
-#[tauri::command]
-fn seal_account_catalog(scope:project_metadata_sync::MetadataScope,event_id:String,frame:Vec<u8>,nonce:Vec<u8>,ciphertext:Vec<u8>)->Result<(),String>{let mut db=metadata_connection(&scope)?;account_catalog::seal(&mut db,&scope,&event_id,&frame,&nonce,&ciphertext).map_err(|e|e.to_string())}
-#[tauri::command]
-fn receipt_account_catalog(scope:project_metadata_sync::MetadataScope,event_id:String,server_sequence:i64)->Result<(),String>{let mut db=metadata_connection(&scope)?;account_catalog::receipt(&mut db,&scope,&event_id,server_sequence).map_err(|e|e.to_string())}
-#[tauri::command]
-fn apply_account_catalog(scope:project_metadata_sync::MetadataScope,event_id:String,frame:Vec<u8>,nonce:Vec<u8>,ciphertext:Vec<u8>)->Result<String,String>{let mut db=metadata_connection(&scope)?;account_catalog::apply(&mut db,&scope,&event_id,&frame,&nonce,&ciphertext).map_err(|e|e.to_string())}
-#[tauri::command]
-fn reorder_project_folders(folder_ids:Vec<String>)->Result<(),String>{let mut db=open_projects_database()?;require_projects_owner(&db)?;let now:String=db.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;if !account_catalog::normal(&mut db,"folder_order","folder_order",serde_json::json!({"ids":folder_ids}),&now).map_err(|e|e.to_string())?{return Err("catalog_authority_required".into())}Ok(())}
-
-#[tauri::command]
-fn list_received_account_objects(scope:project_metadata_sync::MetadataScope,limit:u32,after:i64)->Result<Vec<account_sync::ReceivedAccountItem>,String>{
-    let connection=metadata_connection(&scope)?;
-    account_sync::received(&connection,&scope,limit,after).map_err(|e|e.to_string())
-}
-#[tauri::command]
-fn block_account_object(scope:project_metadata_sync::MetadataScope,event_id:String,nonce:Vec<u8>,ciphertext:Vec<u8>,code:String)->Result<(),String>{
-    let connection=metadata_connection(&scope)?;
-    account_sync::block(&connection,&scope,&event_id,&nonce,&ciphertext,&code).map_err(|e|e.to_string())
-}
-
-fn metadata_connection(scope:&project_metadata_sync::MetadataScope)->Result<rusqlite::Connection,String>{
-    let connection=open_notes_database(true)?;
-    require_sqlite_notes_owner(&connection)?;
-    project_metadata_sync::assert_runtime_scope(&connection,&scope.account_id,&scope.canonical_user_id,&scope.device_id)
-        .map_err(|e|e.to_string())?;
-    Ok(connection)
-}
-
-#[tauri::command]
-fn begin_content_note_migration(scope:project_metadata_sync::MetadataScope,project_id:String,now:String)->Result<serde_json::Value,String>{let mut db=metadata_connection(&scope)?;content_note_writer::begin(&mut db,&scope,&project_id,&now)}
-#[tauri::command]
-fn read_content_note_migration(scope:project_metadata_sync::MetadataScope,project_id:String)->Result<serde_json::Value,String>{let db=metadata_connection(&scope)?;content_note_writer::view(&db,&scope,&project_id)}
-#[tauri::command]
-fn read_content_note_conflicts(scope:project_metadata_sync::MetadataScope,project_id:String)->Result<Vec<serde_json::Value>,String>{let db=metadata_connection(&scope)?;content_note_writer::conflicts(&db,&scope,&project_id)}
-#[tauri::command]
-fn choose_content_note_version(scope:project_metadata_sync::MetadataScope,project_id:String,decision:serde_json::Value,selected:String,now:String)->Result<(),String>{
-    let mut db=metadata_connection(&scope)?;
-    if decision["kind"]=="import" {
-        let command=content_note_writer::prepare_import_choice(&mut db,&scope,&project_id,&decision,&selected,&now)?;
-        drop(db);let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|e|e.to_string())?;
-        note_sync::apply_verified_received_content_note_ipc(&mut privileged,command).map_err(|e|e.to_string())?;return Ok(())
+        game_control::Request::Rebuild { owner_key } => {
+            drop(db);
+            let mut privileged = sqlite::open_privileged_remote_apply_database(
+                &sqlite_data_root()?.join("nfprogress.db"),
+            )
+            .map_err(|_| "game_storage_error")?;
+            game_sync::rebuild(&mut privileged, &scope, &owner_key)?;
+            Ok(serde_json::Value::Null)
+        }
+        ordinary => game_control::ordinary(&mut db, &scope, ordinary),
     }
-    let command=content_note_writer::prepare_choice(&mut db,&scope,&project_id,&decision,&selected,&now)?;
-    drop(db);
-    let mut privileged=sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db")).map_err(|e|e.to_string())?;
-    note_sync::apply_prepared_note_conflict_resolution(&mut privileged,&command).map_err(|_|"stale_note_resolution")?;Ok(())
 }
-#[tauri::command]
-fn list_pending_content_notes(scope:project_metadata_sync::MetadataScope,sealed:bool)->Result<Vec<serde_json::Value>,String>{let db=metadata_connection(&scope)?;content_note_writer::pending(&db,&scope,sealed)}
-#[tauri::command]
-fn seal_content_note(scope:project_metadata_sync::MetadataScope,event_id:String,frame:Vec<u8>,envelope:note_sync::EncryptedNoteSyncEnvelope)->Result<(),String>{let mut db=metadata_connection(&scope)?;content_note_writer::seal(&mut db,&scope,&event_id,&frame,envelope)}
-#[tauri::command]
-fn receipt_content_note(scope:project_metadata_sync::MetadataScope,event_id:String,server_sequence:i64,duplicate:bool)->Result<(),String>{let mut db=metadata_connection(&scope)?;content_note_writer::receipt(&mut db,&scope,&event_id,server_sequence,duplicate)}
 
 #[tauri::command]
-fn read_stage_structural_authority(scope:project_metadata_sync::MetadataScope,project_id:String)->Result<stage_sync::StructuralView,String>{
-    let db=metadata_connection(&scope)?;stage_sync::authority(&db,&scope.account_id,&project_id).map_err(|e|e.to_string())
+fn progress_sync_command(
+    scope: project_metadata_sync::MetadataScope,
+    request: progress_sync::Request,
+) -> Result<serde_json::Value, String> {
+    let mut db = open_projects_database()?;
+    require_projects_owner(&db)?;
+    project_metadata_sync::assert_runtime_scope(
+        &db,
+        &scope.account_id,
+        &scope.canonical_user_id,
+        &scope.device_id,
+    )
+    .map_err(|_| "progress_scope_mismatch")?;
+    use progress_sync::Request::*;
+    match request {
+        View { project_id } => progress_sync::view(&db, &scope, &project_id),
+        Begin { project_id, now } => {
+            progress_sync::capture(&mut db, &scope, &project_id, &now)?;
+            progress_sync::view(&db, &scope, &project_id)
+        }
+        Pending { sealed, now } => {
+            progress_sync::continue_capture(&mut db, &scope.account_id, &now)?;
+            Ok(serde_json::json!(progress_sync::pending(
+                &db,
+                &scope.account_id,
+                &scope.device_id,
+                sealed
+            )?))
+        }
+        Seal {
+            event_id,
+            frame,
+            nonce,
+            ciphertext,
+        } => {
+            progress_sync::seal(
+                &mut db,
+                &scope.account_id,
+                &scope.device_id,
+                &event_id,
+                &frame,
+                &nonce,
+                &ciphertext,
+            )?;
+            Ok(serde_json::Value::Null)
+        }
+        Receipt {
+            event_id,
+            server_sequence,
+            duplicate,
+            now,
+        } => {
+            progress_sync::receipt(
+                &mut db,
+                &scope.account_id,
+                &scope.device_id,
+                &event_id,
+                server_sequence,
+                duplicate,
+                &now,
+            )?;
+            Ok(serde_json::Value::Null)
+        }
+        Received { after, limit } => Ok(serde_json::json!(progress_sync::received(
+            &db,
+            &scope.account_id,
+            after,
+            limit
+        )?)),
+        Apply {
+            frame,
+            nonce,
+            ciphertext,
+        } => {
+            drop(db);
+            let mut privileged = sqlite::open_privileged_remote_apply_database(
+                &sqlite_data_root()?.join("nfprogress.db"),
+            )
+            .map_err(|_| "progress_storage_unavailable")?;
+            Ok(serde_json::json!(progress_sync::apply(
+                &mut privileged,
+                &scope,
+                &frame,
+                &nonce,
+                &ciphertext
+            )?))
+        }
+        Decide { decision, now } => Ok(serde_json::json!(progress_sync::decide(
+            &mut db, &scope, &decision, &now
+        )?)),
+        Rebuild {
+            project_id,
+            stage_id,
+        } => {
+            drop(db);
+            let mut privileged = sqlite::open_privileged_remote_apply_database(
+                &sqlite_data_root()?.join("nfprogress.db"),
+            )
+            .map_err(|_| "progress_storage_unavailable")?;
+            progress_sync::rebuild(&mut privileged, &scope, &project_id, stage_id.as_deref())?;
+            Ok(serde_json::Value::Null)
+        }
+        Block {
+            event_id,
+            nonce,
+            ciphertext,
+            code,
+        } => {
+            if !frame_compression::CODES.contains(&code.as_str())
+                && !matches!(
+                    code.as_str(),
+                    "invalid_progress_payload"
+                        | "decrypt_failed"
+                        | "progress_codec_unsupported"
+                        | "progress_resource_limit"
+                        | "progress_scope_mismatch"
+                )
+            {
+                return Err("invalid_progress_blocker".into());
+            }
+            db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='progress' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext]).map_err(|_|"progress_storage_unavailable")?;
+            Ok(serde_json::Value::Null)
+        }
+    }
+}
+
+#[tauri::command]
+fn document_sync_command(
+    scope: project_metadata_sync::MetadataScope,
+    request: document_sync::Request,
+) -> Result<serde_json::Value, String> {
+    let mut db = metadata_connection(&scope)?;
+    use document_sync::Request::*;
+    let result = (|| -> Result<serde_json::Value, document_sync::Error> {
+        match request {
+            View { project_id } => document_sync::view(&db, &scope, &project_id),
+            Begin { project_id, now } => document_sync::begin(&mut db, &scope, &project_id, &now),
+            Pending { sealed, now } => {
+                document_sync::advance(&mut db, &scope.account_id, &now)?;
+                Ok(serde_json::json!(document_sync::pending(
+                    &db,
+                    &scope.account_id,
+                    &scope.device_id,
+                    sealed
+                )?))
+            }
+            Seal {
+                event_id,
+                frame,
+                nonce,
+                ciphertext,
+            } => {
+                document_sync::seal(
+                    &mut db,
+                    &scope.account_id,
+                    &event_id,
+                    &frame,
+                    &nonce,
+                    &ciphertext,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
+            Receipt {
+                event_id,
+                server_sequence,
+                duplicate,
+                now,
+            } => {
+                document_sync::receipt(
+                    &mut db,
+                    &scope.account_id,
+                    &scope.device_id,
+                    &event_id,
+                    server_sequence,
+                    duplicate,
+                    &now,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
+            Block {
+                event_id,
+                nonce,
+                ciphertext,
+                code,
+            } => {
+                if !frame_compression::CODES.contains(&code.as_str())
+                    && !matches!(
+                        code.as_str(),
+                        "invalid_document_payload"
+                            | "decrypt_failed"
+                            | "document_codec_unsupported"
+                            | "document_resource_limit"
+                            | "document_unsupported_extension"
+                            | "document_unsupported_structure"
+                            | "document_scope_mismatch"
+                    )
+                {
+                    return Err(document_sync::Error::from(
+                        "invalid_document_blocker".to_string(),
+                    ));
+                }
+                db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='document' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",rusqlite::params![code,scope.account_id,event_id,nonce,ciphertext])?;
+                Ok(serde_json::Value::Null)
+            }
+            Received { after, limit } => Ok(serde_json::json!(document_sync::received(
+                &db,
+                &scope.account_id,
+                after,
+                limit
+            )?)),
+            Apply {
+                frame,
+                nonce,
+                ciphertext,
+            } => {
+                drop(db);
+                let mut privileged = sqlite::open_privileged_remote_apply_database(
+                    &sqlite_data_root()
+                        .map_err(document_sync::Error::from)?
+                        .join("nfprogress.db"),
+                )?;
+                Ok(serde_json::json!(document_sync::apply(
+                    &mut privileged,
+                    &scope,
+                    &frame,
+                    &nonce,
+                    &ciphertext
+                )?))
+            }
+            Decide { decision, now } => Ok(serde_json::json!(document_sync::decide(
+                &mut db, &scope, &decision, &now
+            )?)),
+            Move {
+                project_id,
+                document_id,
+                stage_id,
+                expected,
+                now,
+            } => {
+                document_sync::assert_project_scope(&db, &scope, &project_id)?;
+                document_sync::move_scope(
+                    &mut db,
+                    &project_id,
+                    &document_id,
+                    stage_id.as_deref(),
+                    &expected,
+                    &now,
+                )?;
+                Ok(serde_json::Value::Null)
+            }
+            Delete {
+                project_id,
+                document_id,
+                expected,
+                now,
+            } => {
+                document_sync::assert_project_scope(&db, &scope, &project_id)?;
+                let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                if !document_sync::normal(
+                    &tx,
+                    &project_id,
+                    &document_id,
+                    serde_json::Value::Null,
+                    Some(&expected),
+                    &now,
+                )? {
+                    return Err(document_sync::Error::from(
+                        "document_authority_required".to_string(),
+                    ));
+                }
+                tx.commit()?;
+                Ok(serde_json::Value::Null)
+            }
+        }
+    })();
+    result.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+) -> Result<serde_json::Value, String> {
+    let db = metadata_connection(&scope)?;
+    account_catalog::authority(&db, &scope).map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn begin_stage_structural_migration(scope:project_metadata_sync::MetadataScope,project_id:String,now:String)->Result<stage_sync::StructuralView,String>{
-    let mut db=metadata_connection(&scope)?;stage_sync::begin(&mut db,&scope.account_id,&project_id,&now).map_err(|e|e.to_string())
+fn begin_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    now: String,
+) -> Result<serde_json::Value, String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::begin(&mut db, &scope, &now).map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn prepare_stage_structural_decision(scope:project_metadata_sync::MetadataScope,project_id:String,decision:stage_sync::Decision,now:String)->Result<String,String>{
-    let mut db=metadata_connection(&scope)?;stage_sync::decide(&mut db,&scope.account_id,&project_id,&decision,&now).map_err(|e|e.to_string())
+fn decide_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    decision: account_catalog::Decision,
+    now: String,
+) -> Result<String, String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::decide(&mut db, &scope, &decision, &now).map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn list_pending_stage_structural(scope:project_metadata_sync::MetadataScope,sealed:bool)->Result<Vec<serde_json::Value>,String>{
-    let db=metadata_connection(&scope)?;stage_sync::pending_events(&db,&scope.account_id,&scope.device_id,sealed).map_err(|e|e.to_string())
+fn pending_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    sealed: bool,
+    now: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::reconcile_connections(&mut db, &scope, &now).map_err(|e| e.to_string())?;
+    account_catalog::pending(&db, &scope, sealed).map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn commit_sealed_stage_structural(scope:project_metadata_sync::MetadataScope,event_id:String,frame:Vec<u8>,nonce:Vec<u8>,ciphertext:Vec<u8>)->Result<(),String>{
-    let mut db=metadata_connection(&scope)?;
-    let e=stage_sync::unframe(&frame).map_err(|e|e.to_string())?;
-    if e.header.device_id!=scope.device_id || e.header.account_id!=scope.canonical_user_id || e.header.event_id!=event_id{return Err("structural_scope_mismatch".into());}
-    stage_sync::seal(&mut db,&scope.account_id,&event_id,&frame,&nonce,&ciphertext).map_err(|e|e.to_string())
+fn seal_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    frame: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::seal(&mut db, &scope, &event_id, &frame, &nonce, &ciphertext)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn commit_stage_structural_receipt(scope:project_metadata_sync::MetadataScope,event_id:String,server_sequence:i64,duplicate:bool,now:String)->Result<(),String>{
-    let mut db=metadata_connection(&scope)?;
-    let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_outbox WHERE account_id=?1 AND device_id=?2 AND event_id=?3 AND entity_type IN ('stage','stage_order'))",rusqlite::params![scope.account_id,scope.device_id,event_id],|r|r.get(0)).map_err(|e|e.to_string())?;
-    if !owned{return Err("structural_scope_mismatch".into());}
-    stage_sync::commit_receipt(&mut db,&scope.account_id,&scope.device_id,&event_id,server_sequence,duplicate,&now).map_err(|e|e.to_string())
+fn receipt_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    server_sequence: i64,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::receipt(&mut db, &scope, &event_id, server_sequence).map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn list_received_stage_structural(scope:project_metadata_sync::MetadataScope,limit:i64,after_server_sequence:i64)->Result<Vec<serde_json::Value>,String>{
-    let db=metadata_connection(&scope)?;stage_sync::received(&db,&scope.account_id,limit,after_server_sequence).map_err(|e|e.to_string())
+fn apply_account_catalog(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    frame: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<String, String> {
+    let mut db = metadata_connection(&scope)?;
+    account_catalog::apply(&mut db, &scope, &event_id, &frame, &nonce, &ciphertext)
+        .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn apply_authenticated_stage_structural(scope:project_metadata_sync::MetadataScope,event_id:String,frame:Vec<u8>,nonce:Vec<u8>,ciphertext:Vec<u8>)->Result<String,String>{
-    let mut db=metadata_connection(&scope)?;
-    stage_sync::apply_received(&mut db,&scope.account_id,&event_id,&frame,&nonce,&ciphertext).map(str::to_string).map_err(|e|e.to_string())
-}
-#[tauri::command]
-fn record_stage_structural_blocker(scope:project_metadata_sync::MetadataScope,event_id:String,reason:String)->Result<(),String>{
-    let db=metadata_connection(&scope)?;stage_sync::reader_blocker(&db,&scope.account_id,&event_id,&reason).map_err(|e|e.to_string())
-}
-#[tauri::command]
-fn retry_stage_structural(scope:project_metadata_sync::MetadataScope)->Result<(),String>{
-    let mut db=metadata_connection(&scope)?;
-    stage_sync::retry(&mut db,&scope.account_id,8).map_err(|e|e.to_string())?;
-    let projects={let mut q=db.prepare("SELECT project_id FROM cloud_sync_structural_migrations WHERE account_id=?1 UNION SELECT project_id FROM cloud_sync_structural_order_intents WHERE account_id=?1 LIMIT 32").map_err(|e|e.to_string())?;let rows=q.query_map([&scope.account_id],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;rows};
-    for p in projects{stage_sync::advance(&mut db,&scope.account_id,&p).map_err(|e|e.to_string())?;}
+fn reorder_project_folders(folder_ids: Vec<String>) -> Result<(), String> {
+    let mut db = open_projects_database()?;
+    require_projects_owner(&db)?;
+    let now: String = db
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    if !account_catalog::normal(
+        &mut db,
+        "folder_order",
+        "folder_order",
+        serde_json::json!({"ids":folder_ids}),
+        &now,
+    )
+    .map_err(|e| e.to_string())?
+    {
+        return Err("catalog_authority_required".into());
+    }
     Ok(())
 }
 
 #[tauri::command]
-fn capture_project_metadata_candidate(scope:project_metadata_sync::MetadataScope,project_id:String,now:String)->Result<String,String>{
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::capture_legacy_candidate(&mut connection,&scope.account_id,&project_id,&now).map_err(|e|e.to_string())
+fn list_received_account_objects(
+    scope: project_metadata_sync::MetadataScope,
+    limit: u32,
+    after: i64,
+) -> Result<Vec<account_sync::ReceivedAccountItem>, String> {
+    let connection = metadata_connection(&scope)?;
+    account_sync::received(&connection, &scope, limit, after).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn block_account_object(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+    code: String,
+) -> Result<(), String> {
+    let connection = metadata_connection(&scope)?;
+    account_sync::block(&connection, &scope, &event_id, &nonce, &ciphertext, &code)
+        .map_err(|e| e.to_string())
+}
+
+fn metadata_connection(
+    scope: &project_metadata_sync::MetadataScope,
+) -> Result<rusqlite::Connection, String> {
+    let connection = open_notes_database(true)?;
+    require_sqlite_notes_owner(&connection)?;
+    project_metadata_sync::assert_runtime_scope(
+        &connection,
+        &scope.account_id,
+        &scope.canonical_user_id,
+        &scope.device_id,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(connection)
 }
 
 #[tauri::command]
-fn read_project_metadata_migration_status(scope:project_metadata_sync::MetadataScope,project_id:String)
-    ->Result<project_metadata_sync::MetadataMigrationStatus,String>{
-    let connection=metadata_connection(&scope)?;
-    project_metadata_sync::migration_status(&connection,&scope.account_id,&project_id).map_err(|e|e.to_string())
+fn begin_content_note_migration(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    now: String,
+) -> Result<serde_json::Value, String> {
+    let mut db = metadata_connection(&scope)?;
+    content_note_writer::begin(&mut db, &scope, &project_id, &now)
+}
+#[tauri::command]
+fn read_content_note_migration(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+) -> Result<serde_json::Value, String> {
+    let db = metadata_connection(&scope)?;
+    content_note_writer::view(&db, &scope, &project_id)
+}
+#[tauri::command]
+fn read_content_note_conflicts(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = metadata_connection(&scope)?;
+    content_note_writer::conflicts(&db, &scope, &project_id)
+}
+#[tauri::command]
+fn choose_content_note_version(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    decision: serde_json::Value,
+    selected: String,
+    now: String,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    if decision["kind"] == "import" {
+        let command = content_note_writer::prepare_import_choice(
+            &mut db,
+            &scope,
+            &project_id,
+            &decision,
+            &selected,
+            &now,
+        )?;
+        drop(db);
+        let mut privileged = sqlite::open_privileged_remote_apply_database(
+            &sqlite_data_root()?.join("nfprogress.db"),
+        )
+        .map_err(|e| e.to_string())?;
+        note_sync::apply_verified_received_content_note_ipc(&mut privileged, command)
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let command = content_note_writer::prepare_choice(
+        &mut db,
+        &scope,
+        &project_id,
+        &decision,
+        &selected,
+        &now,
+    )?;
+    drop(db);
+    let mut privileged =
+        sqlite::open_privileged_remote_apply_database(&sqlite_data_root()?.join("nfprogress.db"))
+            .map_err(|e| e.to_string())?;
+    note_sync::apply_prepared_note_conflict_resolution(&mut privileged, &command)
+        .map_err(|_| "stale_note_resolution")?;
+    Ok(())
+}
+#[tauri::command]
+fn list_pending_content_notes(
+    scope: project_metadata_sync::MetadataScope,
+    sealed: bool,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = metadata_connection(&scope)?;
+    content_note_writer::pending(&db, &scope, sealed)
+}
+#[tauri::command]
+fn seal_content_note(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    frame: Vec<u8>,
+    envelope: note_sync::EncryptedNoteSyncEnvelope,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    content_note_writer::seal(&mut db, &scope, &event_id, &frame, envelope)
+}
+#[tauri::command]
+fn receipt_content_note(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    server_sequence: i64,
+    duplicate: bool,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    content_note_writer::receipt(&mut db, &scope, &event_id, server_sequence, duplicate)
 }
 
 #[tauri::command]
-fn prepare_project_metadata_genesis(scope:project_metadata_sync::MetadataScope,candidate_id:String,now:String)->Result<String,String>{
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::prepare_metadata_genesis(&mut connection,&scope.account_id,&candidate_id,&now).map_err(|e|e.to_string())
+fn read_stage_structural_authority(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+) -> Result<stage_sync::StructuralView, String> {
+    let db = metadata_connection(&scope)?;
+    stage_sync::authority(&db, &scope.account_id, &project_id).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn begin_stage_structural_migration(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    now: String,
+) -> Result<stage_sync::StructuralView, String> {
+    let mut db = metadata_connection(&scope)?;
+    stage_sync::begin(&mut db, &scope.account_id, &project_id, &now).map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn prepare_stage_structural_decision(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    decision: stage_sync::Decision,
+    now: String,
+) -> Result<String, String> {
+    let mut db = metadata_connection(&scope)?;
+    stage_sync::decide(&mut db, &scope.account_id, &project_id, &decision, &now)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn list_pending_stage_structural(
+    scope: project_metadata_sync::MetadataScope,
+    sealed: bool,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = metadata_connection(&scope)?;
+    stage_sync::pending_events(&db, &scope.account_id, &scope.device_id, sealed)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn commit_sealed_stage_structural(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    frame: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    let e = stage_sync::unframe(&frame).map_err(|e| e.to_string())?;
+    if e.header.device_id != scope.device_id
+        || e.header.account_id != scope.canonical_user_id
+        || e.header.event_id != event_id
+    {
+        return Err("structural_scope_mismatch".into());
+    }
+    stage_sync::seal(
+        &mut db,
+        &scope.account_id,
+        &event_id,
+        &frame,
+        &nonce,
+        &ciphertext,
+    )
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn commit_stage_structural_receipt(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    server_sequence: i64,
+    duplicate: bool,
+    now: String,
+) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    let owned:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_outbox WHERE account_id=?1 AND device_id=?2 AND event_id=?3 AND entity_type IN ('stage','stage_order'))",rusqlite::params![scope.account_id,scope.device_id,event_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    if !owned {
+        return Err("structural_scope_mismatch".into());
+    }
+    stage_sync::commit_receipt(
+        &mut db,
+        &scope.account_id,
+        &scope.device_id,
+        &event_id,
+        server_sequence,
+        duplicate,
+        &now,
+    )
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn list_received_stage_structural(
+    scope: project_metadata_sync::MetadataScope,
+    limit: i64,
+    after_server_sequence: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let db = metadata_connection(&scope)?;
+    stage_sync::received(&db, &scope.account_id, limit, after_server_sequence)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn apply_authenticated_stage_structural(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    frame: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<String, String> {
+    let mut db = metadata_connection(&scope)?;
+    stage_sync::apply_received(
+        &mut db,
+        &scope.account_id,
+        &event_id,
+        &frame,
+        &nonce,
+        &ciphertext,
+    )
+    .map(str::to_string)
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn record_stage_structural_blocker(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    reason: String,
+) -> Result<(), String> {
+    let db = metadata_connection(&scope)?;
+    stage_sync::reader_blocker(&db, &scope.account_id, &event_id, &reason)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn retry_stage_structural(scope: project_metadata_sync::MetadataScope) -> Result<(), String> {
+    let mut db = metadata_connection(&scope)?;
+    stage_sync::retry(&mut db, &scope.account_id, 8).map_err(|e| e.to_string())?;
+    let projects = {
+        let mut q=db.prepare("SELECT project_id FROM cloud_sync_structural_migrations WHERE account_id=?1 UNION SELECT project_id FROM cloud_sync_structural_order_intents WHERE account_id=?1 LIMIT 32").map_err(|e|e.to_string())?;
+        let rows = q
+            .query_map([&scope.account_id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        rows
+    };
+    for p in projects {
+        stage_sync::advance(&mut db, &scope.account_id, &p).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
-fn list_unsealed_project_metadata_genesis(scope:project_metadata_sync::MetadataScope)->Result<Vec<serde_json::Value>,String>{
-    let connection=metadata_connection(&scope)?;
-    project_metadata_sync::unsealed_genesis(&connection,&scope.account_id,&scope.device_id).map_err(|e|e.to_string())
+fn capture_project_metadata_candidate(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    now: String,
+) -> Result<String, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::capture_legacy_candidate(
+        &mut connection,
+        &scope.account_id,
+        &project_id,
+        &now,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn commit_sealed_project_metadata_genesis(scope:project_metadata_sync::MetadataScope,event_id:String,nonce:Vec<u8>,ciphertext:Vec<u8>)->Result<(),String>{
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::commit_sealed_genesis(&mut connection,&scope.account_id,&scope.device_id,&event_id,&nonce,&ciphertext).map_err(|e|e.to_string())
+fn read_project_metadata_migration_status(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+) -> Result<project_metadata_sync::MetadataMigrationStatus, String> {
+    let connection = metadata_connection(&scope)?;
+    project_metadata_sync::migration_status(&connection, &scope.account_id, &project_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn list_sealed_project_metadata_genesis(scope:project_metadata_sync::MetadataScope)->Result<Vec<project_metadata_sync::MetadataUploadItem>,String>{
-    let connection=metadata_connection(&scope)?;
-    project_metadata_sync::sealed_genesis(&connection,&scope.account_id,&scope.device_id).map_err(|e|e.to_string())
+fn prepare_project_metadata_genesis(
+    scope: project_metadata_sync::MetadataScope,
+    candidate_id: String,
+    now: String,
+) -> Result<String, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::prepare_metadata_genesis(
+        &mut connection,
+        &scope.account_id,
+        &candidate_id,
+        &now,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn commit_project_metadata_upload_receipt(scope:project_metadata_sync::MetadataScope,event_id:String,server_sequence:i64,duplicate:bool,now:String)->Result<(),String>{
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::commit_upload_receipt(&mut connection,&scope.account_id,&scope.device_id,&event_id,server_sequence,duplicate,&now).map_err(|e|e.to_string())
+fn list_unsealed_project_metadata_genesis(
+    scope: project_metadata_sync::MetadataScope,
+) -> Result<Vec<serde_json::Value>, String> {
+    let connection = metadata_connection(&scope)?;
+    project_metadata_sync::unsealed_genesis(&connection, &scope.account_id, &scope.device_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn project_cover_command(scope:project_metadata_sync::MetadataScope,project_id:String,action:String,data:serde_json::Value,now:String)->Result<serde_json::Value,String>{
- let mut connection=metadata_connection(&scope)?;
- project_cover_sync::command(&mut connection,&scope,&project_id,&action,&data,&now).map_err(|e|e.to_string())
+fn commit_sealed_project_metadata_genesis(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+) -> Result<(), String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::commit_sealed_genesis(
+        &mut connection,
+        &scope.account_id,
+        &scope.device_id,
+        &event_id,
+        &nonce,
+        &ciphertext,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn list_received_project_metadata(scope:project_metadata_sync::MetadataScope,limit:i64,after_server_sequence:i64)->Result<Vec<project_metadata_sync::MetadataInboxItem>,String>{
-    let connection=metadata_connection(&scope)?;
-    project_metadata_sync::received_metadata(&connection,&scope.account_id,limit,after_server_sequence).map_err(|e|e.to_string())
+fn list_sealed_project_metadata_genesis(
+    scope: project_metadata_sync::MetadataScope,
+) -> Result<Vec<project_metadata_sync::MetadataUploadItem>, String> {
+    let connection = metadata_connection(&scope)?;
+    project_metadata_sync::sealed_genesis(&connection, &scope.account_id, &scope.device_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn record_project_metadata_compression_blocker(scope:project_metadata_sync::MetadataScope,event_id:String,nonce:Vec<u8>,ciphertext:Vec<u8>,code:String)->Result<(),String>{
-    let db=metadata_connection(&scope)?;
-    project_metadata_sync::compression_reader_blocker(&db,&scope.account_id,&event_id,&nonce,&ciphertext,&code).map_err(|e|e.to_string())
+fn commit_project_metadata_upload_receipt(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    server_sequence: i64,
+    duplicate: bool,
+    now: String,
+) -> Result<(), String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::commit_upload_receipt(
+        &mut connection,
+        &scope.account_id,
+        &scope.device_id,
+        &event_id,
+        server_sequence,
+        duplicate,
+        &now,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn apply_authenticated_project_metadata(scope:project_metadata_sync::MetadataScope,project_id:String,plaintext:Vec<u8>,nonce:Vec<u8>,ciphertext:Vec<u8>,now:String)->Result<String,String>{
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::preserve_authenticated_event_checked(&mut connection,&scope.account_id,&project_id,&plaintext,&now,Some((&nonce,&ciphertext)))
-        .map(str::to_string).map_err(|e|e.to_string())
+fn project_cover_command(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    action: String,
+    data: serde_json::Value,
+    now: String,
+) -> Result<serde_json::Value, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_cover_sync::command(&mut connection, &scope, &project_id, &action, &data, &now)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn read_project_metadata_import(scope:project_metadata_sync::MetadataScope,project_id:String,bootstrap_id:String)->Result<project_metadata_sync::MetadataImportProgress,String> {
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::read_metadata_import(&mut connection,&scope.account_id,&project_id,&bootstrap_id).map_err(|e|e.to_string())
+fn list_received_project_metadata(
+    scope: project_metadata_sync::MetadataScope,
+    limit: i64,
+    after_server_sequence: i64,
+) -> Result<Vec<project_metadata_sync::MetadataInboxItem>, String> {
+    let connection = metadata_connection(&scope)?;
+    project_metadata_sync::received_metadata(
+        &connection,
+        &scope.account_id,
+        limit,
+        after_server_sequence,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn record_project_metadata_compression_blocker(
+    scope: project_metadata_sync::MetadataScope,
+    event_id: String,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+    code: String,
+) -> Result<(), String> {
+    let db = metadata_connection(&scope)?;
+    project_metadata_sync::compression_reader_blocker(
+        &db,
+        &scope.account_id,
+        &event_id,
+        &nonce,
+        &ciphertext,
+        &code,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn apply_authenticated_project_metadata(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    plaintext: Vec<u8>,
+    nonce: Vec<u8>,
+    ciphertext: Vec<u8>,
+    now: String,
+) -> Result<String, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::preserve_authenticated_event_checked(
+        &mut connection,
+        &scope.account_id,
+        &project_id,
+        &plaintext,
+        &now,
+        Some((&nonce, &ciphertext)),
+    )
+    .map(str::to_string)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn read_project_metadata_import(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    bootstrap_id: String,
+) -> Result<project_metadata_sync::MetadataImportProgress, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::read_metadata_import(
+        &mut connection,
+        &scope.account_id,
+        &project_id,
+        &bootstrap_id,
+    )
+    .map_err(|e| e.to_string())
 }
 #[tauri::command]
-fn commit_project_metadata_import_page(scope:project_metadata_sync::MetadataScope,project_id:String,bootstrap_id:String,page:project_metadata_sync::MetadataImportPage)->Result<project_metadata_sync::MetadataImportProgress,String> {
-    let mut connection=metadata_connection(&scope)?;
-    project_metadata_sync::commit_metadata_import_page(&mut connection,&scope.account_id,&scope.canonical_user_id,&project_id,&bootstrap_id,&page).map_err(|e|e.to_string())
+fn commit_project_metadata_import_page(
+    scope: project_metadata_sync::MetadataScope,
+    project_id: String,
+    bootstrap_id: String,
+    page: project_metadata_sync::MetadataImportPage,
+) -> Result<project_metadata_sync::MetadataImportProgress, String> {
+    let mut connection = metadata_connection(&scope)?;
+    project_metadata_sync::commit_metadata_import_page(
+        &mut connection,
+        &scope.account_id,
+        &scope.canonical_user_id,
+        &project_id,
+        &bootstrap_id,
+        &page,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -2939,11 +3865,21 @@ fn prepare_project_metadata_change(
 }
 
 #[tauri::command]
-fn create_note(project_id: String, stage_id: Option<String>, content_format:Option<String>) -> Result<serde_json::Value, String> {
+fn create_note(
+    project_id: String,
+    stage_id: Option<String>,
+    content_format: Option<String>,
+) -> Result<serde_json::Value, String> {
     let mut connection = open_notes_database(true)?;
     require_sqlite_notes_owner(&connection)?;
     let id = new_note_id()?;
-    create_note_with_format_in_connection(&mut connection, &project_id, stage_id.as_deref(), &id,content_format.as_deref().unwrap_or("html"))?;
+    create_note_with_format_in_connection(
+        &mut connection,
+        &project_id,
+        stage_id.as_deref(),
+        &id,
+        content_format.as_deref().unwrap_or("html"),
+    )?;
     get_note(project_id, id, stage_id)?.ok_or_else(|| "Созданная заметка не найдена.".to_string())
 }
 
@@ -2978,13 +3914,19 @@ fn create_note_in_connection(
     stage_id: Option<&str>,
     note_id: &str,
 ) -> Result<String, String> {
-    create_note_with_format_in_connection(connection,project_id,stage_id,note_id,"html")
+    create_note_with_format_in_connection(connection, project_id, stage_id, note_id, "html")
 }
 
 fn create_note_with_format_in_connection(
-    connection:&mut rusqlite::Connection,project_id:&str,stage_id:Option<&str>,note_id:&str,content_format:&str,
-)->Result<String,String>{
-    if !matches!(content_format,"plain"|"html"){return Err("invalid_note_payload".into())}
+    connection: &mut rusqlite::Connection,
+    project_id: &str,
+    stage_id: Option<&str>,
+    note_id: &str,
+    content_format: &str,
+) -> Result<String, String> {
+    if !matches!(content_format, "plain" | "html") {
+        return Err("invalid_note_payload".into());
+    }
     let transaction = connection
         .transaction()
         .map_err(|error| error.to_string())?;
@@ -3175,14 +4117,49 @@ fn update_note_in_connection(
         serde_json::Value::String(now.clone()),
     );
     let snapshot = note.to_string();
-    if note["source_type"]=="mindmap" {
-        let owner_raw:String=if let Some(stage)=note_stage_id.as_deref(){transaction.query_row("SELECT payload_json FROM stages WHERE project_id=?1 AND id=?2",rusqlite::params![project_id,stage],|r|r.get(0))}else{transaction.query_row("SELECT payload_json FROM projects WHERE id=?1",[project_id],|r|r.get(0))}.map_err(|e|e.to_string())?;
-        let owner:serde_json::Value=serde_json::from_str(&owner_raw).map_err(|e|e.to_string())?;
-        let map=stored_map(&owner).ok_or("map_note_link_invalid")?;
-        let updated=mindmap::set_note_text(&map,map_node_id.as_deref().ok_or("map_note_link_invalid")?,note["content"].as_str().unwrap_or("")).ok_or("map_note_link_invalid")?;
-        if map_sync::local_edit(&transaction,project_id,note_stage_id.as_deref(),&updated,Some(&note),&now).map_err(|e|e.to_string())? {
-            let raw:String=transaction.query_row("SELECT payload_json FROM notes WHERE id=?1",[&raw_id],|r|r.get(0)).map_err(|e|e.to_string())?;
-            transaction.commit().map_err(|e|e.to_string())?;return Ok(raw);
+    if note["source_type"] == "mindmap" {
+        let owner_raw: String = if let Some(stage) = note_stage_id.as_deref() {
+            transaction.query_row(
+                "SELECT payload_json FROM stages WHERE project_id=?1 AND id=?2",
+                rusqlite::params![project_id, stage],
+                |r| r.get(0),
+            )
+        } else {
+            transaction.query_row(
+                "SELECT payload_json FROM projects WHERE id=?1",
+                [project_id],
+                |r| r.get(0),
+            )
+        }
+        .map_err(|e| e.to_string())?;
+        let owner: serde_json::Value =
+            serde_json::from_str(&owner_raw).map_err(|e| e.to_string())?;
+        let map = stored_map(&owner).ok_or("map_note_link_invalid")?;
+        let updated = mindmap::set_note_text(
+            &map,
+            map_node_id.as_deref().ok_or("map_note_link_invalid")?,
+            note["content"].as_str().unwrap_or(""),
+        )
+        .ok_or("map_note_link_invalid")?;
+        if map_sync::local_edit(
+            &transaction,
+            project_id,
+            note_stage_id.as_deref(),
+            &updated,
+            Some(&note),
+            &now,
+        )
+        .map_err(|e| e.to_string())?
+        {
+            let raw: String = transaction
+                .query_row(
+                    "SELECT payload_json FROM notes WHERE id=?1",
+                    [&raw_id],
+                    |r| r.get(0),
+                )
+                .map_err(|e| e.to_string())?;
+            transaction.commit().map_err(|e| e.to_string())?;
+            return Ok(raw);
         }
     }
     prepare_direct_note_intent(
@@ -3325,8 +4302,18 @@ fn delete_note_in_connection(
             .ok_or_else(|| "Связанная карта больше не существует.".to_string())?;
         let updated_map = mindmap::remove_note(&map, node_id)
             .ok_or_else(|| "Связанная заметка карты больше не существует.".to_string())?;
-        if map_sync::local_edit(&transaction,project_id,note_stage_id.as_deref(),&updated_map,None,&now).map_err(|e|e.to_string())? {
-            transaction.commit().map_err(|e|e.to_string())?;return Ok(());
+        if map_sync::local_edit(
+            &transaction,
+            project_id,
+            note_stage_id.as_deref(),
+            &updated_map,
+            None,
+            &now,
+        )
+        .map_err(|e| e.to_string())?
+        {
+            transaction.commit().map_err(|e| e.to_string())?;
+            return Ok(());
         }
         update_stored_map(
             &transaction,
@@ -3410,8 +4397,18 @@ fn reorder_notes_in_connection(
             if note["source_type"] == "mindmap" {
                 let map = map_sync::owner_data(&transaction, project_id, note_stage_id.as_deref())
                     .map_err(|e| e.to_string())?;
-                if map_sync::local_edit(&transaction, project_id, note_stage_id.as_deref(), &map, Some(&note), &now)
-                    .map_err(|e| e.to_string())? { continue; }
+                if map_sync::local_edit(
+                    &transaction,
+                    project_id,
+                    note_stage_id.as_deref(),
+                    &map,
+                    Some(&note),
+                    &now,
+                )
+                .map_err(|e| e.to_string())?
+                {
+                    continue;
+                }
             }
             let snapshot = note.to_string();
             prepare_direct_note_intent(
@@ -3745,7 +4742,11 @@ struct EntityUpdateCommand {
 }
 
 // Preserve absent vs explicit null for the catalog remove-membership writer.
-fn deserialize_folder_patch<'de,D:serde::Deserializer<'de>>(d:D)->Result<Option<Option<String>>,D::Error>{Option::<String>::deserialize(d).map(Some)}
+fn deserialize_folder_patch<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3763,7 +4764,7 @@ struct ProjectUpdateCommand {
     stages_enabled: Option<bool>,
     combine_stage_mindmaps: Option<bool>,
     cover_image: Option<String>,
-    #[serde(default, deserialize_with="deserialize_folder_patch")]
+    #[serde(default, deserialize_with = "deserialize_folder_patch")]
     folder_id: Option<Option<String>>,
 }
 
@@ -3905,7 +4906,9 @@ fn update_project_metadata(
             .clone()
             .map_or(serde_json::Value::Null, serde_json::Value::String);
     }
-    if proposed["infinite"] == true { proposed["goal"] = serde_json::Value::Null; }
+    if proposed["infinite"] == true {
+        proposed["goal"] = serde_json::Value::Null;
+    }
     let metadata_now = connection
         .query_row(
             "SELECT strftime('%Y-%m-%dT%H:%M:%f','now') || '000Z'",
@@ -3974,17 +4977,47 @@ fn reorder_projects(project_ids: Vec<String>) -> Result<serde_json::Value, Strin
         normalized[position] = project_id.clone();
     }
     drop(repository);
-    let now:String=connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
+    let now: String = connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
     let mut q=connection.prepare("SELECT b.project_id FROM cloud_sync_project_bindings b JOIN cloud_catalog_state c ON c.account_id=b.account_id").map_err(|e|e.to_string())?;
-    let bound=q.query_map([],|r|r.get::<_,String>(0)).map_err(|e|e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())?;drop(q);
-    let portable=normalized.iter().filter(|id|bound.contains(id)).cloned().collect::<Vec<_>>();
-    let captured=account_catalog::normal(&mut connection,"project_order","project_order",serde_json::json!({"ids":portable}),&now).map_err(|e|e.to_string())?;
+    let bound = q
+        .query_map([], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    drop(q);
+    let portable = normalized
+        .iter()
+        .filter(|id| bound.contains(id))
+        .cloned()
+        .collect::<Vec<_>>();
+    let captured = account_catalog::normal(
+        &mut connection,
+        "project_order",
+        "project_order",
+        serde_json::json!({"ids":portable}),
+        &now,
+    )
+    .map_err(|e| e.to_string())?;
     if captured {
-        let old_cloud=existing.iter().filter(|id|bound.contains(id)).cloned().collect::<Vec<_>>();
-        let slots=normalized.iter().enumerate().filter_map(|(i,id)|bound.contains(id).then_some(i)).collect::<Vec<_>>();
-        for (slot,id) in slots.into_iter().zip(old_cloud){normalized[slot]=id;}
+        let old_cloud = existing
+            .iter()
+            .filter(|id| bound.contains(id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let slots = normalized
+            .iter()
+            .enumerate()
+            .filter_map(|(i, id)| bound.contains(id).then_some(i))
+            .collect::<Vec<_>>();
+        for (slot, id) in slots.into_iter().zip(old_cloud) {
+            normalized[slot] = id;
+        }
     }
-    let mut repository=ProjectsRepository::new(&mut connection);
+    let mut repository = ProjectsRepository::new(&mut connection);
     repository
         .update_project_order(&normalized)
         .map_err(|error| error.to_string())?;
@@ -4269,7 +5302,7 @@ fn update_project(
             return Err("Папка не найдена.".to_string());
         }
     }
-    let old_folder=current.payload["folder_id"].clone();
+    let old_folder = current.payload["folder_id"].clone();
     let mut payload = current.payload;
     let object = payload
         .as_object_mut()
@@ -4346,7 +5379,9 @@ fn update_project(
                 .map_or(serde_json::Value::Null, serde_json::Value::String),
         );
     }
-    if payload["infinite"] == true { payload["goal"] = serde_json::Value::Null; }
+    if payload["infinite"] == true {
+        payload["goal"] = serde_json::Value::Null;
+    }
     drop(repository);
     let metadata_now = connection
         .query_row(
@@ -4355,8 +5390,21 @@ fn update_project(
             |r| r.get::<_, String>(0),
         )
         .map_err(|e| e.to_string())?;
-    let catalog_captured=if let Some(folder)=folder_id.as_ref(){account_catalog::normal(&mut connection,"folder_membership",&project_id,serde_json::json!({"folder_id":folder}),&metadata_now).map_err(|e|e.to_string())?}else{false};
-    if catalog_captured {payload["folder_id"]=old_folder;}
+    let catalog_captured = if let Some(folder) = folder_id.as_ref() {
+        account_catalog::normal(
+            &mut connection,
+            "folder_membership",
+            &project_id,
+            serde_json::json!({"folder_id":folder}),
+            &metadata_now,
+        )
+        .map_err(|e| e.to_string())?
+    } else {
+        false
+    };
+    if catalog_captured {
+        payload["folder_id"] = old_folder;
+    }
     let captured = project_metadata_sync::capture_normal_edit(
         &mut connection,
         &project_id,
@@ -4460,14 +5508,16 @@ fn create_stage(
         payload,
     };
     drop(repository);
-    let portable=stage.payload.clone();
-    let now=stage_sync::event_now(&connection).map_err(|e|e.to_string())?;
-    if stage_sync::normal_edit(&mut connection,&project_id,&stage_id,portable,&now).map_err(|e|e.to_string())? {
+    let portable = stage.payload.clone();
+    let now = stage_sync::event_now(&connection).map_err(|e| e.to_string())?;
+    if stage_sync::normal_edit(&mut connection, &project_id, &stage_id, portable, &now)
+        .map_err(|e| e.to_string())?
+    {
         documents::move_project_document_to_stage(&project_id, &stage_id)?;
         refresh_project_totals(&mut connection, &project_id)?;
-        return project_payload(&mut connection,&project_id);
+        return project_payload(&mut connection, &project_id);
     }
-    let mut repository=ProjectsRepository::new(&mut connection);
+    let mut repository = ProjectsRepository::new(&mut connection);
     repository
         .insert_stage(&stage)
         .map_err(|error| error.to_string())?;
@@ -4574,11 +5624,13 @@ fn update_stage(
     };
     drop(repository);
     let portable = update.payload.clone();
-    let now=stage_sync::event_now(&connection).map_err(|e|e.to_string())?;
-    if stage_sync::normal_edit(&mut connection,&project_id,&stage_id,portable,&now).map_err(|e|e.to_string())? {
-        return project_payload(&mut connection,&project_id);
+    let now = stage_sync::event_now(&connection).map_err(|e| e.to_string())?;
+    if stage_sync::normal_edit(&mut connection, &project_id, &stage_id, portable, &now)
+        .map_err(|e| e.to_string())?
+    {
+        return project_payload(&mut connection, &project_id);
     }
-    let mut repository=ProjectsRepository::new(&mut connection);
+    let mut repository = ProjectsRepository::new(&mut connection);
     repository
         .update_stage(&stage_id, &update)
         .map_err(|error| error.to_string())?;
@@ -4591,7 +5643,7 @@ fn update_stage(
 fn delete_stage(command: StageIdCommand) -> Result<(), String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    stage_sync::guard_delete(&connection,&command.project_id).map_err(|e|e.to_string())?;
+    stage_sync::guard_delete(&connection, &command.project_id).map_err(|e| e.to_string())?;
     let mut repository = ProjectsRepository::new(&mut connection);
     let stage = repository
         .get_stage(&command.stage_id)
@@ -4611,9 +5663,16 @@ fn delete_stage(command: StageIdCommand) -> Result<(), String> {
 fn reorder_stages(command: ReorderStagesCommand) -> Result<serde_json::Value, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    let now=stage_sync::event_now(&connection).map_err(|e|e.to_string())?;
-    if stage_sync::normal_order(&mut connection,&command.project_id,&command.stage_ids,&now).map_err(|e|e.to_string())? {
-        return project_payload(&mut connection,&command.project_id);
+    let now = stage_sync::event_now(&connection).map_err(|e| e.to_string())?;
+    if stage_sync::normal_order(
+        &mut connection,
+        &command.project_id,
+        &command.stage_ids,
+        &now,
+    )
+    .map_err(|e| e.to_string())?
+    {
+        return project_payload(&mut connection, &command.project_id);
     }
     let mut repository = ProjectsRepository::new(&mut connection);
     repository
@@ -4671,11 +5730,15 @@ fn set_project_archived(command: ArchiveProjectCommand) -> Result<serde_json::Va
 
 #[tauri::command]
 fn complete_project(command: ProjectIdCommand) -> Result<serde_json::Value, String> {
-    let mut connection=open_projects_database()?;require_projects_owner(&connection)?;
-    complete_project_sqlite(&mut connection,command)
+    let mut connection = open_projects_database()?;
+    require_projects_owner(&connection)?;
+    complete_project_sqlite(&mut connection, command)
 }
 
-fn complete_project_sqlite(connection:&mut rusqlite::Connection, command:ProjectIdCommand)->Result<serde_json::Value,String>{
+fn complete_project_sqlite(
+    connection: &mut rusqlite::Connection,
+    command: ProjectIdCommand,
+) -> Result<serde_json::Value, String> {
     let now = now_from_database(connection)?;
     let mut repository = ProjectsRepository::new(connection);
     let current = repository
@@ -4699,11 +5762,19 @@ fn complete_project_sqlite(connection:&mut rusqlite::Connection, command:Project
     payload["status"] = "завершен".into();
     payload["completed_at"] = now.clone().into();
     drop(repository);
-    let portable_now=stage_sync::event_now(connection).map_err(|e|e.to_string())?;
-    let captured=project_metadata_sync::capture_normal_edit(connection,&command.project_id,&payload,&portable_now).map_err(|e|e.to_string())?;
-    let mut repository=ProjectsRepository::new(connection);
+    let portable_now = stage_sync::event_now(connection).map_err(|e| e.to_string())?;
+    let captured = project_metadata_sync::capture_normal_edit(
+        connection,
+        &command.project_id,
+        &payload,
+        &portable_now,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut repository = ProjectsRepository::new(connection);
     if !captured {
-        repository.update_project_payload(&command.project_id,&payload).map_err(|e|e.to_string())?;
+        repository
+            .update_project_payload(&command.project_id, &payload)
+            .map_err(|e| e.to_string())?;
     }
     append_event_with_context(
         &mut repository,
@@ -4726,11 +5797,15 @@ fn complete_project_sqlite(connection:&mut rusqlite::Connection, command:Project
 
 #[tauri::command]
 fn complete_stage(command: StageIdCommand) -> Result<serde_json::Value, String> {
-    let mut connection=open_projects_database()?;require_projects_owner(&connection)?;
-    complete_stage_sqlite(&mut connection,command)
+    let mut connection = open_projects_database()?;
+    require_projects_owner(&connection)?;
+    complete_stage_sqlite(&mut connection, command)
 }
 
-fn complete_stage_sqlite(connection:&mut rusqlite::Connection, command:StageIdCommand)->Result<serde_json::Value,String>{
+fn complete_stage_sqlite(
+    connection: &mut rusqlite::Connection,
+    command: StageIdCommand,
+) -> Result<serde_json::Value, String> {
     let now = now_from_database(connection)?;
     let mut repository = ProjectsRepository::new(connection);
     let stage = repository
@@ -4769,10 +5844,17 @@ fn complete_stage_sqlite(connection:&mut rusqlite::Connection, command:StageIdCo
         payload,
     };
     drop(repository);
-    let portable=update.payload.clone();
-    let now=stage_sync::event_now(connection).map_err(|e|e.to_string())?;
-    let captured=stage_sync::normal_edit(connection,&command.project_id,&command.stage_id,portable,&now).map_err(|e|e.to_string())?;
-    let mut repository=ProjectsRepository::new(connection);
+    let portable = update.payload.clone();
+    let now = stage_sync::event_now(connection).map_err(|e| e.to_string())?;
+    let captured = stage_sync::normal_edit(
+        connection,
+        &command.project_id,
+        &command.stage_id,
+        portable,
+        &now,
+    )
+    .map_err(|e| e.to_string())?;
+    let mut repository = ProjectsRepository::new(connection);
     if !captured {
         repository
             .update_stage(&command.stage_id, &update)
@@ -4832,8 +5914,22 @@ fn create_project_folder(name: String) -> Result<serde_json::Value, String> {
         return Err("Название папки некорректно.".to_string());
     }
     let id = new_note_id()?;
-    let now:String=connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-    if account_catalog::normal(&mut connection,"folder",&id,serde_json::json!({"name":name}),&now).map_err(|e|e.to_string())? {return Ok(serde_json::json!({"id":id,"name":name}))}
+    let now: String = connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    if account_catalog::normal(
+        &mut connection,
+        "folder",
+        &id,
+        serde_json::json!({"name":name}),
+        &now,
+    )
+    .map_err(|e| e.to_string())?
+    {
+        return Ok(serde_json::json!({"id":id,"name":name}));
+    }
 
     let position: i64 = connection
         .query_row(
@@ -4865,8 +5961,22 @@ fn update_project_folder(folder_id: String, name: String) -> Result<serde_json::
         return Err("Название папки некорректно.".to_string());
     }
 
-    let now:String=connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-    if account_catalog::normal(&mut connection,"folder",&folder_id,serde_json::json!({"name":name}),&now).map_err(|e|e.to_string())? {return Ok(serde_json::json!({"id":folder_id,"name":name}))}
+    let now: String = connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    if account_catalog::normal(
+        &mut connection,
+        "folder",
+        &folder_id,
+        serde_json::json!({"name":name}),
+        &now,
+    )
+    .map_err(|e| e.to_string())?
+    {
+        return Ok(serde_json::json!({"id":folder_id,"name":name}));
+    }
     let changed = connection.execute("UPDATE project_folders SET name=?1,payload_json=json_set(payload_json,'$.name',?1) WHERE id=?2", rusqlite::params![name,folder_id]).map_err(|error| error.to_string())?;
     if changed != 1 {
         return Err("Папка не найдена.".to_string());
@@ -4879,8 +5989,22 @@ fn delete_project_folder(folder_id: String) -> Result<(), String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
 
-    let now:String=connection.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-    if account_catalog::normal(&mut connection,"folder",&folder_id,serde_json::Value::Null,&now).map_err(|e|e.to_string())? {return Ok(())}
+    let now: String = connection
+        .query_row("SELECT strftime('%Y-%m-%dT%H:%M:%f000Z','now')", [], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
+    if account_catalog::normal(
+        &mut connection,
+        "folder",
+        &folder_id,
+        serde_json::Value::Null,
+        &now,
+    )
+    .map_err(|e| e.to_string())?
+    {
+        return Ok(());
+    }
     let tx = connection
         .transaction()
         .map_err(|error| error.to_string())?;
@@ -4902,7 +6026,12 @@ fn delete_project_folder(folder_id: String) -> Result<(), String> {
 #[tauri::command]
 fn add_project_progress(command: AddProjectProgressCommand) -> Result<serde_json::Value, String> {
     validate_progress_command(&command.project_id, command.new_total, None)?;
-    add_progress_sqlite(command.project_id, None, command.new_total, command.expected_heads)
+    add_progress_sqlite(
+        command.project_id,
+        None,
+        command.new_total,
+        command.expected_heads,
+    )
 }
 
 #[tauri::command]
@@ -5034,31 +6163,48 @@ fn add_progress_sqlite(
     let tx = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    if stage_id.is_none()&&tx.query_row("SELECT EXISTS(SELECT 1 FROM stages WHERE project_id=?1)",[&project_id],|r|r.get::<_,bool>(0)).map_err(|e|e.to_string())?{return Err("Выберите этап для записи прогресса.".into())}
-    let handled=progress_sync::normal(&tx,&project_id,stage_id.as_deref(),&entry,expected_heads.as_deref(),&now)?;
+    if stage_id.is_none()
+        && tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM stages WHERE project_id=?1)",
+                [&project_id],
+                |r| r.get::<_, bool>(0),
+            )
+            .map_err(|e| e.to_string())?
+    {
+        return Err("Выберите этап для записи прогресса.".into());
+    }
+    let handled = progress_sync::normal(
+        &tx,
+        &project_id,
+        stage_id.as_deref(),
+        &entry,
+        expected_heads.as_deref(),
+        &now,
+    )?;
     if !handled {
-    tx.execute("INSERT INTO progress_entries(id,project_id,stage_id,created_at,added_symbols,added_progress,payload_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", rusqlite::params![entry_id, project_id, stage_id, now, delta, added_progress, entry.to_string()]).map_err(|error| error.to_string())?;
-    let position: i64 = tx
-        .query_row(
-            "SELECT COALESCE(MAX(position),-1)+1 FROM progress_order",
-            [],
-            |row| row.get(0),
+        tx.execute("INSERT INTO progress_entries(id,project_id,stage_id,created_at,added_symbols,added_progress,payload_json) VALUES(?1,?2,?3,?4,?5,?6,?7)", rusqlite::params![entry_id, project_id, stage_id, now, delta, added_progress, entry.to_string()]).map_err(|error| error.to_string())?;
+        let position: i64 = tx
+            .query_row(
+                "SELECT COALESCE(MAX(position),-1)+1 FROM progress_order",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|error| error.to_string())?;
+        tx.execute(
+            "INSERT INTO progress_order(entry_id,position) VALUES(?1,?2)",
+            rusqlite::params![entry_id, position],
         )
         .map_err(|error| error.to_string())?;
-    tx.execute(
-        "INSERT INTO progress_order(entry_id,position) VALUES(?1,?2)",
-        rusqlite::params![entry_id, position],
-    )
-    .map_err(|error| error.to_string())?;
-    let table = if stage_id.is_some() {
-        "stages"
-    } else {
-        "projects"
-    };
-    tx.execute(&format!("UPDATE {table} SET goal=?1, infinite=?2, unit=?3, updated_at=?4, payload_json=?5 WHERE id=?6"), rusqlite::params![entity.goal, entity.infinite, entity.unit, now, payload.to_string(), entity.id]).map_err(|error| error.to_string())?;
-    if stage_id.is_some() {
-        refresh_project_totals_in_transaction(&tx, &project_id)?;
-    }
+        let table = if stage_id.is_some() {
+            "stages"
+        } else {
+            "projects"
+        };
+        tx.execute(&format!("UPDATE {table} SET goal=?1, infinite=?2, unit=?3, updated_at=?4, payload_json=?5 WHERE id=?6"), rusqlite::params![entity.goal, entity.infinite, entity.unit, now, payload.to_string(), entity.id]).map_err(|error| error.to_string())?;
+        if stage_id.is_some() {
+            refresh_project_totals_in_transaction(&tx, &project_id)?;
+        }
     }
     let game_key = stage_id
         .as_deref()
@@ -5079,7 +6225,9 @@ fn delete_progress_sqlite(
 ) -> Result<serde_json::Value, String> {
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
-    if progress_sync::local_heads(&connection,&project_id,stage_id.as_deref())?.is_some(){return Err("progress_descendant_rebase_required".into())}
+    if progress_sync::local_heads(&connection, &project_id, stage_id.as_deref())?.is_some() {
+        return Err("progress_descendant_rebase_required".into());
+    }
     let now = now_from_database(&connection)?;
     let mut repository = ProjectsRepository::new(&mut connection);
     let project = repository
@@ -5348,21 +6496,26 @@ async fn fetch_update_manifest() -> Result<serde_json::Value, String> {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn account_catalog_membership_patch_distinguishes_absent_move_and_remove(){
-        let absent:super::ProjectUpdateCommand=serde_json::from_value(serde_json::json!({})).unwrap();
-        let remove:super::ProjectUpdateCommand=serde_json::from_value(serde_json::json!({"folderId":null})).unwrap();
-        let assign:super::ProjectUpdateCommand=serde_json::from_value(serde_json::json!({"folderId":"F"})).unwrap();
-        assert_eq!(absent.folder_id,None);assert_eq!(remove.folder_id,Some(None));assert_eq!(assign.folder_id,Some(Some("F".into())));
+    fn account_catalog_membership_patch_distinguishes_absent_move_and_remove() {
+        let absent: super::ProjectUpdateCommand =
+            serde_json::from_value(serde_json::json!({})).unwrap();
+        let remove: super::ProjectUpdateCommand =
+            serde_json::from_value(serde_json::json!({"folderId":null})).unwrap();
+        let assign: super::ProjectUpdateCommand =
+            serde_json::from_value(serde_json::json!({"folderId":"F"})).unwrap();
+        assert_eq!(absent.folder_id, None);
+        assert_eq!(remove.folder_id, Some(None));
+        assert_eq!(assign.folder_id, Some(Some("F".into())));
     }
 
+    use std::fs;
     #[cfg(target_os = "macos")]
     use std::io::Write;
-    use std::fs;
     use std::path::Path;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
     #[cfg(target_os = "macos")]
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use rusqlite::Connection;
 
@@ -5573,10 +6726,7 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert_eq!(
-            super::projects_read_status(&connection).unwrap(),
-            "healthy"
-        );
+        assert_eq!(super::projects_read_status(&connection).unwrap(), "healthy");
 
         let mut connection = connection;
         let project = super::ProjectRecord {
@@ -5593,13 +6743,8 @@ mod tests {
         super::ProjectsRepository::new(&mut connection)
             .insert_project(&project)
             .unwrap();
-        super::create_note_in_connection(
-            &mut connection,
-            &project.id,
-            None,
-            "dirty-mirror-note",
-        )
-        .unwrap();
+        super::create_note_in_connection(&mut connection, &project.id, None, "dirty-mirror-note")
+            .unwrap();
         assert_eq!(
             connection
                 .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get::<_, i64>(0))
@@ -5619,11 +6764,14 @@ mod tests {
         let identity = {
             let mut connection = super::sqlite::open_database(&path).unwrap();
             super::initialize_fresh_desktop_database(&connection, &root).unwrap();
-            let identity = super::provision_cloud_identity_on_connection(&mut connection, &command).unwrap();
-            connection.execute(
-                "UPDATE cloud_sync_state SET pull_cursor=2,ack_cursor=1 WHERE account_id=?1",
-                [&identity.local_account_id],
-            ).unwrap();
+            let identity =
+                super::provision_cloud_identity_on_connection(&mut connection, &command).unwrap();
+            connection
+                .execute(
+                    "UPDATE cloud_sync_state SET pull_cursor=2,ack_cursor=1 WHERE account_id=?1",
+                    [&identity.local_account_id],
+                )
+                .unwrap();
             connection.execute(
                 "INSERT INTO cloud_sync_outbox(event_id,account_id,device_id,project_id,entity_id,entity_type,operation,revision,updated_at,deleted_at,created_at,parent_event_id,local_ordinal,lifecycle)
                  VALUES('123e4567-e89b-42d3-a456-426614174002',?1,?2,'project','note','note','upsert',1,'2026-09-23T00:00:00Z',NULL,'2026-09-23T00:00:00Z',NULL,1,'sealed')",
@@ -5637,15 +6785,51 @@ mod tests {
             identity
         };
         let mut reopened = super::sqlite::open_database(&path).unwrap();
-        assert_eq!(super::read_cloud_identity_on_connection(&mut reopened, &command).unwrap(), Some(identity.clone()));
-        assert_eq!(super::provision_cloud_identity_on_connection(&mut reopened, &command).unwrap(), identity.clone());
-        assert_eq!(reopened.query_row("SELECT pull_cursor,ack_cursor FROM cloud_sync_state WHERE account_id=?1", [&identity.local_account_id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))).unwrap(), (2, 1));
-        assert_eq!(reopened.query_row("SELECT count(*) FROM cloud_sync_outbox WHERE account_id=?1", [&identity.local_account_id], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(reopened.query_row("SELECT count(*) FROM cloud_sync_inbox WHERE account_id=?1", [&identity.local_account_id], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(
+            super::read_cloud_identity_on_connection(&mut reopened, &command).unwrap(),
+            Some(identity.clone())
+        );
+        assert_eq!(
+            super::provision_cloud_identity_on_connection(&mut reopened, &command).unwrap(),
+            identity.clone()
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT pull_cursor,ack_cursor FROM cloud_sync_state WHERE account_id=?1",
+                    [&identity.local_account_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                )
+                .unwrap(),
+            (2, 1)
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_outbox WHERE account_id=?1",
+                    [&identity.local_account_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            reopened
+                .query_row(
+                    "SELECT count(*) FROM cloud_sync_inbox WHERE account_id=?1",
+                    [&identity.local_account_id],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
+            1
+        );
         let mismatch = super::account_binding::EnsureCloudAccountBindingCommand {
-            local_account_id: identity.local_account_id.clone(), canonical_user_id: CLOUD_USER_TWO.to_string(),
+            local_account_id: identity.local_account_id.clone(),
+            canonical_user_id: CLOUD_USER_TWO.to_string(),
         };
-        assert!(super::ensure_cloud_account_binding_on_connection(&mut reopened, &mismatch).is_err());
+        assert!(
+            super::ensure_cloud_account_binding_on_connection(&mut reopened, &mismatch).is_err()
+        );
         drop(reopened);
         fs::remove_dir_all(root).unwrap();
     }
@@ -5658,7 +6842,13 @@ mod tests {
             canonical_user_id: CLOUD_USER_ONE.to_string(),
         };
         assert!(super::provision_cloud_identity_on_connection(&mut connection, &command).is_err());
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
@@ -5883,7 +7073,8 @@ mod tests {
         reconcile_map_notes(&transaction, "p", None, &map, "now").unwrap();
         transaction.commit().unwrap();
 
-        let response = super::map_response_in_connection(&mut connection, "p".into(), None).unwrap();
+        let response =
+            super::map_response_in_connection(&mut connection, "p".into(), None).unwrap();
         assert_eq!(response["notes"].as_array().unwrap().len(), 1);
         drop(connection);
         fs::remove_dir_all(root).unwrap();
@@ -6511,7 +7702,18 @@ pub fn run() {
             reconcile_verified_received_resolution_self_echo,
             commit_note_sync_inbound_page,
             commit_v3_sync_inbound_page,
-            game_sync_command,progress_sync_command,document_sync_command,map_sync_command,read_account_catalog,begin_account_catalog,decide_account_catalog,pending_account_catalog,seal_account_catalog,receipt_account_catalog,apply_account_catalog,reorder_project_folders,
+            game_sync_command,
+            progress_sync_command,
+            document_sync_command,
+            map_sync_command,
+            read_account_catalog,
+            begin_account_catalog,
+            decide_account_catalog,
+            pending_account_catalog,
+            seal_account_catalog,
+            receipt_account_catalog,
+            apply_account_catalog,
+            reorder_project_folders,
             list_received_account_objects,
             block_account_object,
             read_stage_structural_authority,

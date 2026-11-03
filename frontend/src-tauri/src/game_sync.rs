@@ -126,16 +126,28 @@ fn tenth(n: f64) -> f64 {
 }
 /// Legacy loss damage and GUI revival semantics, in the replayable account state.
 pub fn loss_health(state: &mut Value, length: u64) -> Result<()> {
-    let health=amount(&state["health"])?;
-    let max=amount(&state["max_health"])?;
-    let remaining=(health.min(max) - i128::from(length)*5_000_000).max(0);
-    state["health"]=json!(progress_codec::decimal(remaining));
-    if remaining==0 {
-        let inventory=state["inventory"].as_array_mut().ok_or("invalid_game_payload")?;
-        if let Some(i)=inventory.iter().position(|v|v["category"]=="Зелья"&&v["item_id"]=="Зелье воскрешения"&&v["count"].as_u64().is_some_and(|n|n>0)) {
-            let count=inventory[i]["count"].as_u64().ok_or("invalid_game_payload")?;
-            if count==1 { inventory.remove(i); } else { inventory[i]["count"]=json!(count-1); }
-            state["health"]=state["max_health"].clone();
+    let health = amount(&state["health"])?;
+    let max = amount(&state["max_health"])?;
+    let remaining = (health.min(max) - i128::from(length) * 5_000_000).max(0);
+    state["health"] = json!(progress_codec::decimal(remaining));
+    if remaining == 0 {
+        let inventory = state["inventory"]
+            .as_array_mut()
+            .ok_or("invalid_game_payload")?;
+        if let Some(i) = inventory.iter().position(|v| {
+            v["category"] == "Зелья"
+                && v["item_id"] == "Зелье воскрешения"
+                && v["count"].as_u64().is_some_and(|n| n > 0)
+        }) {
+            let count = inventory[i]["count"]
+                .as_u64()
+                .ok_or("invalid_game_payload")?;
+            if count == 1 {
+                inventory.remove(i);
+            } else {
+                inventory[i]["count"] = json!(count - 1);
+            }
+            state["health"] = state["max_health"].clone();
         }
     }
     Ok(())
@@ -164,12 +176,19 @@ fn verify_effect(e: &Value) -> Result<()> {
             }
         }
         Some("completion") => {
-            if !matches!(h["rule"].as_str(),Some("native-game-v1"|"python-game-v1")) {
+            if !matches!(
+                h["rule"].as_str(),
+                Some("native-game-v1" | "python-game-v1")
+            ) {
                 return Err("game_invalid_rule".into());
             }
             let factor = if h["stage_id"].is_null() { 1.0 } else { 0.25 };
-            let input=float(&a["total_symbols"])? / 1000.0 + 0.5;
-            let rounded=if h["rule"]=="python-game-v1"{input.round_ties_even()}else{input.round()};
+            let input = float(&a["total_symbols"])? / 1000.0 + 0.5;
+            let rounded = if h["rule"] == "python-game-v1" {
+                input.round_ties_even()
+            } else {
+                input.round()
+            };
             let coins = rounded * 100.0 * factor;
             if a["reward"] != json!({"coins":decimal(coins)?,"experience":decimal(coins*100.0)?}) {
                 return Err("game_invalid_rule".into());
@@ -384,8 +403,10 @@ fn transition_with_source(
                 }
                 verify_effect(source)?;
                 let writing = source["action"]["kind"] == "writing";
-                if !matches!(h["rule"].as_str(),Some("native-game-v1"|"python-game-v1"))
-                    || !writing && source["action"]["kind"] != "completion"
+                if !matches!(
+                    h["rule"].as_str(),
+                    Some("native-game-v1" | "python-game-v1")
+                ) || !writing && source["action"]["kind"] != "completion"
                 {
                     return Err("game_invalid_rule".into());
                 }
@@ -404,17 +425,17 @@ fn transition_with_source(
                         float(&state["coins"])? + float(&a["reward"]["coins"])?,
                     ))?;
                     state["writing_bonus"] = json!("0.000000");
-                    if h["rule"]=="native-game-v1" {
-                    let productive = state["productive_actions"]
-                        .as_u64()
-                        .ok_or("invalid_game_payload")?
-                        + 1;
-                    if productive >= 3 && state["creative_event_pending"] == "absent" {
-                        state["creative_event_pending"] = json!("unexpected_idea");
-                        state["productive_actions"] = json!(0);
-                    } else {
-                        state["productive_actions"] = json!(productive);
-                    }
+                    if h["rule"] == "native-game-v1" {
+                        let productive = state["productive_actions"]
+                            .as_u64()
+                            .ok_or("invalid_game_payload")?
+                            + 1;
+                        if productive >= 3 && state["creative_event_pending"] == "absent" {
+                            state["creative_event_pending"] = json!("unexpected_idea");
+                            state["productive_actions"] = json!(0);
+                        } else {
+                            state["productive_actions"] = json!(productive);
+                        }
                     }
                 } else {
                     change(&mut state, "coins", amount(&a["reward"]["coins"])?)?;
@@ -442,10 +463,14 @@ fn transition_with_source(
                             .cmp(b.as_str().unwrap().encode_utf16())
                     });
                 }
-                if h["rule"]=="python-game-v1" {
+                if h["rule"] == "python-game-v1" {
                     // The Python consumer historically adds raw XP. It does
                     // not execute the native level/health/productive rules.
-                    change(&mut state,"experience",amount(&a["reward"]["experience"])?)?;
+                    change(
+                        &mut state,
+                        "experience",
+                        amount(&a["reward"]["experience"])?,
+                    )?;
                     return Ok(state);
                 }
                 change(
@@ -479,11 +504,19 @@ fn transition_with_source(
                 }
             }
             "global_streak" if e["version"] == 2 => {
-                if state["global_streak"] != a["before"] || h["event_id"] != loss_id(text(h,"account_id")?, &a["before"]) {
+                if state["global_streak"] != a["before"]
+                    || h["event_id"] != loss_id(text(h, "account_id")?, &a["before"])
+                {
                     return Err("game_invalid_rule".into());
                 }
-                state["global_streak"] = codec::loss_after(&state["global_streak"], text(a,"writing_day")?)?;
-                loss_health(&mut state, a["after"]["lost_length"].as_u64().ok_or("invalid_game_payload")?)?;
+                state["global_streak"] =
+                    codec::loss_after(&state["global_streak"], text(a, "writing_day")?)?;
+                loss_health(
+                    &mut state,
+                    a["after"]["lost_length"]
+                        .as_u64()
+                        .ok_or("invalid_game_payload")?,
+                )?;
             }
             "compensation" => {
                 let target = source.ok_or("game_parent_unknown")?;
@@ -505,7 +538,9 @@ fn transition_with_source(
                 }
             }
             "inventory" => {
-                if h["rule"]!="native-game-v1"||!matches!(a["operation"].as_str(), Some("buy" | "sell")) {
+                if h["rule"] != "native-game-v1"
+                    || !matches!(a["operation"].as_str(), Some("buy" | "sell"))
+                {
                     return Err("game_unsupported_local_mutation".into());
                 }
                 let expected = amount(&a["unit_price"])?
@@ -691,7 +726,8 @@ pub fn seal(
     if nonce.len() != 24 || !(16..=codec::MAX_FRAME_BYTES + 16).contains(&ciphertext.len()) {
         return Err("invalid_game_payload".into());
     }
-    let compression_view = crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
     let frame = compression_view.as_ref();
     let (stored,n,c,state): (Vec<u8>,Option<Vec<u8>>,Option<Vec<u8>>,String) = db.query_row("SELECT canonical_frame,nonce,ciphertext,state FROM cloud_game_events WHERE account_id=?1 AND event_id=?2",params![account,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(sql)?;
     if stored != frame
@@ -1020,7 +1056,8 @@ pub fn apply(
     ciphertext: &[u8],
     project: bool,
 ) -> Result<String> {
-    let compression_view = crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
     let frame = compression_view.as_ref();
     let e = codec::unframe(frame, project)?;
     let h = &e["header"];
@@ -1118,7 +1155,11 @@ pub fn apply(
 
 /// Refresh a derived compatibility view from complete authenticated history.
 /// Local recovery evidence and unsupported extensions are never overwritten.
-pub fn rebuild(db:&mut crate::sqlite::PrivilegedRemoteApplyConnection,scope:&metadata::MetadataScope,key:&str)->Result<()> {
+pub fn rebuild(
+    db: &mut crate::sqlite::PrivilegedRemoteApplyConnection,
+    scope: &metadata::MetadataScope,
+    key: &str,
+) -> Result<()> {
     db.execute_planned_many_once(|tx|->std::result::Result<(_, (Value,Value,String)),ApplyError>{
         metadata::assert_runtime_scope(tx,&scope.account_id,&scope.canonical_user_id,&scope.device_id).map_err(|_|"game_scope_mismatch")?;
         let heads=tips(tx,&scope.account_id,key)?;
@@ -1323,52 +1364,107 @@ mod tests {
             .collect()
     }
     fn loss_fixture() -> (Value, Value, String) {
-        let mut genesis=vectors().into_iter().find(|v|v["header"]["scope"]=="account"&&v["action"]["kind"]=="genesis").unwrap();
-        genesis["action"]["base"]["global_streak"]["history"]=json!([
+        let mut genesis = vectors()
+            .into_iter()
+            .find(|v| v["header"]["scope"] == "account" && v["action"]["kind"] == "genesis")
+            .unwrap();
+        genesis["action"]["base"]["global_streak"]["history"] = json!([
             {"day":"2026-10-01","frozen":false},{"day":"2026-10-02","frozen":false},{"day":"2026-10-03","frozen":false}]);
-        genesis["action"]["base"]["global_streak"]["maximum"]=json!(3);
-        let base=genesis["action"]["base"].clone();
-        let parent=genesis["header"]["event_id"].as_str().unwrap().to_string();
-        let mut e=genesis.clone();
-        let id=loss_id(e["header"]["account_id"].as_str().unwrap(),&base["global_streak"]);
-        e["version"]=json!(2);e["header"]["rule"]=json!("native-game-v1");
-        e["header"]["event_id"]=json!(id);e["header"]["entity_id"]=json!(format!("game:{id}"));
-        e["header"]["parents"]=json!([parent]);e["header"]["revision"]=json!(2);
-        e["action"]=json!({"kind":"global_streak","writing_day":"2026-10-05","project_action_ids":[],"before":base["global_streak"],"after":codec::loss_after(&base["global_streak"],"2026-10-05").unwrap(),"reward":{"coins":"0.000000","experience":"0.000000"}});
-        (genesis,e,parent)
+        genesis["action"]["base"]["global_streak"]["maximum"] = json!(3);
+        let base = genesis["action"]["base"].clone();
+        let parent = genesis["header"]["event_id"].as_str().unwrap().to_string();
+        let mut e = genesis.clone();
+        let id = loss_id(
+            e["header"]["account_id"].as_str().unwrap(),
+            &base["global_streak"],
+        );
+        e["version"] = json!(2);
+        e["header"]["rule"] = json!("native-game-v1");
+        e["header"]["event_id"] = json!(id);
+        e["header"]["entity_id"] = json!(format!("game:{id}"));
+        e["header"]["parents"] = json!([parent]);
+        e["header"]["revision"] = json!(2);
+        e["action"] = json!({"kind":"global_streak","writing_day":"2026-10-05","project_action_ids":[],"before":base["global_streak"],"after":codec::loss_after(&base["global_streak"],"2026-10-05").unwrap(),"reward":{"coins":"0.000000","experience":"0.000000"}});
+        (genesis, e, parent)
     }
     #[test]
     fn global_loss_replay_health_and_inventory_follow_the_same_rule() {
-        let (g,e,parent)=loss_fixture();
-        for (health,potions,expected,left) in [("100.000000",0,"85.000000",0),("10.000000",2,"100.000000",1),("10.000000",0,"0.000000",0)] {
-            let mut base=g["action"]["base"].clone();base["health"]=json!(health);
-            base["inventory"]=if potions>0 {json!([{"category":"Зелья","item_id":"Зелье воскрешения","count":potions}])}else{json!([])};
-            let next=transition(&e,&BTreeMap::from([(parent.clone(),base)])).unwrap();
-            assert_eq!(next["health"],expected);
-            let actual=next["inventory"].as_array().unwrap().iter().find(|v|v["item_id"]=="Зелье воскрешения").map(|v|v["count"].as_u64().unwrap()).unwrap_or(0);
-            assert_eq!(actual,left);
+        let (g, e, parent) = loss_fixture();
+        for (health, potions, expected, left) in [
+            ("100.000000", 0, "85.000000", 0),
+            ("10.000000", 2, "100.000000", 1),
+            ("10.000000", 0, "0.000000", 0),
+        ] {
+            let mut base = g["action"]["base"].clone();
+            base["health"] = json!(health);
+            base["inventory"] = if potions > 0 {
+                json!([{"category":"Зелья","item_id":"Зелье воскрешения","count":potions}])
+            } else {
+                json!([])
+            };
+            let next = transition(&e, &BTreeMap::from([(parent.clone(), base)])).unwrap();
+            assert_eq!(next["health"], expected);
+            let actual = next["inventory"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["item_id"] == "Зелье воскрешения")
+                .map(|v| v["count"].as_u64().unwrap())
+                .unwrap_or(0);
+            assert_eq!(actual, left);
         }
     }
     #[test]
     fn standalone_loss_is_causal_versioned_and_replay_safe() {
-        let (g,e,parent)=loss_fixture();let base=g["action"]["base"].clone();
-        let states=BTreeMap::from([(parent.clone(),base.clone())]);
-        let next=transition(&e,&states).unwrap();
-        assert_eq!(next["global_streak"]["lost_length"],3);
-        assert_eq!(next["global_streak"]["history"],json!([]));
-        assert_eq!(codec::unframe(&codec::frame(&e).unwrap(),false).unwrap(),e);
-        assert!(transition(&e,&BTreeMap::new()).is_err());
-        assert!(transition(&e,&BTreeMap::from([(parent,next)])).is_err());
-        for field in ["before","after","reward"] {
-            let mut bad=e.clone();bad["action"][field]=json!({});assert!(transition(&bad,&states).is_err());
+        let (g, e, parent) = loss_fixture();
+        let base = g["action"]["base"].clone();
+        let states = BTreeMap::from([(parent.clone(), base.clone())]);
+        let next = transition(&e, &states).unwrap();
+        assert_eq!(next["global_streak"]["lost_length"], 3);
+        assert_eq!(next["global_streak"]["history"], json!([]));
+        assert_eq!(
+            codec::unframe(&codec::frame(&e).unwrap(), false).unwrap(),
+            e
+        );
+        assert!(transition(&e, &BTreeMap::new()).is_err());
+        assert!(transition(&e, &BTreeMap::from([(parent, next)])).is_err());
+        for field in ["before", "after", "reward"] {
+            let mut bad = e.clone();
+            bad["action"][field] = json!({});
+            assert!(transition(&bad, &states).is_err());
         }
-        let mut old=e.clone();old["version"]=json!(1);assert!(codec::validate(&old).is_err());
-        let mut early=e.clone();early["action"]["writing_day"]=json!("2026-10-04");assert!(transition(&early,&states).is_err());
-        let mut wrong=e.clone();wrong["header"]["event_id"]=g["header"]["device_id"].clone();wrong["header"]["entity_id"]=json!(format!("game:{}",wrong["header"]["event_id"].as_str().unwrap()));assert!(transition(&wrong,&states).is_err());
-        let (db,path)=setup();preserve(&db,ACCOUNT,&g,"unsealed").unwrap();assert!(preserve(&db,ACCOUNT,&e,"unsealed").unwrap());assert!(!preserve(&db,ACCOUNT,&e,"unsealed").unwrap());
-        assert_eq!(rebuild_chain(&db,ACCOUNT,"account",e["header"]["event_id"].as_str().unwrap()).unwrap(),transition(&e,&states).unwrap());
-        assert!(dependencies(&db,ACCOUNT,g["header"]["device_id"].as_str().unwrap(),&e).is_err());
-        drop(db);let _=std::fs::remove_file(path);
+        let mut old = e.clone();
+        old["version"] = json!(1);
+        assert!(codec::validate(&old).is_err());
+        let mut early = e.clone();
+        early["action"]["writing_day"] = json!("2026-10-04");
+        assert!(transition(&early, &states).is_err());
+        let mut wrong = e.clone();
+        wrong["header"]["event_id"] = g["header"]["device_id"].clone();
+        wrong["header"]["entity_id"] = json!(format!(
+            "game:{}",
+            wrong["header"]["event_id"].as_str().unwrap()
+        ));
+        assert!(transition(&wrong, &states).is_err());
+        let (db, path) = setup();
+        preserve(&db, ACCOUNT, &g, "unsealed").unwrap();
+        assert!(preserve(&db, ACCOUNT, &e, "unsealed").unwrap());
+        assert!(!preserve(&db, ACCOUNT, &e, "unsealed").unwrap());
+        assert_eq!(
+            rebuild_chain(
+                &db,
+                ACCOUNT,
+                "account",
+                e["header"]["event_id"].as_str().unwrap()
+            )
+            .unwrap(),
+            transition(&e, &states).unwrap()
+        );
+        assert!(
+            dependencies(&db, ACCOUNT, g["header"]["device_id"].as_str().unwrap(), &e).is_err()
+        );
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
     fn setup() -> (Connection, std::path::PathBuf) {
         let path =
@@ -1785,34 +1881,89 @@ mod tests {
     }
     #[test]
     fn game_earn_spend_and_compensation_spend_keep_both_causal_branches() {
-        for compensation in [false,true] {
-            let (db,path)=setup();let v=vectors();
-            let g=v.iter().find(|e|e["header"]["scope"]=="account"&&e["action"]["kind"]=="genesis").unwrap();
-            preserve(&db,ACCOUNT,g,"waiting").unwrap();
-            preserve(&db,ACCOUNT,&v[0],"waiting").unwrap();
-            let (mut p,mut r)=pair();p["header"]["parents"]=json!([v[0]["header"]["event_id"]]);r["header"]["parents"]=json!([g["header"]["event_id"]]);
-            queue_reward_pair(&db,ACCOUNT,"source-E",&p,&r).unwrap();
-            let parent=if compensation{r["header"]["event_id"].as_str().unwrap()}else{g["header"]["event_id"].as_str().unwrap()};
-            let revision=if compensation{3}else{2};
-            let base=rebuild_chain(&db,ACCOUNT,"account",parent).unwrap();
-            db.execute("INSERT INTO cloud_game_projection VALUES(?1,'account',?2,?3,?4)",params![ACCOUNT,parent,canonical(&base),revision-1]).unwrap();
-            set_tips(&db,"account",&[parent.into()]);
-            let mut left=r.clone();
+        for compensation in [false, true] {
+            let (db, path) = setup();
+            let v = vectors();
+            let g = v
+                .iter()
+                .find(|e| e["header"]["scope"] == "account" && e["action"]["kind"] == "genesis")
+                .unwrap();
+            preserve(&db, ACCOUNT, g, "waiting").unwrap();
+            preserve(&db, ACCOUNT, &v[0], "waiting").unwrap();
+            let (mut p, mut r) = pair();
+            p["header"]["parents"] = json!([v[0]["header"]["event_id"]]);
+            r["header"]["parents"] = json!([g["header"]["event_id"]]);
+            queue_reward_pair(&db, ACCOUNT, "source-E", &p, &r).unwrap();
+            let parent = if compensation {
+                r["header"]["event_id"].as_str().unwrap()
+            } else {
+                g["header"]["event_id"].as_str().unwrap()
+            };
+            let revision = if compensation { 3 } else { 2 };
+            let base = rebuild_chain(&db, ACCOUNT, "account", parent).unwrap();
+            db.execute(
+                "INSERT INTO cloud_game_projection VALUES(?1,'account',?2,?3,?4)",
+                params![ACCOUNT, parent, canonical(&base), revision - 1],
+            )
+            .unwrap();
+            set_tips(&db, "account", &[parent.into()]);
+            let mut left = r.clone();
             if compensation {
-                let id=stable_action_id(r["header"]["account_id"].as_str().unwrap(),"compensation",&r["header"]["event_id"]);
-                left["header"]["event_id"]=json!(id);left["header"]["entity_id"]=json!(format!("game:{id}"));left["header"]["revision"]=json!(revision);left["header"]["parents"]=json!([parent]);
-                left["action"]=json!({"kind":"compensation","target_action_id":parent,"reward":{"coins":"-10.000000","experience":"-500.000000"}});
-                queue_compensation(&db,ACCOUNT,&left).unwrap();
+                let id = stable_action_id(
+                    r["header"]["account_id"].as_str().unwrap(),
+                    "compensation",
+                    &r["header"]["event_id"],
+                );
+                left["header"]["event_id"] = json!(id);
+                left["header"]["entity_id"] = json!(format!("game:{id}"));
+                left["header"]["revision"] = json!(revision);
+                left["header"]["parents"] = json!([parent]);
+                left["action"] = json!({"kind":"compensation","target_action_id":parent,"reward":{"coins":"-10.000000","experience":"-500.000000"}});
+                queue_compensation(&db, ACCOUNT, &left).unwrap();
             }
-            let left_tips=next_tips(&db,ACCOUNT,&left).unwrap();set_tips(&db,"account",&left_tips);
-            let mut spend=v.iter().find(|e|e["action"]["kind"]=="inventory"&&e["action"]["operation"]=="buy").unwrap().clone();
-            spend["header"]["parents"]=json!([parent]);spend["header"]["revision"]=json!(revision);
-            spend["action"]=json!({"kind":"inventory","operation":"buy","category":"Предметы","item_id":"Заморозка","count":1,"unit_price":"20.000000","before_count":2,"after_count":3,"coins_delta":"-20.000000"});
-            preserve(&db,ACCOUNT,&spend,"waiting").unwrap();let both=next_tips(&db,ACCOUNT,&spend).unwrap();assert_eq!(both.len(),2);
-            assert_ne!(rebuild_chain(&db,ACCOUNT,"account",left["header"]["event_id"].as_str().unwrap()).unwrap(),rebuild_chain(&db,ACCOUNT,"account",spend["header"]["event_id"].as_str().unwrap()).unwrap());
-            assert_eq!(db.query_row("SELECT snapshot_json FROM cloud_game_projection",[],|r|r.get::<_,String>(0)).unwrap(),canonical(&base));
-            assert_eq!(db.query_row("SELECT count(*) FROM cloud_game_rewards",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-            drop(db);std::fs::remove_file(path).unwrap();
+            let left_tips = next_tips(&db, ACCOUNT, &left).unwrap();
+            set_tips(&db, "account", &left_tips);
+            let mut spend = v
+                .iter()
+                .find(|e| e["action"]["kind"] == "inventory" && e["action"]["operation"] == "buy")
+                .unwrap()
+                .clone();
+            spend["header"]["parents"] = json!([parent]);
+            spend["header"]["revision"] = json!(revision);
+            spend["action"] = json!({"kind":"inventory","operation":"buy","category":"Предметы","item_id":"Заморозка","count":1,"unit_price":"20.000000","before_count":2,"after_count":3,"coins_delta":"-20.000000"});
+            preserve(&db, ACCOUNT, &spend, "waiting").unwrap();
+            let both = next_tips(&db, ACCOUNT, &spend).unwrap();
+            assert_eq!(both.len(), 2);
+            assert_ne!(
+                rebuild_chain(
+                    &db,
+                    ACCOUNT,
+                    "account",
+                    left["header"]["event_id"].as_str().unwrap()
+                )
+                .unwrap(),
+                rebuild_chain(
+                    &db,
+                    ACCOUNT,
+                    "account",
+                    spend["header"]["event_id"].as_str().unwrap()
+                )
+                .unwrap()
+            );
+            assert_eq!(
+                db.query_row("SELECT snapshot_json FROM cloud_game_projection", [], |r| r
+                    .get::<_, String>(0))
+                    .unwrap(),
+                canonical(&base)
+            );
+            assert_eq!(
+                db.query_row("SELECT count(*) FROM cloud_game_rewards", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            drop(db);
+            std::fs::remove_file(path).unwrap();
         }
     }
     #[test]
@@ -1926,7 +2077,9 @@ mod tests {
         let n = vec![7; 24];
         let c = vec![8; 32];
         receive_account(&db, &e, 1, &n, &c);
-        assert!(crate::account_sync::received(&db,&scope,8,0).unwrap().is_empty());
+        assert!(crate::account_sync::received(&db, &scope, 8, 0)
+            .unwrap()
+            .is_empty());
         drop(db);
         let mut privileged = crate::sqlite::open_privileged_remote_apply_database(&path).unwrap();
         assert_eq!(
@@ -1966,15 +2119,56 @@ mod tests {
                 .unwrap(),
             1
         );
-        let mut damaged=projected.clone();damaged["gamer"]["coins"]=json!(123.0);
-        privileged.connection().execute("UPDATE game_state SET payload_json=?1",[canonical(&damaged)]).unwrap();
-        privileged.connection().execute("UPDATE cloud_game_projection SET snapshot_json=?1",[canonical(&json!({"coins":"123.000000"}))]).unwrap();
-        rebuild(&mut privileged,&scope,"account").unwrap();
-        let restored:String=privileged.connection().query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&restored).unwrap(),projected);
-        assert_eq!(privileged.connection().query_row("SELECT canonical_frame FROM cloud_game_events",[],|r|r.get::<_,Vec<u8>>(0)).unwrap(),frame);
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM cloud_game_apply_ledger",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-        assert_eq!(privileged.connection().query_row("SELECT count(*) FROM cloud_game_local_mutations",[],|r|r.get::<_,i64>(0)).unwrap(),1);
+        let mut damaged = projected.clone();
+        damaged["gamer"]["coins"] = json!(123.0);
+        privileged
+            .connection()
+            .execute(
+                "UPDATE game_state SET payload_json=?1",
+                [canonical(&damaged)],
+            )
+            .unwrap();
+        privileged
+            .connection()
+            .execute(
+                "UPDATE cloud_game_projection SET snapshot_json=?1",
+                [canonical(&json!({"coins":"123.000000"}))],
+            )
+            .unwrap();
+        rebuild(&mut privileged, &scope, "account").unwrap();
+        let restored: String = privileged
+            .connection()
+            .query_row("SELECT payload_json FROM game_state", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&restored).unwrap(), projected);
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row("SELECT canonical_frame FROM cloud_game_events", [], |r| r
+                    .get::<_, Vec<
+                    u8,
+                >>(
+                    0
+                ))
+                .unwrap(),
+            frame
+        );
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row("SELECT count(*) FROM cloud_game_apply_ledger", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            privileged
+                .connection()
+                .query_row("SELECT count(*) FROM cloud_game_local_mutations", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         let mut forged = e;
         forged["action"]["base"]["coins"] = json!("999.000000");
         assert_eq!(
@@ -1992,8 +2186,11 @@ mod tests {
         assert_eq!(
             privileged
                 .connection()
-                .query_row("SELECT code FROM cloud_game_blockers WHERE event_id=?1",[forged["header"]["event_id"].as_str().unwrap()], |r| r
-                    .get::<_, String>(0))
+                .query_row(
+                    "SELECT code FROM cloud_game_blockers WHERE event_id=?1",
+                    [forged["header"]["event_id"].as_str().unwrap()],
+                    |r| r.get::<_, String>(0)
+                )
                 .unwrap(),
             "game_exact_replay_mismatch"
         );
