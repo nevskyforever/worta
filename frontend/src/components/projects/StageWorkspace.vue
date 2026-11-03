@@ -340,7 +340,8 @@ onBeforeUnmount(() => {
 .stage-drag-handle { min-width: 2.75rem; padding: 0; font-size: 1.2rem; cursor: grab; touch-action: none; user-select: none; }
 .stage-drag-handle:active { cursor: grabbing; }
 .stage-list { --stage-card-height: 0px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--nf-space-3); margin: 0; padding: 0; list-style: none; }
-.stage-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: var(--stage-card-height); gap: var(--nf-space-3); padding: var(--nf-space-4); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-md); background: var(--nf-color-surface); box-shadow: var(--nf-shadow-card); }
+.stage-card { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: var(--stage-card-height); gap: var(--nf-space-3); padding: var(--nf-space-4); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-md); background: var(--nf-color-surface); box-shadow: var(--nf-shadow-card); transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease; }
+.stage-card:hover { border-color: color-mix(in srgb, var(--nf-color-primary) 45%, var(--nf-color-border)); transform: translateY(-2px); box-shadow: 0 18px 42px rgb(43 55 50 / 13%); }
 .stage-card--sortable { cursor: grab; user-select: none; }
 .stage-open-button { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--nf-space-3); align-self: stretch; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .stage-open-button:focus-visible { border-radius: var(--nf-radius-sm); outline: 3px solid var(--nf-color-primary-soft); outline-offset: 3px; }
