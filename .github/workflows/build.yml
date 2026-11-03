@@ -84,7 +84,10 @@ jobs:
           set -euo pipefail
           version=$(node scripts/sync-tauri-versions.mjs --version-only)
           tag="v${version}"
-          tag_sha=$(git rev-parse "refs/tags/${tag}^{commit}")
+          if ! tag_sha=$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}"); then
+            echo "::error::Required release tag ${tag} is missing. Verify the published macOS archives against their source SHA, create and push ${tag} on that exact commit, then rerun the failed jobs of this run. Never move an existing release tag."
+            exit 1
+          fi
           mkdir -p "$RUNNER_TEMP/host-inspection"
           for arch in arm intel; do
             file="$RUNNER_TEMP/host-inspection/nfprogress-mac-${arch}-${version}.zip"

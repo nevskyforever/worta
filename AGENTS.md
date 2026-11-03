@@ -40,6 +40,18 @@ Production Desktop targets:
   completion and resolve failures before continuing. This script publishes the
   qualified macOS archives and updates the existing hosting manifests after both
   builds pass; preserve all release and integrity gates.
+* Before dispatching the Windows workflow, verify both published macOS archives
+  with `scripts/verify-tauri-artifact.py` against their exact source commit.
+  Create the annotated `v<version>` Git tag on that commit, push that specific
+  tag, and verify the remote tag resolves to the same SHA. The workflow requires
+  this tag before it inspects hosted artifacts; publishing macOS alone does not
+  create it. Never move an existing release tag to repair a mismatch.
+* Keep the dispatch commit, version tag, and macOS artifact source SHA identical.
+  If source changes after macOS qualification, rebuild and qualify the macOS
+  artifacts from the new release commit before dispatching a new release run.
+  If a run failed only because its matching tag was absent, publish the verified
+  tag and rerun failed jobs of that original run instead of dispatching from a
+  newer commit. Do not rerun an already successful release.
 * After both macOS builds succeed, manually dispatch `.github/workflows/build.yml`
   from `main` to build Windows x64 and publish the release. Keep the release tag,
   source revision and macOS artifact provenance consistent.

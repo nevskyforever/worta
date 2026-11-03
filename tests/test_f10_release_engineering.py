@@ -180,7 +180,7 @@ def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(
     fake_bin.mkdir()
     commands = {
         'node': 'echo 5.3.12',
-        'git': 'echo 1111111111111111111111111111111111111111',
+        'git': '[ "$SCENARIO" != missing_tag ] || exit 1; echo 1111111111111111111111111111111111111111',
         'unzip': 'exit 0',
         'python3': 'exit 0',
         'gh': '''case "$*" in
@@ -193,7 +193,8 @@ def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(
           *"attestation verify"*) echo "$*" >> "$CALLS"; [ "$SCENARIO" != untrusted ] ;;
           *) exit 1 ;;
         esac''',
-        'curl': '''output=""; url=""; code=0
+        'curl': '''echo curl >> "$CALLS"
+        output=""; url=""; code=0
         while [ "$#" -gt 0 ]; do
           case "$1" in
             -o|--output) shift; output="$1" ;;
@@ -214,7 +215,7 @@ def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(
         path = fake_bin / name
         path.write_text('#!/bin/sh\n' + body + '\n')
         path.chmod(0o755)
-    for scenario in ('missing_mac', 'missing_windows', 'hosted', 'untrusted', 'released', 'release_mismatch'):
+    for scenario in ('missing_tag', 'missing_mac', 'missing_windows', 'hosted', 'untrusted', 'released', 'release_mismatch'):
         work = tmp_path / scenario
         work.mkdir()
         output = work / 'output'
@@ -230,7 +231,12 @@ def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(
                    PROVENANCE_HASH=provenance_hash)
         result = subprocess.run(['bash', '-c', script], env=env, text=True,
                                 capture_output=True)
-        if scenario == 'missing_mac':
+        if scenario == 'missing_tag':
+            assert result.returncode != 0
+            assert 'Required release tag v5.3.12 is missing' in result.stdout
+            assert not (work / 'calls').exists()
+            assert not output.exists()
+        elif scenario == 'missing_mac':
             assert result.returncode != 0 and 'Required macOS' in result.stderr
         elif scenario in ('untrusted', 'release_mismatch'):
             assert result.returncode != 0
