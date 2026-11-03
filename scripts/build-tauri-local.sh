@@ -168,7 +168,7 @@ PACKAGE_NAME="$ARTIFACT_PREFIX-$VERSION"
 
 if [ "${NFPROGRESS_TAURI_RUN_FRONTEND_CHECKS:-0}" = "1" ]; then
   echo "Запускаются frontend typecheck и tests для release qualification..."
-  (cd "$FRONTEND_DIR" && npm run typecheck && npm run test)
+  (cd "$FRONTEND_DIR" && npm run typecheck && npm run test -- --maxWorkers=2)
 fi
 
 if [ "${NFPROGRESS_TAURI_RUN_RUST_CHECKS:-0}" = "1" ]; then
