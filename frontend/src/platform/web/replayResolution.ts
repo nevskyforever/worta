@@ -67,8 +67,12 @@ export async function applyReplayResolutionOwner(input: {
   if (root.state !== 'content_note_proven' || first.state !== 'content_note_proven'
     || second.state !== 'content_note_conflict_preserved'
     || !['received', 'note_resolution_proven'].includes(resolution.state)) reject()
-  if (rows.slice(0, sequence - 4).some(row => row.state !== 'applied'
-    || JSON.parse(row.wire_item).event.entity_type !== 'project_metadata')) reject()
+  if (rows.slice(0, sequence - 4).some(row => {
+    const kind = JSON.parse(row.wire_item).event.entity_type
+    return !((kind === 'project_metadata' && row.state === 'applied')
+      || (kind === 'stage' && row.state === 'stage_proven')
+      || (kind === 'stage_order' && row.state === 'stage_order_proven'))
+  })) reject()
   const descriptors = notes.map(row => JSON.parse(row.wire_item).event)
   const base = descriptors[0]
   if(descriptors[3].device_id===scope.deviceId)requireOwnResolutionPublication(scope,resolution,inventory)

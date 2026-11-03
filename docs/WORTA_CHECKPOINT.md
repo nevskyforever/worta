@@ -1,5 +1,22 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-04 — Slice 4/5: Stage prefix admission for Resolution (partial)
+
+Starting SHA `66a4779b6087e845312ecc6c6a06df5fea77bff5`.
+The production codec8 writer's admitted source families are project/plain and
+Stage/plain or Stage/html. Project/html follows the retained Legacy path;
+mindmap is explicitly blocked by the codec8 writer. Browser replay now allows
+authenticated Stage and StageOrder owner outcomes before the bounded Content
+conflict/Resolution sequence; the existing owner still validates Stage refs and
+source proofs. Stage plain/html owner-level replay passes. The previous
+project/plain deleted-Resolution resurrection Chromium acceptance remains valid.
+
+`tombstone_resurrection_not_accepted` remains open: Native Stage plain/html
+delete-result Resolution, restoration and dependent Stage recovery have not yet
+passed Chromium/IndexedDB. This is the precise next acceptance dependency.
+Readiness stays 1/10 closed; server-to-browser acceptance is unproven.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`.
+
 ## 2026-11-04 — Slice 4/5: deleted Resolution continuation (partial)
 
 Starting SHA `3ddea182c3055aa0f6384aa565b5f74a0c47603b`, branch `6.0`.

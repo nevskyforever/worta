@@ -21,6 +21,16 @@ it('applies through the real owner, retains original wire and proofs, and reauth
   expect(await run()).toMatchObject({ status: 'already_applied' })
   expect(f.before()).toEqual(saved)
 })
+it.each(['plain', 'html'] as const)('admits authenticated Stage %s prefix before a Content conflict', async format => {
+  const f = await plannerFixture('choose_version', 2, false, false, { stage: true, format })
+  const run = () => applyReplayResolutionOwner({ contractVersion: 6, scope, sequence: f.sequence,
+    transaction: f.f.transaction, current: () => true, auth: f.f.auth, bindings: f.f.bindings as never,
+    keys: f.f.keys as never, device: f.device })
+  expect(await run()).toMatchObject({ status: 'applied' })
+  const before = f.before()
+  expect(await run()).toMatchObject({ status: 'already_applied' })
+  expect(f.before()).toEqual(before)
+})
 it('rejects an old replay contract before owner writes', async () => {
   const { f, run } = await setup(), saved = f.before()
   await expect(run(5)).rejects.toThrow('unsupported_resolution_cohort')
