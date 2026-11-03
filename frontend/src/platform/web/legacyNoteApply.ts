@@ -1,3 +1,4 @@
+import {BrowserContentAuthorityOwner} from './contentAuthorityOwner'
 import {authenticateContentAuthorityInventory} from './contentAuthorityInventory'
 import type {BrowserAnyNoteIntent} from './contentAuthorityRecords'
 import {validateBrowserUploadPair} from './syncDurability'
@@ -159,7 +160,8 @@ export class BrowserLegacyNoteApply {
   bind(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext):BrowserLegacyNoteApplyRuntime{return new BrowserLegacyNoteApplyRuntime(this.transaction,this.local.bind(auth,bindings,keys),this.sessionCurrent,auth,bindings,keys)}
 }
 export class BrowserLegacyNoteApplyRuntime {
-  constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthorityRuntime,private readonly sessionCurrent:()=>boolean,private readonly auth:NormalUserAuthRuntime,private readonly bindings:AuthoritativeAccountBinding,private readonly keys:RuntimeKeyContext){}
+  private readonly contentAuthority:BrowserContentAuthorityOwner
+  constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthorityRuntime,private readonly sessionCurrent:()=>boolean,private readonly auth:NormalUserAuthRuntime,private readonly bindings:AuthoritativeAccountBinding,private readonly keys:RuntimeKeyContext){this.contentAuthority=new BrowserContentAuthorityOwner(transaction,sessionCurrent,auth,bindings,keys)}
   private async guard(scope:BrowserSyncScope){if(!this.sessionCurrent()||this.auth.state!=='authenticated')fail('closed');const {context}=await this.bindings.ensureForCurrentUser(scope.accountId),lease=this.keys.leaseForAccount(scope.accountId);const current=()=>this.sessionCurrent()&&this.auth.isCurrent(context)&&!!lease?.isCurrent();if(!lease||context.userId!==scope.canonicalUserId||lease.localAccountId!==scope.accountId||lease.canonicalUserId!==scope.canonicalUserId||lease.authEpoch!==context.authEpoch||!current())fail('account_mismatch');return{lease,current}}
   private load(scope:BrowserSyncScope,sequence:number,dormant=false):Promise<Inventory>{return this.transaction(scope,['inbox','projectBindings','outbox','receipts','cursors',NOTE_HISTORY_STORE,NOTE_INTENT_STORE],'readonly',(tx,result,abort)=>{
     const incoming=tx.objectStore('inbox').getAll(range(scope.accountId)),bindings=tx.objectStore('projectBindings').getAll(range(scope.accountId)),out=tx.objectStore('outbox').getAll(range(scope.accountId)),receipts=tx.objectStore('receipts').getAll(range(scope.accountId)),intents=tx.objectStore(NOTE_INTENT_STORE).getAll(range(scope.accountId));let n=0;const finish=()=>{if(++n!==5)return;try{const rows=incoming.result.map(r=>validateBrowserInboxRecord(r,scope)),row=rows.find(r=>r.server_sequence===sequence);if(!row)fail('missing_history');const e=JSON.parse(row.wire_item).event;if(e.entity_type!=='note'||!(dormant?e.operation==='event'&&e.deleted_at===null&&row.protocol_version===3:['upsert','delete'].includes(e.operation)))fail('unsupported_local_source');const binding=bindings.result.find(b=>b.project_id===e.project_id);if(!binding)fail('ineligible_lineage');readBrowserSyncCursor(tx,scope,checkpoint=>{try{if(sequence>checkpoint.pull_cursor)fail('corrupt_record');const history=tx.objectStore(NOTE_HISTORY_STORE).getAll(historyRange(scope));history.onsuccess=()=>{try{const allHistory=historySort(validateNoteHistorySet(scope,history.result));result({allHistory,intents:intents.result.map(v=>validateNoteIntentRecord(v,scope)),history:allHistory.filter(h=>h.project_id===e.project_id&&h.note_id===e.entity_id),checkpoint,binding:validateBrowserProjectBinding(binding,scope),rows,out:out.result,receipts:receipts.result})}catch(e){abort(e)}}}catch(e){abort(e)}},abort)}catch(e){abort(e)}};[incoming,bindings,out,receipts,intents].forEach(r=>r.onsuccess=finish)
@@ -167,8 +169,8 @@ export class BrowserLegacyNoteApplyRuntime {
   async prepare(scope:BrowserSyncScope,sequence:number):Promise<VerifiedLegacyNotePlan>{return this.prepareRoute(scope,sequence,false)}
   /** Internal dormant acceptance adapter. Never selected by normal apply or production composition. No Content ACK proof. */
   async prepareDormantOrdinary(scope:BrowserSyncScope,sequence:number):Promise<VerifiedLegacyNotePlan>{return this.prepareRoute(scope,sequence,true)}
-  /** Production project-HTML peer subset; same causal engine and transaction as Legacy. */
-  async prepareContentOrdinary(scope:BrowserSyncScope,sequence:number):Promise<VerifiedNoteCausalPlan>{return this.prepareRoute(scope,sequence,false,true)}
+  /** Content peers use the existing causal engine; own Content requires C3/R2 receipt authority. */
+  async prepareContentOrdinary(scope:BrowserSyncScope,sequence:number):Promise<VerifiedNoteCausalPlan>{return await this.contentAuthority.prepareEcho(scope,sequence)??this.prepareRoute(scope,sequence,false,true)}
   private async prepareRoute(scope:BrowserSyncScope,sequence:number,dormant:boolean,content=false):Promise<VerifiedLegacyNotePlan>{
     scope=snapshotBrowserSyncScope(scope);if(!Number.isSafeInteger(sequence)||sequence<1)fail('missing_history')
     const {lease,current}=await this.guard(scope),inventory=await this.load(scope,sequence,dormant||content),row=inventory.rows.find(r=>r.server_sequence===sequence)!,binding=inventory.binding
@@ -310,6 +312,7 @@ export class BrowserLegacyNoteApplyRuntime {
     })
   }
   async commit(token:VerifiedLegacyNotePlan):Promise<'applied'|'self_echo_applied'|'already_applied'|'conflict_preserved'>{
+    if(this.contentAuthority.owns(token))return this.contentAuthority.commitEcho(token)
     const p=plans.get(token);if(!p||p.owner!==this)fail('stale_source');if(!p.current())fail('closed');let unsubscribe:(()=>void)|undefined
     return this.transaction<'applied'|'self_echo_applied'|'already_applied'|'conflict_preserved'>(p.scope,['inbox','projectBindings','outbox','receipts','cursors','localProjects','localNotes',NOTE_HISTORY_STORE,NOTE_INTENT_STORE,...(p.transportHook?['ownerHeads']:[])],'readwrite',(tx,result,abort)=>{
       unsubscribe=this.auth.onInvalidated(()=>abort(new BrowserPersistenceError('closed')))

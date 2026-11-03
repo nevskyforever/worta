@@ -20,6 +20,7 @@ import type { ProjectNotePatch } from '@/types/notes'
 export interface LocalSourceToken { readonly verifiedLocalSource: unique symbol }
 /** Internal source/intent transaction hook. Binding a writer never activates user composition. */
 export interface LocalNoteMutationWriter {
+  readonly transportKind?: 'content_note_v1'
   readonly mutationStores: string[]
   prepareMutation(scope: BrowserSyncScope, notes: LocalNoteRecord[], amk: AccountMasterKey, source: LocalSourceToken): Promise<NoteMutationPlan>
   scheduleMutation(tx: IDBTransaction, plan: NoteMutationPlan, ready: () => void, abort: (e: unknown) => void): void
@@ -456,7 +457,7 @@ export class BrowserLocalAuthorityRuntime {
     })
   }
   createNote(scope: BrowserSyncScope, token: LocalSourceToken, input: NativeLegacyNote): Promise<number> {
-    const source = validateLocalNote({ state: 'live', note: input }, input.project_id)
+    const source = (this.writer?.transportKind==='content_note_v1'?validateContentLocalNote:validateLocalNote)({ state: 'live', note: input }, input.project_id)
     if (source.state !== 'live' || source.note.revision !== 0) fail()
     return this.mutate(scope, token, opened => { if (source.note.project_id !== opened.project.project_id || opened.notes.some(n => n.note.id === source.note.id)) fail('conflicting_record'); opened.notes.push(source); return [source] })
   }
@@ -476,7 +477,7 @@ export class BrowserLocalAuthorityRuntime {
         ;(note as unknown as Record<string, unknown>)[key] = normalized
       }
       note.revision++; note.updated_at = updatedAt
-      const changed = validateLocalNote({ state: 'live', note }, opened.project.project_id)
+      const changed = (this.writer?.transportKind==='content_note_v1'?validateContentLocalNote:validateLocalNote)({ state: 'live', note }, opened.project.project_id)
       opened.notes[opened.notes.indexOf(source)] = changed
       return [changed]
     })
@@ -488,7 +489,7 @@ export class BrowserLocalAuthorityRuntime {
       if (!source || source.state !== 'live') fail('missing_local_source')
       if (!localSafe(source.note.revision + 1)) fail('source_limit')
       const n = source.note
-      const changed = validateLocalNote({ state: 'tombstone', revision: n.revision + 1, note: { id: n.id, project_id: n.project_id, stage_id: n.stage_id, source_type: n.source_type, source_map_id: n.source_map_id, source_node_id: n.source_node_id, content_format: n.content_format, deleted_at: deletedAt } }, opened.project.project_id)
+      const changed = (this.writer?.transportKind==='content_note_v1'?validateContentLocalNote:validateLocalNote)({ state: 'tombstone', revision: n.revision + 1, note: { id: n.id, project_id: n.project_id, stage_id: n.stage_id, source_type: n.source_type, source_map_id: n.source_map_id, source_node_id: n.source_node_id, content_format: n.content_format, deleted_at: deletedAt } }, opened.project.project_id)
       opened.notes[opened.notes.indexOf(source)] = changed
       return [changed]
     })

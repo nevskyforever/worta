@@ -1,3 +1,4 @@
+import {BrowserContentAuthorityOwner} from './contentAuthorityOwner'
 import type {NormalUserAuthRuntime} from '@/auth/userAuth'
 import type {AuthoritativeAccountBinding} from '@/auth/accountBinding'
 import type {RuntimeKeyContext} from '@/auth/keyContext'
@@ -33,9 +34,11 @@ export class BrowserContentNoteIntents {
  bind(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext){return new BrowserContentNoteIntentRuntime(this.transaction,this.source,this.current,auth,bindings,keys)}
 }
 export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter {
+ readonly transportKind='content_note_v1' as const
  readonly mutationStores=['localProjects','localNotes','legacyNoteIntents','cursors','projectBindings','legacyNoteHistory','outbox','receipts','inbox','ownerHeads']
  readonly local
- constructor(private readonly transaction:BrowserSyncTransaction,source:BrowserLocalAuthority,private readonly sessionCurrent:()=>boolean,private readonly auth:NormalUserAuthRuntime,private readonly bindings:AuthoritativeAccountBinding,private readonly keys:RuntimeKeyContext){this.local=source.bind(auth,bindings,keys).withNoteWriter(this)}
+ readonly authority:BrowserContentAuthorityOwner
+ constructor(private readonly transaction:BrowserSyncTransaction,source:BrowserLocalAuthority,private readonly sessionCurrent:()=>boolean,private readonly auth:NormalUserAuthRuntime,private readonly bindings:AuthoritativeAccountBinding,private readonly keys:RuntimeKeyContext){this.local=source.bind(auth,bindings,keys).withNoteWriter(this);this.authority=new BrowserContentAuthorityOwner(transaction,sessionCurrent,auth,bindings,keys)}
  private async guard(s:BrowserSyncScope){
   if(!this.sessionCurrent()||this.auth.state!=='authenticated')fail('closed')
   const {context}=await this.bindings.ensureForCurrentUser(s.accountId),lease=this.keys.leaseForAccount(s.accountId)
@@ -120,7 +123,7 @@ export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter 
   // source validation through a temporary immutable source row, using the same AAD.
   const next=await openContentIntentSource(s,row,amk,current)
   const note=next.note
-  if(note.stage_id!==null||note.source_type!=='project'||note.source_map_id!==null||note.source_node_id!==null||note.content_format!=='html')fail('unsupported_local_source')
+  if(note.stage_id!==null||note.source_type!=='project'||note.source_map_id!==null||note.source_node_id!==null||!['html','plain'].includes(note.content_format))fail('unsupported_local_source')
   intent.updated_at=next.state==='live'?next.note.updated_at:next.note.deleted_at;intent.deleted_at=next.state==='live'?null:next.note.deleted_at
   const bytes=localCanonicalBytes({intent_format:2,identity:contentIntentIdentity(intent)});let encrypted
   try{encrypted=await encryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:row.project_id,entityId:row.note_id,entityType:'note'},bytes);intent.intent_envelope={crypto_version:1,aad_version:1,nonce:encodeBase64Url(encrypted.nonce),ciphertext:encodeBase64Url(encrypted.ciphertext)}}finally{bytes.fill(0);encrypted?.nonce.fill(0);encrypted?.ciphertext.fill(0)}

@@ -248,3 +248,15 @@ def test_native_two_resolution_generations_dispatch_in_chromium(tmp_path):
 
 def test_native_repeating_resolution_dispatch_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, repeated=True, generations=4, mixed=True)
+
+
+def test_native_parent_browser_content_author_self_echo_in_chromium(tmp_path):
+    """Real Native SQLite history seeds existing browser owners; no fake authorship."""
+    native_content_resolution_history(tmp_path)
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ['node', 'scripts/browser-content-author-owner-local.mjs', str(tmp_path / 'native-browser-fixture.json')],
+        cwd=root / 'frontend', capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1])['pass']

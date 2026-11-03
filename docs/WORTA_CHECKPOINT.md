@@ -1,5 +1,87 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+
+## 2026-11-03 — Slice 4/5: genuine Content author/receipt/self-echo lifecycle
+
+Starting SHA `f60a9acfb2d7e457bb00e52c1793d36c5a1daf33`, branch `6.0`.
+**PARTIAL** for the requested author/self-echo qualification. This commit adds
+working production code and local owner acceptance, not full replay eligibility.
+
+Implemented the previously missing producer of the EXISTING authenticated I2,
+C3, R2 and E2 record formats. The internal Content mutation owner supplies a
+genuine encrypted canonical source and I2. The Content authority owner seals
+that intent into an immutable codec8 ordinary1 wire, AEAD-authenticated C3 and
+outbox, removes the intent in the same transaction, then seals the exact parsed
+upload response into R2 with event/sequence/ciphertext joins. No peer candidate
+or pulled Native event is relabelled as browser authorship. Existing envelope
+and digest validators authenticate every generated record.
+
+The production Content apply entry now routes own Content to this owner. It
+requires genuine C3 + accepted outbox + R2 and the exact returned wire, checks
+Metadata dependencies and peer parent proofs, creates the existing E2 outcome,
+and atomically acknowledges it without reapplying the source or creating a
+conflict. Duplicate delivery/commit is read-only. Preparation and commit bind
+the complete retained inventory, source rows, owner heads and cursor through
+CAS, with auth/key/profile checks and transaction abort handling. Reopen can
+reauthenticate encrypted authority evidence, dependencies and the current own
+tip's source snapshot through the same owner.
+
+Native Content writers intentionally emit plain Notes while project HTML remains
+on their Legacy writer. To test their unchanged events, explicitly bound dormant
+Content mutations now use the existing Content source validator for plain and
+HTML. Default source access and Legacy writer validation remain unchanged;
+stages, map sources, unsupported sources and resurrection remain refused.
+There is no new store/schema, network uploader, outbox composition, writer
+permission, browser capability declaration, or public editing flow.
+
+Chromium acceptance starts with real production Rust Metadata and Content in
+independent SQLite databases and the existing isolated transport. The actual
+browser owners authenticate that Native parent and produce I2/C3/R2/E2; no
+synthetic authorship fixture supplies the new positive acceptance. A separate
+test-only IDB with the existing schema isolates this author-owner lifecycle from
+the still peer-only replay manifest. It checks physical IDB aborts at seal,
+acceptance and echo, exact source/ciphertext/proof preservation, duplicate
+commit/delivery, persistent-profile reopen, corrupt wire/receipt/proof/parent
+and logout refusal. Existing Native peer-conflict/Resolution tests still cover
+the established replay-v6 path.
+
+Remaining concrete dependencies: replay inventory still requires empty
+outbox/receipts/intents and does not admit E2 coverage; source mutation still
+requires a clean head1 rather than post-Resolution head2; Resolution planner and
+continuation remain peer-only for Content authority. Consequently author after
+Resolution2, own Resolution authorship, author-aware manifest coverage/page
+reconciliation and complete author-history restart authentication are NOT
+accepted by this commit. The new acknowledgement alone grants no prefix/ACK.
+The next implementation must extend those existing owner boundaries and prove
+the author-after-Resolution chain before removing a readiness blocker.
+
+Readiness blockers remain **0/10 closed**; `own_content_self_echo_not_qualified`
+is deliberately retained. Server-to-browser acceptance remains unconfirmed;
+no server gate bypass or capability PUT was performed. `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`; registration and public
+release remain closed. Product stage **2/6**, technical Slice **4/5**; the official
+overall WORTA progress remains **89.36%**. Slice 5 is not started.
+
+Local acceptance:
+- Focused Rust: Content writer tests **4 passed**; Resolution regressions
+  **56 passed**. The current production headless Native bridge binary is used
+  for the SQLite/Chromium acceptance (not a replacement writer).
+- Focused Vitest owner/replay/v10/Resolution/local-source regressions:
+  **1,647 passed, 2 pre-existing skipped** across 43 files. The final new-owner
+  suite additionally covers a missing own head; skipped tests are not PASS.
+- Native SQLite / persistent Chromium / IndexedDB acceptance: **6 passed**,
+  including the new real-parent/browser-author owner scenario and existing
+  repeating Resolution histories. The new lifecycle additionally checks reopen
+  between seal and acceptance, between acceptance and echo, and after echo.
+- Typecheck and frontend build PASS (existing bundle-size/dynamic-import
+  warnings); maintained local acceptance `quick`, changed Python syntax and
+  diff checks PASS. Generated-output maintenance DRY RUN completed; no user
+  files, worktrees, node_modules or currently needed Rust test binaries removed.
+- No PostgreSQL/FastAPI positive reader qualification is claimed in this pass;
+  it uses the existing isolated local integration transport. No CI dispatch or
+  polling. The tested independent production portion is committed/pushed to
+  `origin/6.0`; the complete author/replay task remains PARTIAL.
+
 ## 2026-11-03 — Slice 4/5: repeating choose-version dispatch, no generation cap
 
 Starting SHA `533ffb77ff507c292accb3978fc0e5a1e6a8f50e`, branch `6.0`.
