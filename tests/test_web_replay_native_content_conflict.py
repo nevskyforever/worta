@@ -260,3 +260,14 @@ def test_native_parent_browser_content_author_self_echo_in_chromium(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
+
+def test_native_resolution_browser_replay_author_self_echo(tmp_path):
+    fixture = native_content_resolution_history(tmp_path)
+    fixture['authorSelfEcho'] = True
+    path = tmp_path / 'native-browser-fixture.json'
+    path.write_text(json.dumps(fixture), encoding='utf-8')
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend', capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1])['pass']

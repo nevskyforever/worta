@@ -52,12 +52,12 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
   }
   if (snapshot.rows.some(r => r.state === 'note_resolution_proven')) {
     const inventory = { rows: snapshot.rows, history: snapshot.noteHistory ?? [],
-      bindings: snapshot.bindings, owners: snapshot.owners, out: [], receipts: [], projects: snapshot.sources ?? [], localNotes: snapshot.notes ?? [],
-      cursor: { pull_cursor: snapshot.rows.length, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1 } }
-    if (root?.record_kind === 'resolution' && snapshot.rows.some(r => r.server_sequence > root.server_sequence && r.state !== 'received')) {
+      bindings: snapshot.bindings, owners: snapshot.owners, out: snapshot.author?.out??[], receipts: snapshot.author?.receipts??[], intents:snapshot.author?.intents??[],projects: snapshot.sources ?? [], localNotes: snapshot.notes ?? [],
+      cursor: { pull_cursor: snapshot.rows.length, ack_cursor: 0, proven_prefix: 0, next_local_ordinal: 1+(snapshot.author?.out.length??0)+(snapshot.author?.intents.length??0) } }
+    if (root?.record_kind === 'resolution' && (snapshot.author||snapshot.rows.some(r => r.server_sequence > root.server_sequence && r.state !== 'received'))) {
       const history = await authenticateContinuationHistory(scope, inventory, amk, current)
       await verifyContinuationSources(scope, inventory, history, amk, current)
-      for (const r of snapshot.rows) if (r.server_sequence > root.server_sequence && (r.state === 'content_note_proven'||r.state==='content_note_conflict_preserved'||r.state==='note_resolution_proven')) sequences.add(r.server_sequence)
+      for (const r of snapshot.rows) if (r.server_sequence > root.server_sequence && (r.state === 'content_note_proven'||r.state==='content_note_conflict_preserved'||r.state==='note_resolution_proven'||r.state==='content_note_self_echo_proven')) sequences.add(r.server_sequence)
     } else await authenticateResolutionHistory(scope, inventory, amk, current)
     for (const r of snapshot.rows) if (r.state === 'note_resolution_proven') sequences.add(r.server_sequence)
   }

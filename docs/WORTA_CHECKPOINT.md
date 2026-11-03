@@ -1,6 +1,100 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
 
+
+## 2026-11-03 — Slice 4/5: author/self-echo integrated into replay v6
+
+Starting SHA `b9d50c080b9f6c7bf9cc42b4c5ab34c8582ef88a`, branch `6.0`.
+Requested bounded author/self-echo-after-Resolution route: **LOCAL COMPLETE**.
+Full Slice 4 Reader qualification remains **PARTIAL**.
+
+The existing Content I2/C3/R2/E2 owner now works inside the actual v6 replay
+inventory and transaction adapter. No test-only author DB or substituted proofs
+are needed for the new acceptance. A closed choose-version Content history may
+explicitly hand over its current head2 to a genuine local Content intent. The
+mutation owner authenticates the entire Resolution/continuation DAG, closed
+group, current encrypted project/Note source, Metadata dependency and exact
+parent before preparing the intent. Published own parents require their verified
+self echo before another author event. Repeating updates and a subsequent delete
+use the same path; implicit resurrection and unresolved forks remain refused.
+
+Replay inventory now reads the real outbound, receipt and intent stores rather
+than requiring them to be empty for this v6 cohort. It checks their existing
+schemas and dense ordinals, exact scope/bootstrap, candidate/receipt/wire joins,
+head2/source counters and E2 coverage. Legacy replay versions retain their empty
+store and unsupported-outcome barriers. No schema/version bump or new IDB store
+was introduced. The manifest keeps its existing generation/revision/receive and
+applied cursors; author lifecycle changes increment revision through full
+inventory CAS. Sealing advances head2 to the real C3 candidate. E2 acknowledgement
+and applied manifest coverage commit in ONE native IDB transaction, using the
+existing owner's internal commit result; duplicate delivery is read-only and
+does not reapply a source or create a conflict.
+
+An internal bounded catch-up adapter uses the normal authenticated registry,
+capability GET and v3 pull plus the existing durable receive owner. It admits
+only the exact next event with an already authenticated own C3/R2, retaining the
+original ciphertext. Unknown intervening events, wrong wire/device/sequence,
+unsupported history, disconnect and the real reader gate fail closed; no input
+is skipped or relabelled. This is not a general pull qualification or a browser
+writer grant. It does not upload or call capability PUT. Re-delivery runs the
+existing full zero-origin v10 reconciliation and complete owner authentication.
+Restart authenticates retained authorship, receipts, E2, peer proofs, all
+Resolution generations and canonical encrypted source, including pending sealed
+or accepted author states.
+
+Native SQLite/Chromium acceptance starts with real production Rust writers in
+two independent databases: Content genesis → peer conflict → choose_version
+Resolution2. In the SAME replay-v6 IndexedDB, real browser owners then produce
+an author update, sealed wire/authorship, receipt and self echo; three sequential
+updates and a final delete are exercised. Original native and earlier own
+ciphertext/proofs survive exact replay and persistent-profile reopen. Tests abort
+intent, seal, receipt, receive, E2 and manifest writes, and reject corrupt receipt,
+wrong receipt sequence, mismatched authorship/device, dependencies, parent,
+ciphertext and E2 proof; reader-gate refusal, network loss, unsupported pull and
+logout preserve retained inventory.
+
+Scope remains the accepted project Note / choose-version lineage. Stage-scoped
+authoring, coalescing an already pending post-Resolution intent, resurrection,
+own Resolution authorship, other complete strategy/source matrices and general
+account orchestration are not qualified here. Unsupported cases fail closed.
+The static readiness criteria are unchanged: **0/10 blockers closed**; the broader
+`own_content_self_echo_not_qualified` and
+`local_author_after_resolution_not_accepted` claims are deliberately retained.
+Next dependency: `own_resolution_author_chain_not_accepted` and the remaining
+full-contract author/source qualification, within Slice 4.
+
+Server-to-browser acceptance is **NOT confirmed**: this pass uses the existing
+isolated integration transport, and explicitly tests the negative server gate.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`. No capability
+PUT, reader-gate bypass, UI writer activation, registration or public release.
+Product stage **2/6**, technical Slice **4/5**; official WORTA progress remains
+**89.36%**. Main, AGENTS.md, CI and release scripts are unchanged. CI is neither
+manually dispatched nor polled. Slice 5 is not started.
+
+Local acceptance:
+- Production Rust Content writer tests **4 PASS**, Resolution regressions
+  **56 PASS**. The existing current Native headless bridge supplies the actual
+  writer events; no substitute producer or fake owner proof is used.
+- Focused Vitest **1,651 PASS / 2 pre-existing SKIP** across 44 files with
+  `--maxWorkers=2`; final author/inventory hardening **57 PASS** across the
+  three affected owner suites, including refusal to skip a pending peer event.
+  A prior highly parallel run hit existing 5-second crypto-test timeouts under
+  host contention. The affected groups and full focused selection passed with
+  reduced workers, without changing test timeouts or assertions. SKIP is not PASS.
+- Native independent SQLite / persistent Chromium / actual replay-v6 IndexedDB
+  **7 PASS**, plus the final author integration rerun **1 PASS** after hardening.
+  The new test verifies three successive own updates and a final own delete,
+  receipt/device/authorship/dependency/parent/ciphertext/E2 corruption, physical
+  transaction abort at every lifecycle boundary, exact duplicate delivery,
+  restart, logout, unsupported history, disconnection and reader-gate refusal.
+- Frontend typecheck/build PASS; existing bundle-size/dynamic-import warnings
+  remain. Maintained `quick`, changed Python syntax and diff checks PASS.
+  Generated-output maintenance DRY RUN reports retained outputs only; no user
+  data, unrelated worktrees or currently needed Rust bridge binaries are removed.
+- No production VPS/user data, capability PUT, remote CI dispatch or CI polling.
+  Checkpoint and the accepted implementation are committed/pushed to `origin/6.0`.
+  Positive HTTP reader-gate/server-to-browser qualification is still NOT claimed.
+
 ## 2026-11-03 — Slice 4/5: genuine Content author/receipt/self-echo lifecycle
 
 Starting SHA `f60a9acfb2d7e457bb00e52c1793d36c5a1daf33`, branch `6.0`.

@@ -1,3 +1,5 @@
+import {inspectResolutionDag} from './resolutionDag'
+import {authenticateContinuationHistory,verifyContinuationSources} from './resolutionHistorical'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { AuthoritativeAccountBinding } from '@/auth/accountBinding'
 import type { RuntimeKeyContext } from '@/auth/keyContext'
@@ -21,8 +23,8 @@ import { prepareNotePrerequisite } from './noteTransportPrerequisite'
 import { validateBrowserProjectBinding } from './projectBindings'
 const same = (a: unknown, b: unknown) => immutableWireIdentity(a) === immutableWireIdentity(b)
 function fail(code: BrowserPersistenceCode = 'corrupt_record'): never { throw new BrowserPersistenceError(code) }
-const stores = ['inbox', 'outbox', 'receipts', 'legacyNoteHistory', 'legacyNoteIntents', 'localNotes', 'projectBindings', 'ownerHeads', 'cursors']
-interface Change { scope: BrowserSyncScope; before: BrowserPrefixInventory; after: BrowserPrefixInventory; current: () => boolean }
+const stores = ['inbox', 'outbox', 'receipts', 'legacyNoteHistory', 'legacyNoteIntents', 'localNotes', 'projectBindings', 'ownerHeads', 'cursors', 'localProjects']
+interface Change { echo?:boolean;scope: BrowserSyncScope; before: BrowserPrefixInventory; after: BrowserPrefixInventory; current: () => boolean }
 /** Existing C3/R2/E2 lifecycle. Internal only: no transport, capability declaration or user writer grant. */
 export class BrowserContentAuthorityOwner {
  private readonly echoes = new WeakMap<object, Change>()
@@ -36,11 +38,11 @@ export class BrowserContentAuthorityOwner {
   return { lease, current }
  }
  private read(tx: IDBTransaction, s: BrowserSyncScope, done: (v: BrowserPrefixInventory) => void, abort: (e: unknown) => void) {
-  const names = ['inbox', 'outbox', 'receipts', 'legacyNoteHistory', 'legacyNoteIntents', 'localNotes', 'projectBindings', 'ownerHeads']
+  const names = ['inbox', 'outbox', 'receipts', 'legacyNoteHistory', 'legacyNoteIntents', 'localNotes', 'projectBindings', 'ownerHeads', 'localProjects']
   const rs = names.map(n => tx.objectStore(n).getAll(historyRange(s))); let count = 0
   rs.forEach(r => { r.onsuccess = () => { if (++count !== rs.length) return
    readBrowserSyncCursor(tx, s, cursor => { try { done({ rows: rs[0]!.result, out: rs[1]!.result, receipts: rs[2]!.result, history: rs[3]!.result,
-    intents: rs[4]!.result, localNotes: rs[5]!.result, bindings: rs[6]!.result, owners: rs[7]!.result, cursor }) } catch (e) { abort(e) } }, abort)
+    intents: rs[4]!.result, localNotes: rs[5]!.result, bindings: rs[6]!.result, owners: rs[7]!.result, projects:rs[8]!.result, cursor }) } catch (e) { abort(e) } }, abort)
   } })
  }
  private inventory(s: BrowserSyncScope) { return this.transaction<BrowserPrefixInventory>(s, stores, 'readonly', (tx, result, abort) => this.read(tx, s, result, abort)) }
@@ -51,23 +53,32 @@ export class BrowserContentAuthorityOwner {
   } finally { bytes.fill(0) }
  }
  private sourceTip(v: BrowserPrefixInventory, c: BrowserContentCandidate3) {
-  const head = v.history.find(r => (r as {record_kind:string;project_id:string;note_id:string}).record_kind === 'head' && (r as {project_id:string}).project_id === c.project_id && (r as {note_id:string}).note_id === c.note_id) as {linear_head_event_id:string;tip_event_ids:string[]} | undefined
+  const head = v.history.find(r => (r as {record_kind:string;project_id:string;note_id:string}).record_kind === 'head' && (r as {project_id:string}).project_id === c.project_id && (r as {note_id:string}).note_id === c.note_id&&(r as {bootstrap_id:string}).bootstrap_id===c.bootstrap_id) as {linear_head_event_id:string;tip_event_ids:string[]} | undefined
   if (!head) fail('candidate_history_unavailable')
-  if (head.linear_head_event_id === c.event_id && head.tip_event_ids.length === 1 && !v.localNotes?.some(n => same(n, c.intent.snapshot))) fail('stale_source')
+  if (head.linear_head_event_id === c.event_id && head.tip_event_ids.length === 1 && !v.localNotes?.some(n => same(n, c.intent.snapshot))&&!v.intents?.some((i:any)=>i.record_version===2&&i.parent_event_id===c.event_id&&v.localNotes?.some(n=>same(n,i.snapshot)))) fail('stale_source')
  }
  private async prerequisites(s: BrowserSyncScope, v: BrowserPrefixInventory, c: {project_id:string;note_id:string;bootstrap_id:string;dependencies:{metadata_event_id:string;stage_event_ids:string[]}}, amk: AccountMasterKey, current:()=>boolean, sequence?:number) {
   // Dormant producer supports project HTML/plain with no Stage dependency.
   if (c.dependencies.stage_event_ids.length) fail('unsupported_local_source')
   const binding = validateBrowserProjectBinding(v.bindings.find(b => (b as {project_id:string}).project_id === c.project_id), s)
   if (binding.mode !== 'import_remote' || binding.phase !== 'captured' || binding.remote_state !== 'active' || binding.bootstrap_id !== c.bootstrap_id) fail('stale_authority')
-  const token = await prepareMetadataPrefix(s, v, amk, current, true), sequences = verifiedMetadataSequences(token, s, v)
+  const view={...v,rows:v.rows.filter(r=>['project_metadata','stage','stage_order'].includes(JSON.parse((r as {wire_item:string}).wire_item).event.entity_type))}
+  const token = await prepareMetadataPrefix(s, view, amk, current, true), sequences = verifiedMetadataSequences(token, s, view)
   const head = validateBrowserMetadataHead(v.owners.find(o => (o as {owner_kind:string;owner_id:string}).owner_kind === 'project_metadata' && (o as {owner_id:string}).owner_id === c.project_id), s)
   const dependency = head.history.find(p => p.event_id === c.dependencies.metadata_event_id), tip = head.history.find(p => p.event_id === head.tip_event_ids[0])
   if (head.bootstrap_id !== c.bootstrap_id || head.tip_event_ids.length !== 1 || !dependency || !tip || dependency.operation === 'delete' || tip.operation === 'delete' || !sequences.has(dependency.server_sequence) || !sequences.has(tip.server_sequence) || sequence !== undefined && dependency.server_sequence >= sequence) fail('stale_authority')
+  if(v.history.some(r=>(r as {record_kind:string}).record_kind==='resolution')){
+   const history=await authenticateContinuationHistory(s,v,amk,current)
+   await verifyContinuationSources(s,{...v,projects:v.projects!},history,amk,current)
+   const parentId=(c as {parent_event_id?:string;header?:{parent_event_id:string}}).parent_event_id??(c as {header?:{parent_event_id:string}}).header?.parent_event_id
+   const parent=v.rows.find(r=>(r as {event_id:string}).event_id===parentId) as {server_sequence:number}|undefined
+   if(!parent||sequence!==undefined&&parent.server_sequence>=sequence)fail('missing_history')
+   return
+  }
   const history = validateNoteHistorySet(s, v.history)
   for (const candidate of history) if (candidate.record_kind === 'candidate' && candidate.record_version !== 3 && candidate.project_id === c.project_id && candidate.note_id === c.note_id) {
    const row = v.rows.find(r => (r as {event_id:string}).event_id === candidate.event_id) as ReturnType<typeof inspectContentAuthorityInventory>['rows'][number] | undefined
-   if (!row) fail('candidate_history_unavailable')
+   if (!row||row.state==='note_resolution_proven') fail('candidate_history_unavailable')
    if (sequence !== undefined && row.server_sequence >= sequence) fail('missing_history')
    await openHistoryCandidate(s, candidate, amk)
    if (candidate.record_version === 2) { await verifyStoredContentNoteProof(s, amk, row, history); await prepareNotePrerequisite(s, row, binding, amk, current, undefined, v) }
@@ -77,11 +88,11 @@ export class BrowserContentAuthorityOwner {
  private commit(p: Change): Promise<boolean> {
   if (!p.current()) fail('closed')
   let unsubscribe: (() => void) | undefined
-  return this.transaction<boolean>(p.scope, stores, 'readwrite', (tx, result, abort) => {
+  return this.transaction<boolean|{status:'self_echo_applied'|'already_applied'}>(p.scope, stores, 'readwrite', (tx, result, abort) => {
    unsubscribe = this.auth.onInvalidated(() => abort(new BrowserPersistenceError('closed')))
    this.read(tx, p.scope, now => { try {
     if (!p.current()) fail('closed')
-    if (same(now, p.after)) { result(false); return }
+    if (same(now, p.after)) { result(p.echo?{status:'already_applied'}:false); return }
     if (!same(now, p.before)) fail('stale_source')
     const sets: Array<[string, unknown[], unknown[]]> = [['inbox', p.before.rows, p.after.rows], ['outbox', p.before.out, p.after.out],
      ['receipts', p.before.receipts, p.after.receipts], ['legacyNoteHistory', p.before.history, p.after.history]]
@@ -91,9 +102,9 @@ export class BrowserContentAuthorityOwner {
     for (const i of p.before.intents ?? []) if (!p.after.intents?.some(n => same(n, i))) {
      const w = tx.objectStore('legacyNoteIntents').delete([p.scope.accountId, (i as { event_id: string }).event_id]); w.onsuccess = () => { if (!p.current()) abort(new BrowserPersistenceError('closed')) }
     }
-    result(true)
+    result(p.echo?{status:'self_echo_applied'}:true)
    } catch (e) { abort(e) } }, abort)
-  }).finally(() => unsubscribe?.())
+  }).then(value=>value===true||typeof value==='object'&&value.status==='self_echo_applied').finally(() => unsubscribe?.())
  }
  /** Seal only a genuine authenticated I2 prepared by the existing local mutation owner. */
  async seal(scope: BrowserSyncScope, eventId: string): Promise<'sealed' | 'already_sealed'> {
@@ -123,13 +134,13 @@ export class BrowserContentAuthorityOwner {
    const record = { ...body, authorship_envelope }, candidate: BrowserContentCandidate3 = { ...record, record_digest: await noteProofDigest(record) }
    await authenticateContentCandidate3(s, candidate, amk, current)
    const ownHistory = parsed.history.filter(r => r.project_id === intent.project_id && r.note_id === intent.note_id), binding = before.bindings.find(b => (b as { project_id: string }).project_id === intent.project_id)
-   const candidates = [...ownHistory.filter(r => r.record_kind === 'candidate'), candidate], previous = ownHistory.find(r => r.record_kind === 'head')
-   const head = nextNoteHead(s, binding as Parameters<typeof nextNoteHead>[1], candidates, eventId, previous?.record_kind === 'head' ? previous : undefined)
+   const candidates = [...ownHistory.filter(r => r.record_kind === 'candidate'), candidate], previous = before.history.find((r):r is any => (r as any).record_kind === 'head'&&(r as any).project_id===intent.project_id&&(r as any).note_id===intent.note_id)
+   const head = previous?.record_version===2?{...previous,head_revision:previous.head_revision+1,linear_head_event_id:eventId,tip_event_ids:[eventId],node_ref:{kind:'candidate',event_id:eventId}}:nextNoteHead(s, binding as Parameters<typeof nextNoteHead>[1], candidates, eventId, previous?.record_kind === 'head' ? previous : undefined)
    const after = structuredClone(before)
    after.history = [...before.history.filter(r => !same(r, previous)), candidate, head]
    after.intents = before.intents!.filter(i => (i as { event_id: string }).event_id !== eventId)
    after.out.push({ record_version: 1, account_id: s.accountId, device_id: s.deviceId, event_id: eventId, local_ordinal: intent.local_ordinal, protocol_version: 3, state: 'sealed', raw_body: raw })
-   validateNoteHistorySet(s, after.history); await authenticateContentAuthorityInventory(s, after, amk, current)
+   if(previous?.record_version===2)inspectResolutionDag(s,after.history);else validateNoteHistorySet(s, after.history); await authenticateContentAuthorityInventory(s, after, amk, current)
    await this.commit({ scope: s, before, after, current }); return 'sealed'
   })
  }
@@ -179,7 +190,7 @@ export class BrowserContentAuthorityOwner {
    const proven = { ...row, record_version: 9 as const, state: 'content_note_self_echo_proven' as const, content_note_self_echo_proof: proof }
    await authenticateContentSelfEcho2(s, proven, c, r, out, amk, current)
    const after = structuredClone(before); after.rows = before.rows.map(v => same(v, row) ? proven : v)
-   const token = Object.freeze({}) as VerifiedNoteCausalPlan; this.echoes.set(token, { scope: s, before, after, current }); return token
+   const token = Object.freeze({}) as VerifiedNoteCausalPlan; this.echoes.set(token, { echo:true,scope: s, before, after, current }); return token
   })
  }
  owns(token: VerifiedNoteCausalPlan) { return this.echoes.has(token) }

@@ -1,3 +1,5 @@
+import {inspectContentAuthorityInventory} from './contentAuthorityInventory'
+import {validateContentSelfEchoProof2} from './contentAuthorityRecords'
 import { readFutureInboxRecord, readFutureHistoryRecord, type FutureInbox, type FutureNoteHistory } from './resolutionRecords'
 import { inspectResolutionDag } from './resolutionDag'
 import { contentHistoryJoin } from './contentNoteProof'
@@ -14,6 +16,7 @@ import { REPLAY_LIMITS, replayExact, replaySame, replayUuid, validateReplayManif
 
 export interface ReplaySnapshot {
   manifest: ReplayManifest | null; rows: FutureInbox[]; bindings: BrowserProjectBinding[]; owners: Array<BrowserMetadataHead | BrowserStageHead | BrowserStageOrderHead>
+  author?: {out:unknown[];receipts:unknown[];intents:unknown[]}
   sources?: LocalProjectRecord[]
   notes?: LocalNoteRecord[]; noteHistory?: FutureNoteHistory[]
 }
@@ -33,6 +36,11 @@ export function replayAppliedProof(row: FutureInbox): BrowserMetadataProof | Bro
 }
 export function assertReplayOwnerTransition(before: ReplaySnapshot, after: ReplaySnapshot, sequence: number, status: unknown): void {
   if (status === 'already_applied') { if (!replaySame(before, after)) fail(); return }
+  if(after.rows[sequence-1]?.state==='content_note_self_echo_proven'){
+    const row=after.rows[sequence-1]!,old=before.rows[sequence-1]!;if(row.state!=='content_note_self_echo_proven'||old.state!=='received'||status!=='self_echo_applied'||sequence!==before.manifest!.applied_cursor!+1)fail()
+    const {content_note_self_echo_proof:_p,...wire}=row
+    if(!replaySame({...wire,record_version:1,state:'received'},old)||!replaySame({...after,manifest:before.manifest,rows:before.rows},before)||!replaySame(after.manifest,replayCoverage(before.manifest!,row)))fail();return
+  }
   const manifest = before.manifest!, previous = before.rows[sequence - 1], row = after.rows[sequence - 1]
   if (row?.state === 'note_resolution_proven') {
     if (manifest.contract_version !== 6 || status !== 'applied' || previous?.state !== 'received'
@@ -196,12 +204,12 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
   const manifests = tx.objectStore('replayManifest').getAll(bound), bindings = tx.objectStore('projectBindings').getAll(bound), owners = tx.objectStore('ownerHeads').getAll(bound)
   const projects = tx.objectStore('localProjects').getAll(bound)
   const localNotes = tx.objectStore('localNotes').getAll(bound), noteHistory = tx.objectStore('legacyNoteHistory').getAll(bound)
-  const counts = replayEmptyStores.map(name => tx.objectStore(name).count(bound))
+  const counts = replayEmptyStores.map(name => tx.objectStore(name).getAll(bound))
   let pending = 11 + counts.length, bytes = 0
   const finish = () => {
     try {
       check(); if (--pending) return
-      if (counts.some(request => request.result !== 0) || version < 4 && projects.result.length || cursors.result.length > 1 || manifests.result.length > 1
+      if (version<6&&counts.some(request => request.result.length !== 0) || version < 4 && projects.result.length || cursors.result.length > 1 || manifests.result.length > 1
         || bindings.result.length > 200 || owners.result.length > 200 || version === 1 && (bindings.result.length || owners.result.length)) fail()
       const i: unknown = identity.result, b: unknown = binding.result
       if (i === undefined ? b !== undefined || alias.result !== undefined : !replayExact(i, ['record_version', 'canonical_user_id', 'local_account_id', 'device_id'])
@@ -210,7 +218,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         || b.record_version !== 1 || b.local_account_id !== s.accountId || b.canonical_user_id !== s.canonicalUserId) fail()
       const manifest = manifests.result.length ? validateReplayManifest(manifests.result[0], s, version) : null
       const checkpoint = validateBrowserSyncCursor(cursors.result[0], s), metadata = manifest?.metadata_cursor ?? 0, applied = version >= 3 ? manifest?.applied_cursor ?? 0 : metadata
-      if (checkpoint.ack_cursor !== 0 || checkpoint.proven_prefix !== 0 || checkpoint.next_local_ordinal !== 1
+      if (checkpoint.ack_cursor !== 0 || checkpoint.proven_prefix !== 0 || checkpoint.next_local_ordinal !== 1+counts[0]!.result.length+counts[2]!.result.length
         || checkpoint.pull_cursor !== rows.length || !manifest && (rows.length || cursors.result.length || bindings.result.length || owners.result.length || projects.result.length)
         || manifest && (i === undefined || !cursors.result.length || manifest.receive_cursor !== rows.length)) fail()
       const imported = bindings.result.map(raw => validateBrowserProjectBinding(raw, s)), heads = owners.result.map(raw => validateBrowserOwnerHead(raw, s))
@@ -230,12 +238,21 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
           ||row.resolution_proof.resolution_digest!==resolution.record_digest||row.resolution_proof.transition_digest!==transition.record_digest)fail()
       }
       inspectResolutionDag(s, future)
+      const authorActive=counts.some(r=>r.result.length),author={out:counts[0]!.result,receipts:counts[1]!.result,intents:counts[2]!.result}
+      const authority=inspectContentAuthorityInventory(s,{...author,history:future,rows,bindings:imported,localNotes:notes,cursor:checkpoint})
+      const authored=authority.candidates.sort((a,b)=>a.header.revision-b.header.revision),authorMutations=authored.length+authority.intents.filter(i=>i.record_version===2).length
+      if(authorActive&&(!closed||version!==6||authority.out.length!==authored.length||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
       for (const successor of successors) {
         const e = JSON.parse(successor.wire_item).event
         if (e.entity_type !== 'note' || e.operation !== 'event' || e.revision <= closed!.header.revision
-          || e.project_id !== closed!.project_id || e.entity_id !== closed!.note_id || e.device_id === s.deviceId
-          || !['received', 'content_note_proven', 'content_note_conflict_preserved', 'note_resolution_proven'].includes(successor.state)) fail()
+          || e.project_id !== closed!.project_id || e.entity_id !== closed!.note_id || e.device_id === s.deviceId&&!authored.some(c=>c.event_id===successor.event_id)
+          || !['received', 'content_note_proven', 'content_note_conflict_preserved', 'note_resolution_proven','content_note_self_echo_proven'].includes(successor.state)) fail()
+      }
+      for(const row of successors)if(JSON.parse(row.wire_item).event.device_id===s.deviceId){
+        const c=authored.find(c=>c.event_id===row.event_id),r=authority.receipts.find(r=>r.event_id===row.event_id),w=JSON.parse(row.wire_item),{device_id:_device,server_sequence,...event}=w.event
+        if(!c||!r||r.server_sequence!==server_sequence||server_sequence!==row.server_sequence||!replaySame({event,object:w.object},JSON.parse(c.wire_item)))fail()
       }
       const appliedSuccessors = successors.filter(r => r.state === 'content_note_proven')
       const successorCandidates=successors.filter(r=>r.state==='content_note_proven'||r.state==='content_note_conflict_preserved')
@@ -244,12 +261,12 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (closed) {
         const head = future.find(r => r.record_kind === 'head' && r.record_version === 2)
         const row = rows.find(r => r.server_sequence === closed.server_sequence)
-        if (!head || head.record_kind !== 'head' || head.head_revision !== 3 + resolutions.length + successorCandidates.length || head.linear_head_event_id !== latestMaterial?.event_id
+        if (!head || head.record_kind !== 'head' || head.head_revision !== 3 + resolutions.length + successorCandidates.length+authored.length || head.linear_head_event_id !== (authored.at(-1)?.event_id??latestMaterial?.event_id)
           || row?.state !== 'note_resolution_proven' || row.event_id !== closed.event_id
           || row.resolution_proof.resolution_digest !== closed.record_digest
           || rows.filter(r => JSON.parse(r.wire_item).event.entity_type === 'note').length !== 4 + successors.length) fail()
       }
-      if (future.length !== history.length + (closed ? 2 * resolutions.length + successorCandidates.length + future.filter(r=>r.record_kind==='group'&&r.group_id!==closed.local_group_id).length : 0)) fail()
+      if (future.length !== history.length + (closed ? 2 * resolutions.length + successorCandidates.length+authored.length + future.filter(r=>r.record_kind==='group'&&r.group_id!==closed.local_group_id).length : 0)) fail()
       validateNoteHistorySet(s, history)
       const noteProofs = rows.filter(row => (!closed || row.server_sequence < closed.server_sequence) && (row.state === 'note_proven' || row.state === 'content_note_proven'))
       const conflicts = rows.filter(row => (!closed||row.server_sequence<closed.server_sequence)&&row.state === 'content_note_conflict_preserved')
@@ -269,7 +286,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         || noteHeads.some(head => !noteKeys.has(noteKey(head.project_id, head.note_id)))) fail()
       for (const source of sources) {
         const appliedNotes = noteProofs.filter(row => replayNoteOutcome(row).header.project_id === source.project_id)
-        if (source.source_revision !== appliedNotes.length + 1 + (closed?.project_id === source.project_id ? resolutions.length + appliedSuccessors.length : 0) || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
+        if (source.source_revision !== appliedNotes.length + 1 + (closed?.project_id === source.project_id ? resolutions.length + appliedSuccessors.length+authorMutations : 0) || appliedNotes.some((row, index) => replayNoteOutcome(row).source_revision !== index + 2)) fail()
       }
       for (const seed of manifest?.source_seeds ?? []) {
         const genesis = rows.find(row => row.event_id === seed.genesis_event_id)
@@ -282,11 +299,12 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       let ciphertextBytes = 0
       const ids = new Set<string>()
       for (const [index, row] of rows.entries()) {
-        if (row.server_sequence !== index + 1 || ids.has(row.event_id) || (row.server_sequence <= applied) !== (!!replayAppliedProof(row) || row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven')) fail()
+        if (row.server_sequence !== index + 1 || ids.has(row.event_id) || (row.server_sequence <= applied) !== (!!replayAppliedProof(row) || row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven'||row.state==='content_note_self_echo_proven')) fail()
         ids.add(row.event_id)
         const wire = JSON.parse(row.wire_item) as { event: { project_id: string }; object: { ciphertext: string } }
         ciphertextBytes += Math.floor(wire.object.ciphertext.length * 3 / 4)
         const proof = replayAppliedProof(row)
+        if(row.state==='content_note_self_echo_proven'){validateContentSelfEchoProof2(row.content_note_self_echo_proof,s);if(!authored.some(c=>c.event_id===row.event_id))fail()}
         if (closed && row.server_sequence > closed.server_sequence) {
           if (row.state === 'content_note_proven'||row.state==='content_note_conflict_preserved') {
             const candidate = future.find(r => r.record_kind === 'candidate' && r.event_id === row.event_id)
@@ -294,7 +312,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
               || candidate.header.revision !== JSON.parse(row.wire_item).event.revision
               || !['update', 'delete'].includes((row.state==='content_note_proven'?row.content_note_proof:row.content_note_conflict_proof).mutation) || candidate.wire_item !== row.wire_item
               || candidate.record_digest !== (row.state==='content_note_proven'?row.content_note_proof:row.content_note_conflict_proof).candidate_digest
-              || (latestMaterial === row && !replaySame(candidate.projection, notes.find(n => n.note_id === closed.note_id)))) fail()
+              || (latestMaterial === row && !authorMutations && !replaySame(candidate.projection, notes.find(n => n.note_id === closed.note_id)))) fail()
           }
           continue // The continuation owner authenticates these proofs and sources.
         }
@@ -362,7 +380,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (metadata !== (metadataPrefix < 0 ? rows.length : metadataPrefix)) fail()
       for (const record of imported) {
         const remote = manifest?.anchor.registry.projects.find(project => project.project_id === record.project_id)
-        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water !== manifest!.anchor.registry.current_cursor
+        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&(!authorActive||record.remote_high_water===null||record.remote_high_water<closed!.server_sequence||record.remote_high_water>manifest!.anchor.registry.current_cursor)
           || !(heads.some(head => head.owner_kind === 'project_metadata' && head.owner_id === record.project_id)
             || manifest?.source_seeds?.some(seed => seed.project_id === record.project_id))) fail()
       }
@@ -377,9 +395,9 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         const genesis = head.history.find(proof => proof.operation === 'create')
         if (!genesis || genesis.source_device_id !== manifest!.anchor.registry.projects.find(record => record.project_id === project)?.origin_device_id) fail()
       }
-      bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history: future })).length + REPLAY_LIMITS.controlReserveBytes
+      bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history: future,author })).length + REPLAY_LIMITS.controlReserveBytes
       if (manifest && (ciphertextBytes !== manifest.ciphertext_bytes || bytes > REPLAY_LIMITS.inventoryBytes)) fail()
-      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: future })
+      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: future,...(authorActive?{author}:{}) })
     } catch (error) { abort(error) }
   }
   for (const request of [identity, alias, binding, cursors, manifests, bindings, owners, projects, localNotes, noteHistory, ...counts]) request.onsuccess = finish
@@ -391,7 +409,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (rows.length >= REPLAY_LIMITS.events) fail()
       const row = readFutureInboxRecord(cursor.value, s)
       if (!(row.state === 'received' && row.record_version === 1 || version >= 2 && row.state === 'applied' && row.record_version === 2 || version >= 3 && (row.state === 'stage_proven' && row.record_version === 5 || row.state === 'stage_order_proven' && row.record_version === 6) || version >= 4 && row.state === 'note_proven' && row.record_version === 3 || version >= 5 && row.state === 'content_note_proven' && row.record_version === 7 || version >= 6 && row.state === 'content_note_conflict_preserved' && row.record_version === 8)
-        && !(version >= 6 && row.state === 'note_resolution_proven' && row.record_version === 10)
+        && !(version >= 6 && (row.state === 'note_resolution_proven' && row.record_version === 10||row.state==='content_note_self_echo_proven'&&row.record_version===9))
         || row.protocol_version !== 3 || !replaySame(cursor.primaryKey, [s.accountId, row.server_sequence])) fail()
       bytes += new TextEncoder().encode(JSON.stringify(row)).length
       if (bytes > REPLAY_LIMITS.inventoryBytes) fail()
@@ -465,4 +483,33 @@ export function replayOrdinaryHistory(values: FutureNoteHistory[]): BrowserNoteH
       linear_head_event_id: winner.event_id, tip_event_ids: group.tip_event_ids })
   }
   return ordinary
+}
+
+/** Local author lifecycle only; no receive/apply coverage or project-read grant. */
+export function assertReplayAuthorTransition(before:ReplaySnapshot,after:ReplaySnapshot):void {
+  if(!before.manifest||!replaySame({...after,manifest:before.manifest,author:before.author,sources:before.sources,notes:before.notes,noteHistory:before.noteHistory},{...before,author:before.author}))fail()
+  if(!replaySame(after.manifest,{...before.manifest,revision:before.manifest.revision+1}))fail()
+  const a=before.author??{out:[],receipts:[],intents:[]},b=after.author??{out:[],receipts:[],intents:[]}
+  const old=before.noteHistory??[],next=after.noteHistory??[]
+  if(b.intents.length===a.intents.length+1){
+    const i=b.intents.find(i=>!a.intents.some(v=>replaySame(v,i))) as import('./contentAuthorityRecords').BrowserContentIntent2|undefined
+    const source=before.sources?.find(p=>p.project_id===i?.project_id),updated=after.sources?.find(p=>p.project_id===i?.project_id)
+    if(!i||i.record_version!==2||i.mutation_generation!==1||!replaySame(a.out,b.out)||!replaySame(a.receipts,b.receipts)||!replaySame(old,next)
+      ||!source||!updated||updated.source_revision!==source.source_revision+1||!replaySame(after.notes?.find(n=>n.note_id===i.note_id),i.snapshot)
+      ||!replaySame(before.sources?.filter(n=>n!==source),after.sources?.filter(n=>n!==updated))
+      ||!replaySame(before.notes?.filter(n=>n.note_id!==i.note_id),after.notes?.filter(n=>n.note_id!==i.note_id)))fail()
+  }else if(b.out.length===a.out.length+1){
+    const candidates=next.filter(r=>r.record_kind==='candidate'&&r.record_version===3&&!old.some(v=>replaySame(v,r)))
+    const c=candidates[0],head=old.find(r=>r.record_kind==='head'&&r.project_id===c?.project_id&&r.note_id===c?.note_id),h=next.find(r=>r.record_kind==='head'&&r.project_id===c?.project_id&&r.note_id===c?.note_id)
+    if(candidates.length!==1||!c||c.record_kind!=='candidate'||c.record_version!==3||!head||head.record_kind!=='head'||!h||h.record_kind!=='head'||head.record_version!==2||h.record_version!==2
+      ||!replaySame(h,{...head,head_revision:head.head_revision+1,linear_head_event_id:c.event_id,tip_event_ids:[c.event_id],node_ref:{kind:'candidate',event_id:c.event_id}})
+      ||next.length!==old.length+1||old.filter(r=>r!==head).some(r=>!next.some(v=>replaySame(v,r)))
+      ||!replaySame(b.intents,a.intents.filter((i:any)=>i.event_id!==c.event_id))||!a.intents.some(i=>replaySame(i,c.intent))||!replaySame(a.receipts,b.receipts)
+      ||a.out.some(o=>!b.out.some(v=>replaySame(o,v)))||!replaySame(before.notes,after.notes)||!replaySame(before.sources,after.sources))fail()
+  }else {
+    if(!replaySame(a.intents,b.intents)||!replaySame(old,next)||!replaySame(before.sources,after.sources)||!replaySame(before.notes,after.notes)
+      ||b.receipts.length!==a.receipts.length+1||a.receipts.some(r=>!b.receipts.some(v=>replaySame(r,v)))||a.out.length!==b.out.length)fail()
+    const r=b.receipts.find(r=>!a.receipts.some(v=>replaySame(r,v))) as {event_id:string}
+    if(!a.out.some((o:any)=>o.event_id===r.event_id&&o.state==='sealed')||!replaySame(b.out,a.out.map((o:any)=>o.event_id===r.event_id?{...o,state:'accepted'}:o)))fail()
+  }
 }

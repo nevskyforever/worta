@@ -17,7 +17,7 @@ import type { BrowserSyncScope, BrowserSyncTransaction } from './syncDurability'
 /** Decode for route admission only. Owner tokens remain the sole apply authority. */
 export async function openReplayContent(scope:BrowserSyncScope,row:FutureInbox,amk:AccountMasterKey){
   const wire=JSON.parse(row.wire_item),e=wire.event
-  if(row.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||e.device_id===scope.deviceId)throw new BrowserReplayError('unsupported_resolution_cohort')
+  if(row.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event')throw new BrowserReplayError('unsupported_resolution_cohort')
   const nonce=decodeBase64Url(wire.object.nonce),ciphertext=decodeBase64Url(wire.object.ciphertext)
   let bytes:Uint8Array|undefined
   try{

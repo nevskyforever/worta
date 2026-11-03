@@ -1,3 +1,4 @@
+import {BrowserContentNoteApply} from './contentNoteApply'
 import { BrowserV10Transport } from './v10Transport'
 import { BrowserResolutionContinuation } from './resolutionContinuation'
 import { BrowserResolutionPlanner } from './resolutionPlanner'
@@ -161,7 +162,7 @@ export async function reauthenticateReplayOwners(scope: BrowserSyncScope, snapsh
   }
   let authenticated = 0
   for (const row of snapshot.rows) if (row.state !== 'received') {
-    if (!(row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven' ? notes.has(row.server_sequence) : certificates.get(row.state)?.has(row.server_sequence)))
+    if (!(row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven'||row.state==='content_note_self_echo_proven' ? notes.has(row.server_sequence) : certificates.get(row.state)?.has(row.server_sequence)))
       throw new BrowserReplayError(structural ? 'structural_proof_reauthentication_failed' : 'metadata_proof_reauthentication_failed')
     authenticated++
   }
@@ -278,7 +279,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
       return port.transaction(expected, target, server)(...args)
     }
     const device = await new BrowserDeviceRegistration(transaction, current).bind(auth, bindings).registerVerified(scope)
-    if (snapshot.manifest!.applied_cursor! <= resolutionSequence!) await applyReplayResolutionOwner({ contractVersion: 6, scope, sequence: resolutionSequence!,
+    if (snapshot.manifest!.applied_cursor! < resolutionSequence!) await applyReplayResolutionOwner({ contractVersion: 6, scope, sequence: resolutionSequence!,
       transaction, current, auth, bindings, keys, device })
     if (snapshot.rows.length > resolutionSequence!) {
       const owner = new BrowserResolutionContinuation(transaction, new BrowserLocalAuthority(transaction), current).bind(auth, bindings, keys, device)
@@ -290,7 +291,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
           const planner=new BrowserResolutionPlanner(transaction,new BrowserLocalAuthority(transaction),current).bind(auth,bindings,keys,device)
           const plan=await planner.prepareSuccessor(scope,sequence),apply=planner.atomicApply()
           await apply.commit(await apply.prepare(plan.token));check()
-        }else{await owner.apply(scope,sequence);check()}
+        }else if(JSON.parse(row.wire_item).event.device_id===scope.deviceId){await new BrowserContentNoteApply(new BrowserLegacyNoteApply(transaction,new BrowserLocalAuthority(transaction),current)).bind(auth,bindings,keys).apply(scope,sequence);check()}else{await owner.apply(scope,sequence);check()}
       }
       await owner.history(scope)
     }

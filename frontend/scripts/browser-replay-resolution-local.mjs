@@ -277,6 +277,10 @@ try {
     assert.equal((await page.evaluate(() => adapter.run())).kind, expectedKind)
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
   }
+  if(fixture.authorSelfEcho){
+    const {acceptReplayAuthor}=await import('./browser-replay-author-local.mjs')
+    page=await acceptReplayAuthor({page,fixture,reopen:async(p)=>{await p.evaluate(()=>adapter.store.close());await context.close();const next=await launch();await attach(next);return next}})
+  }
   await page.evaluate(() => adapter.store.close())
   console.log(JSON.stringify({ pass: true, scenarios: 10 }))
 } finally {

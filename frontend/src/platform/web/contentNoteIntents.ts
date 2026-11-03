@@ -1,3 +1,4 @@
+import {authenticateContinuationHistory,verifyContinuationSources} from './resolutionHistorical'
 import {BrowserContentAuthorityOwner} from './contentAuthorityOwner'
 import type {NormalUserAuthRuntime} from '@/auth/userAuth'
 import type {AuthoritativeAccountBinding} from '@/auth/accountBinding'
@@ -47,13 +48,14 @@ export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter 
   return{lease,current}
  }
  private read(tx:IDBTransaction,s:BrowserSyncScope,done:(v:BrowserPrefixInventory)=>void,abort:(e:unknown)=>void){
-  const names=['inbox','outbox','receipts','projectBindings','ownerHeads','legacyNoteHistory','legacyNoteIntents','localNotes'],rs=names.map(n=>tx.objectStore(n).getAll(historyRange(s)));let n=0
-  const finish=()=>{if(++n!==rs.length)return;readBrowserSyncCursor(tx,s,cursor=>{try{done({rows:rs[0]!.result,out:rs[1]!.result,receipts:rs[2]!.result,bindings:rs[3]!.result,owners:rs[4]!.result,history:rs[5]!.result,intents:rs[6]!.result,localNotes:rs[7]!.result,cursor})}catch(e){abort(e)}},abort)}
+  const names=['inbox','outbox','receipts','projectBindings','ownerHeads','legacyNoteHistory','legacyNoteIntents','localNotes','localProjects'],rs=names.map(n=>tx.objectStore(n).getAll(historyRange(s)));let n=0
+  const finish=()=>{if(++n!==rs.length)return;readBrowserSyncCursor(tx,s,cursor=>{try{done({rows:rs[0]!.result,out:rs[1]!.result,receipts:rs[2]!.result,bindings:rs[3]!.result,owners:rs[4]!.result,history:rs[5]!.result,intents:rs[6]!.result,localNotes:rs[7]!.result,projects:rs[8]!.result,cursor})}catch(e){abort(e)}},abort)}
   rs.forEach(r=>r.onsuccess=finish)
  }
  private inventory(s:BrowserSyncScope){return this.transaction<BrowserPrefixInventory>(s,this.mutationStores,'readonly',(tx,result,abort)=>this.read(tx,s,result,abort))}
  private async metadata(s:BrowserSyncScope,v:BrowserPrefixInventory,project:string,bootstrap:string,amk:AccountMasterKey,current:()=>boolean,pinned?:string){
-  const cert=await prepareMetadataPrefix(s,v,amk,current,true),seqs=verifiedMetadataSequences(cert,s,v)
+  const view={...v,rows:v.rows.filter(r=>['project_metadata','stage','stage_order'].includes(JSON.parse((r as {wire_item:string}).wire_item).event.entity_type))}
+  const cert=await prepareMetadataPrefix(s,view,amk,current,true),seqs=verifiedMetadataSequences(cert,s,view)
   const raw=v.owners.find(o=>(o as {owner_kind:string;owner_id:string}).owner_kind==='project_metadata'&&(o as {owner_id:string}).owner_id===project)
   if(!raw)fail('stale_authority')
   const head=validateBrowserMetadataHead(raw,s),tip=head.history.find(p=>p.event_id===head.tip_event_ids[0]),dependency=pinned?head.history.find(p=>p.event_id===pinned):tip
@@ -73,6 +75,7 @@ export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter 
   await authenticateContentAuthorityInventory(s,v,amk,current)
   const binding=validateBrowserProjectBinding(v.bindings.find(b=>(b as {project_id:string}).project_id===row.project_id),s)
   if(binding.mode!=='import_remote'||binding.phase!=='captured'||binding.remote_state!=='active')fail('ineligible_lineage')
+  if(v.history.some(h=>(h as {record_kind:string}).record_kind==='resolution'))return this.prepareResolutionMutation(s,row,amk,source,v,current,binding.bootstrap_id)
   const history=validateNoteHistorySet(s,v.history).filter(h=>h.note_id===row.note_id)
   if(history.some(h=>h.project_id!==row.project_id||h.bootstrap_id!==binding.bootstrap_id))fail('stale_lineage')
   if(history.some(h=>h.record_kind==='group'||h.record_kind==='local_version'))fail('note_conflict_unproven')
@@ -90,7 +93,7 @@ export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter 
   const incoming=parsed.rows.filter(r=>{const e=JSON.parse(r.wire_item).event;return e.entity_type==='note'&&e.entity_id===row.note_id})
   for(const r of incoming){const c=candidates.find(c=>c.event_id===r.event_id);if(!c||!['note_proven','content_note_proven'].includes(r.state))fail('note_conflict_unproven')}
   for(const c of candidates){
-   const r=incoming.find(r=>r.event_id===c.event_id);if(!r)fail('candidate_history_unavailable')
+   const r=incoming.find(r=>r.event_id===c.event_id);if(!r||r.state==='note_resolution_proven')fail('candidate_history_unavailable')
    await openHistoryCandidate(s,c,amk)
    if(c.record_version===2){await verifyStoredContentNoteProof(s,amk,r,v.history as never);await prepareNotePrerequisite(s,r,binding,amk,current,undefined,v)}
    else{
@@ -129,6 +132,25 @@ export class BrowserContentNoteIntentRuntime implements LocalNoteMutationWriter 
   try{encrypted=await encryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:row.project_id,entityId:row.note_id,entityType:'note'},bytes);intent.intent_envelope={crypto_version:1,aad_version:1,nonce:encodeBase64Url(encrypted.nonce),ciphertext:encodeBase64Url(encrypted.ciphertext)}}finally{bytes.fill(0);encrypted?.nonce.fill(0);encrypted?.ciphertext.fill(0)}
   validateContentIntent2(intent,s);await authenticateContentIntent2(s,intent,amk,current)
   if(!current())fail('closed');const token=Object.freeze({}) as NoteMutationPlan;mutations.set(token,{owner:this,scope:s,old:v,intent,nextOrdinal,current});return token
+ }
+ private async prepareResolutionMutation(s:BrowserSyncScope,row:LocalNoteRecord,amk:AccountMasterKey,source:LocalSourceToken,v:BrowserPrefixInventory,current:()=>boolean,bootstrap:string):Promise<NoteMutationPlan>{
+  if(v.rows.some(r=>(r as {state:string}).state==='received'))fail('note_conflict_unproven')
+  const history=await authenticateContinuationHistory(s,v,amk,current)
+  await verifyContinuationSources(s,{...v,projects:v.projects!},history,amk,current)
+  if(v.intents?.length)fail('unsupported_local_source')
+  const head=history.dag.history.find(h=>h.record_kind==='head'&&h.project_id===row.project_id&&h.note_id===row.note_id)
+  if(!head||head.record_kind!=='head'||head.record_version!==2||head.tip_event_ids.length!==1||history.groups.some(g=>g.effective==='open'))fail('note_conflict_unproven')
+  const parent=history.dag.events.get(head.linear_head_event_id),payload=history.opened.get(head.linear_head_event_id)??history.resolutions.get(head.linear_head_event_id)?.payload
+  if(!parent||!payload||parent.header.operation==='delete'||parent.record_kind==='resolution'&&parent.result_operation==='delete')fail('unsupported_local_source')
+  if(parent.record_kind==='candidate'&&parent.record_version===3&&!v.rows.some(r=>(r as any).event_id===parent.event_id&&(r as any).state==='content_note_self_echo_proven'))fail('self_echo_unavailable')
+  await this.local.withDecryptedSnapshot(s,source,async prior=>{const note=prior.notes.find(n=>n.note.id===row.note_id);const expected=payload.version===2?payload.result.note:payload.note;if(!note||note.state!=='live'||!same(material(note),material({state:'live',note:{...expected,revision:0}} as LocalNoteSource)))fail('stale_source')})
+  const dependency=await this.metadata(s,v,row.project_id,bootstrap,amk,current),next=await openContentIntentSource(s,row,amk,current)
+  if(next.note.stage_id!==null)fail('unsupported_local_source')
+  const ordinal=v.cursor.next_local_ordinal,intent:BrowserContentIntent2={record_version:2,transport_kind:'content_note_v1',account_id:s.accountId,device_id:s.deviceId,project_id:row.project_id,note_id:row.note_id,bootstrap_id:bootstrap,event_id:crypto.randomUUID(),operation:next.state==='live'?'upsert':'delete',revision:parent.header.revision+1,parent_event_id:parent.event_id,updated_at:next.state==='live'?next.note.updated_at:next.note.deleted_at,deleted_at:next.state==='live'?null:next.note.deleted_at,local_ordinal:ordinal,mutation_generation:1,dependencies:{bootstrap_id:bootstrap,metadata_event_id:dependency,stage_event_ids:[]},snapshot:row,snapshot_digest:await noteProofDigest(row),intent_envelope:row.envelope,seal_state:'pending',seal_attempt_count:0,last_error_code:null,next_attempt_at:null}
+  const bytes=localCanonicalBytes({intent_format:2,identity:contentIntentIdentity(intent)})
+  try{const e=await encryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:row.project_id,entityId:row.note_id,entityType:'note'},bytes);try{intent.intent_envelope={crypto_version:1,aad_version:1,nonce:encodeBase64Url(e.nonce),ciphertext:encodeBase64Url(e.ciphertext)}}finally{e.nonce.fill(0);e.ciphertext.fill(0)}}finally{bytes.fill(0)}
+  await authenticateContentIntent2(s,intent,amk,current);if(!current())fail('closed')
+  const token=Object.freeze({}) as NoteMutationPlan;mutations.set(token,{owner:this,scope:s,old:v,intent,nextOrdinal:ordinal+1,current});return token
  }
  scheduleMutation(tx:IDBTransaction,token:NoteMutationPlan,done:()=>void,abort:(e:unknown)=>void){
   const p=mutations.get(token);if(!p||p.owner!==this||!p.current()){abort(new BrowserPersistenceError('closed'));return}

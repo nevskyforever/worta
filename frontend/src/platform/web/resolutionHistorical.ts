@@ -120,7 +120,7 @@ async function authenticateContinuationCore(s:BrowserSyncScope,v:ResolutionInven
   if(i.record_version===2)await authenticateContentIntent2(s,i,amk,current);else await unsealedPlaintext(s,i,amk)
   if(!notes.some(n=>same(n,i.snapshot)))bad()
   const head=dag.history.find(h=>h.record_kind==='head'&&h.project_id===i.project_id&&h.note_id===i.note_id)
-  if(i.parent_event_id!==null&&(!head||head.record_kind!=='head'||head.record_version!==1||head.linear_head_event_id!==i.parent_event_id||head.tip_event_ids.length!==1))throw new BrowserPersistenceError('unsupported_local_source')
+  if(i.parent_event_id!==null&&(!head||head.record_kind!=='head'||head.record_version!==1&&i.record_version!==2||head.linear_head_event_id!==i.parent_event_id||head.tip_event_ids.length!==1))throw new BrowserPersistenceError('unsupported_local_source')
   check()
  }
  let material=0
@@ -268,16 +268,19 @@ export async function verifyContinuationSources(s:BrowserSyncScope,v:ResolutionI
    const expectedRevision=(noteId===r.note_id?root.headBefore.head_revision+1:1)+following.length
    if(head.head_revision!==expectedRevision)bad()
    for(const c of following){
-    if(c.origin!=='peer')throw new BrowserPersistenceError('unsupported_local_source')
+    if(c.origin!=='peer'&&c.record_version!==3)throw new BrowserPersistenceError('unsupported_local_source')
     const row=history.rows.find(row=>row.event_id===c.event_id),parent=history.rows.find(row=>row.event_id===c.header.parent_event_id)
-    if(!row||!parent||row.server_sequence<=parent.server_sequence)bad()
+    if(!parent||row&&row.server_sequence<=parent.server_sequence||!row&&c.record_version!==3)bad()
     const parentCandidate=history.dag.events.get(c.header.parent_event_id!)
     const parentDeleted=parentCandidate?.record_kind==='resolution'?parentCandidate.result_operation==='delete':parentCandidate?.header.operation==='delete'
     if(parentDeleted&&c.header.operation!=='delete')throw new BrowserPersistenceError('unsupported_local_source')
+    if(c.record_version===3){if(c.intent.mutation_generation!==1||c.intent.snapshot.source_revision<=root.project.source_revision)bad();sourceRevisions.push(c.intent.snapshot.source_revision)}
     if(c.projection){if(c.projection.note_revision!==0||c.projection.source_revision<=root.project.source_revision)bad();sourceRevisions.push(c.projection.source_revision)}
    }
-   const last=history.dag.events.get(head.linear_head_event_id),expected=last?.record_kind==='candidate'?last.projection:root.notes.find(n=>n.note_id===noteId)
-   if(!expected||!same(notes.find(n=>n.note_id===noteId),expected))bad()
+   const last=history.dag.events.get(head.linear_head_event_id),expected=last?.record_kind==='candidate'?(last.record_version===3?last.intent.snapshot:last.projection):root.notes.find(n=>n.note_id===noteId)
+   const intent=(v.intents??[]).map(i=>validateNoteIntentRecord(i,s)).find(i=>i.record_version===2&&i.project_id===r.project_id&&i.note_id===noteId)
+   if(intent){if(intent.mutation_generation!==1)bad();sourceRevisions.push(intent.snapshot.source_revision)}
+   if(!expected||!same(notes.find(n=>n.note_id===noteId),intent?.snapshot??expected))bad()
   }
   sourceRevisions.sort((a,b)=>a-b)
   if(sourceRevisions.some((n,i)=>n!==root.project.source_revision+i+1)||p.source_revision!==root.project.source_revision+sourceRevisions.length)bad()

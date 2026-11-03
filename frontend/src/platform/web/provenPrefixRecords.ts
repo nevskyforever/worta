@@ -9,7 +9,7 @@ import { validateBrowserInboxRecord,immutableWireIdentity,validateBrowserUploadP
 import { validateNoteHistorySet,type BrowserNoteCandidate } from './noteHistoryRecords'
 import { validateBrowserProjectBinding } from './projectBindings'
 export const PREFIX_STORES=['inbox','outbox','receipts','cursors','projectBindings','ownerHeads','legacyNoteHistory']
-export interface BrowserPrefixInventory {rows:unknown[];out:unknown[];receipts:unknown[];bindings:unknown[];owners:unknown[];history:unknown[];intents?:unknown[];localNotes?:unknown[];cursor:BrowserSyncCheckpoint}
+export interface BrowserPrefixInventory {rows:unknown[];out:unknown[];receipts:unknown[];bindings:unknown[];owners:unknown[];history:unknown[];intents?:unknown[];localNotes?:unknown[];cursor:BrowserSyncCheckpoint;projects?:unknown[]}
 export type PrefixBlocker='missing_sequence'|'received_note'|'metadata_proof_gap'|'unsupported_family'|null
 export interface BrowserPrefixResult {current_proven_prefix:number;candidate_proven_prefix:number;pull_cursor:number;first_blocking_sequence:number|null;blocker:PrefixBlocker;unsupported_family:string|null;counts:{applied:number;self_echo:number;conflict:number;unsealed_conflict:number}}
 const same=(a:unknown,b:unknown)=>immutableWireIdentity(a)===immutableWireIdentity(b)

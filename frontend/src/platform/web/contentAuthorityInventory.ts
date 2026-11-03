@@ -1,9 +1,11 @@
+import {readFutureInboxRecord} from './resolutionRecords'
+import {inspectResolutionDag} from './resolutionDag'
 import type {AccountMasterKey} from '@/crypto'
 import {BrowserPersistenceError} from './persistence'
 import {validateNoteHistorySet} from './noteHistoryRecords'
 import {validateNoteIntentRecord} from './noteIntentRecords'
 import {validateBrowserProjectBinding} from './projectBindings'
-import {validateBrowserInboxRecord,validateBrowserStoredUploadPair,immutableWireIdentity,type BrowserSyncScope,type BrowserOutboxRecord,type BrowserSyncCheckpoint} from './syncDurability'
+import {validateBrowserStoredUploadPair,immutableWireIdentity,type BrowserSyncScope,type BrowserOutboxRecord,type BrowserSyncCheckpoint} from './syncDurability'
 import {validateContentReceipt2,joinContentReceipt2,contentAuthorityCorrupt as bad,type BrowserContentCandidate3} from './contentAuthorityRecords'
 import {authenticateContentIntent2,authenticateContentCandidate3,authenticateContentReceipt2,authenticateContentSelfEcho2} from './contentAuthorityAuthentication'
 import {noteProofDigest} from './legacyNoteApply'
@@ -11,7 +13,7 @@ const same=(a:unknown,b:unknown)=>immutableWireIdentity(a)===immutableWireIdenti
 export interface ContentAuthorityInventory {history:readonly unknown[];out:readonly unknown[];receipts:readonly unknown[];rows?:readonly unknown[];intents?:readonly unknown[];bindings?:readonly unknown[];localNotes?:readonly unknown[];cursor?:BrowserSyncCheckpoint}
 /** Structural dispatch only. These rows do not grant writer, self-echo or ACK authority. */
 export function inspectContentAuthorityInventory(s:BrowserSyncScope,v:ContentAuthorityInventory){
- const history=validateNoteHistorySet(s,[...v.history]),intents=(v.intents??[]).map(i=>validateNoteIntentRecord(i,s)),rows=(v.rows??[]).map(r=>validateBrowserInboxRecord(r,s))
+ const history=(v.history.some(r=>(r as {record_kind:string}).record_kind==='resolution')?inspectResolutionDag(s,v.history).history.filter((r):r is ReturnType<typeof validateNoteHistorySet>[number]=>r.record_kind==='candidate'||r.record_kind==='group'||r.record_kind==='local_version'||r.record_kind==='head'&&r.record_version===1):validateNoteHistorySet(s,[...v.history])),intents=(v.intents??[]).map(i=>validateNoteIntentRecord(i,s)),rows=(v.rows??[]).map(r=>readFutureInboxRecord(r,s))
  const candidates=history.filter((h):h is BrowserContentCandidate3=>h.record_kind==='candidate'&&h.record_version===3)
  const out=v.out.map(o=>validateBrowserStoredUploadPair(o,v.receipts.find(r=>(r as any)?.event_id===(o as any)?.event_id),s))
  const receipts=v.receipts.filter(r=>(r as any)?.record_version===2).map(r=>validateContentReceipt2(r,s))
@@ -31,8 +33,8 @@ export function inspectContentAuthorityInventory(s:BrowserSyncScope,v:ContentAut
  for(const r of receipts){const c=candidates.find(c=>c.event_id===r.event_id),o=out.find(o=>o.event_id===r.event_id);if(!c||!o)bad();joinContentReceipt2(s,r,c,o)}
  for(const i of intents)if(i.record_version===2){
   if(out.some(o=>o.event_id===i.event_id)||candidates.some(c=>c.event_id===i.event_id))bad()
-  const own=history.filter(h=>h.project_id===i.project_id&&h.note_id===i.note_id),head=own.find(h=>h.record_kind==='head')
-  if(own.some(h=>h.record_kind==='group')||i.parent_event_id===null&&own.length||i.parent_event_id!==null&&(!head||head.record_kind!=='head'||head.linear_head_event_id!==i.parent_event_id||head.tip_event_ids.length!==1||!own.some(h=>h.record_kind==='candidate'&&h.event_id===i.parent_event_id&&h.header.revision===i.revision-1)))bad()
+  const own=history.filter(h=>h.project_id===i.project_id&&h.note_id===i.note_id),head=v.history.find(h=>(h as any).record_kind==='head'&&(h as any).project_id===i.project_id&&(h as any).note_id===i.note_id&&(h as any).bootstrap_id===i.bootstrap_id) as any, parent=v.history.find(h=>['candidate','resolution'].includes((h as any).record_kind)&&(h as any).event_id===i.parent_event_id&&(h as any).project_id===i.project_id&&(h as any).note_id===i.note_id&&(h as any).bootstrap_id===i.bootstrap_id) as any
+  if(own.some(h=>h.record_kind==='group'&&!v.history.some(t=>(t as any).record_kind==='group_transition'&&(t as any).group_id===h.group_id&&(t as any).project_id===h.project_id&&(t as any).note_id===h.note_id&&(t as any).bootstrap_id===h.bootstrap_id))||i.parent_event_id===null&&own.length||i.parent_event_id!==null&&(!head||head.record_kind!=='head'||head.linear_head_event_id!==i.parent_event_id||head.tip_event_ids.length!==1||(!parent||parent.header.revision!==i.revision-1)))bad()
   if(v.localNotes&&!v.localNotes.some(n=>same(n,i.snapshot)))bad()
  }
  if(v.bindings){const bs=v.bindings.map(b=>validateBrowserProjectBinding(b,s));for(const c of [...candidates,...intents.filter(i=>i.record_version===2)])if(!bs.some(b=>b.project_id===c.project_id&&b.bootstrap_id===c.bootstrap_id&&b.mode==='import_remote'&&b.phase==='captured'&&b.remote_state==='active'))bad()}

@@ -1,3 +1,5 @@
+import {BrowserContentNoteIntents} from './contentNoteIntents'
+import {assertReplayAuthorTransition} from './replayInventory'
 import { BrowserNoteReaderReadiness } from './noteReaderReadiness'
 import { BrowserDeviceRegistration } from './deviceRegistration'
 import { applyReplayContentUpdate } from './replayContentUpdate'
@@ -232,6 +234,55 @@ class BrowserReplayStorage {
         () => { try { this.check(); return true } catch { return false } }, auth, bindings, keys)
     } finally { unAuth(); unKey() }
   }
+  /** Internal owner binding only. No UI composition, upload, capability or writer grant. */
+  contentAuthorOwner(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext){
+    const current=()=>{try{this.check();return true}catch{return false}}
+    const transaction:BrowserSyncTransaction=async(scope,_stores,mode,schedule)=>{
+      if(!replaySame(scope,this.scope))fail()
+      return this.run(mode,(tx,result,abort)=>this.load(tx,before=>{
+        try{if(mode==='readwrite'&&(!before.manifest||before.manifest.phase!=='received'||before.manifest.revision===Number.MAX_SAFE_INTEGER||!before.noteHistory?.some(r=>r.record_kind==='resolution')))throw new BrowserPersistenceError('unsupported_local_source')
+          schedule(tx,value=>{
+          if(mode==='readonly'){result(value);return}
+          tx.objectStore('replayManifest').put({...before.manifest!,revision:before.manifest!.revision+1})
+          this.load(tx,after=>{try{assertReplayAuthorTransition(before,after);result(value)}catch(e){abort(e)}},abort)
+        },abort)}catch(e){abort(e)}
+      },abort))
+    }
+    return new BrowserContentNoteIntents(transaction,new BrowserLocalAuthority(transaction),current).bind(auth,bindings,keys)
+  }
+  /** Exact accepted author echo only, through the normal authenticated pull (and its reader gate). */
+  async receiveContentAuthorEcho(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext){
+    const stop=()=>{void this.close()},unAuth=auth.onInvalidated(stop),unKey=keys.onInvalidated(stop)
+    try{
+    const context=auth.requireContext(),lease=keys.leaseForAccount(this.scope.accountId),before=await this.read()
+    const check=()=>{this.check();if(!auth.isCurrent(context)||!lease?.isCurrent()||context.userId!==this.scope.canonicalUserId)throw new BrowserPersistenceError('closed')}
+    check();await this.contentAuthorOwner(auth,bindings,keys).authority.authenticate(this.scope);check()
+    const registry=await auth.authorized(token=>cloudProjectsApi.listBootstraps(token,this.signal));check()
+    const mode=await auth.authorized(token=>encryptedSyncV2Api.capabilities(token,this.signal));check()
+    const anchor=replayAnchor(registry.value,mode.value),previous=before.manifest!
+    if(previous&&replaySame(anchor,previous.anchor)&&before.rows.at(-1)?.state==='content_note_self_echo_proven'){
+      await this.applyOrderedContentUpdate(auth,bindings,keys);check()
+      return {committed_cursor:previous.receive_cursor,new_events:0,replayed_events:1,has_more:false}
+    }
+    if(!previous||previous.phase!=='received'||previous.applied_cursor!==previous.receive_cursor||anchor.registry.current_cursor!==previous.receive_cursor+1
+      ||!replaySame(anchor.transport,previous.anchor.transport)||!replaySame(anchor.registry.projects,previous.anchor.registry.projects))fail()
+    const response=await auth.authorized(token=>encryptedSyncV3Api.pullRaw(token,this.scope.deviceId,previous.receive_cursor,100,this.signal));check()
+    const {page}=prepareReplayPage(response.value,previous.receive_cursor,this.scope,anchor)
+    const item=page.items[0],receipt=before.author?.receipts.find((r:any)=>r.event_id===item?.event.event_id) as {server_sequence:number}|undefined
+    if(page.items.length!==1||page.has_more||!receipt||receipt.server_sequence!==page.next_cursor||item!.event.device_id!==this.scope.deviceId)fail()
+    const transaction:BrowserSyncTransaction=(scope,_stores,_mode,schedule)=>this.run('readwrite',(tx,result,abort)=>this.load(tx,now=>{
+      try{check();if(!replaySame(scope,this.scope)||!replaySame(now,before))throw new BrowserPersistenceError('stale_source')
+        schedule(tx,value=>{
+          try{check();const bytes=Math.floor((JSON.parse(response.value).items[0].object.ciphertext as string).length*3/4)
+            tx.objectStore('replayManifest').put({...previous,anchor,receive_cursor:page.next_cursor,ciphertext_bytes:previous.ciphertext_bytes+bytes,revision:previous.revision+1})
+            this.load(tx,after=>{try{if(!replaySame({...after,manifest:before.manifest,rows:before.rows},before)||after.rows.length!==before.rows.length+1||!replaySame(after.rows.slice(0,-1),before.rows))fail();result(value)}catch(e){abort(e)}},abort)
+          }catch(e){abort(e)}
+        },abort)
+      }catch(e){abort(e)}
+    },abort))
+    return await new BrowserSyncDurability(transaction).commitInboundPage(this.scope,previous.receive_cursor,response.value)
+    }finally{unAuth();unKey()}
+  }
   /** Negative qualification diagnostic over the real replay inventory. It never
    * pulls data, declares a reader, advances coverage or opens a project. */
   async inspectNoteReaderReadiness(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding,
@@ -260,7 +311,7 @@ class BrowserReplayStorage {
               const finish = (after: ReplaySnapshot) => {
                 try { assertReplayOwnerTransition(before, after, sequence, value && typeof value === 'object' && 'status' in value ? value.status : value); result(value) } catch (error) { abort(error) }
               }
-              if (value === 'applied' || value === 'conflict_preserved' || value && typeof value === 'object' && 'status' in value && value.status === 'applied') {
+              if (value === 'applied' || value === 'conflict_preserved' || value==='self_echo_applied'|| value && typeof value === 'object' && 'status' in value && (value.status === 'applied'||value.status==='self_echo_applied')) {
                 const manifest = before.manifest!
                 if (manifest.revision === Number.MAX_SAFE_INTEGER) fail()
                 const row = tx.objectStore('inbox').get([this.scope.accountId, sequence])
@@ -347,7 +398,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)
