@@ -1,5 +1,39 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-04 — Slice 4/5: deleted Resolution continuation (partial)
+
+Starting SHA `3ddea182c3055aa0f6384aa565b5f74a0c47603b`, branch `6.0`.
+Reader qualification remains **PARTIAL, 1/10 blockers closed**. The existing
+continuation owner and historical verifier accept a Content update immediately
+after an authenticated Resolution with a deleted result; the replay admission
+now admits this same transition. Ordinary tombstone-to-update remains refused.
+
+Two independent native SQLite writers produced genesis, concurrent updates,
+Resolution, a further update/delete conflict, choose-version of the delete,
+recreation as an update with the Resolution as parent, and a subsequent edit.
+The real encrypted history was applied in Chromium/IndexedDB; abort on the
+recreation, persistent-profile reopen, duplicate replay, corrupted stored wire
+and owner evidence, and logout refusal are exercised. The original encrypted
+wire and owner proofs remain in the existing atomic inventory and coverage.
+Focused verification: Rust **2 passed**, Vitest **290 passed**, native
+SQLite/Chromium regression **2 passed**, final resurrection acceptance
+**1 passed**, frontend typecheck/build and maintained quick acceptance passed.
+The injected transport failure is local, not a successful protected server pull.
+Additional acceptance on the same starting SHA: two successive deleted-result
+Resolution/recreation cycles, each emitted by the Native writers, followed by
+an update, persistent Chromium reopen and repeated proof verification: **1
+passed**. Focused Rust **2 passed**, Vitest **209 passed**, build/typecheck and
+quick acceptance passed. This extends the project/plain history only; it does
+not close the source and dependency recovery matrix.
+
+This is a bounded deleted-Resolution path, not full ordinary/Resolution
+tombstone and resurrection reader coverage. The existing
+`tombstone_resurrection_not_accepted` blocker therefore remains open pending
+the complete supported-source, causal-dependency and recovery matrix. Positive
+server-to-browser qualification remains unproven; no reader gate was bypassed.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`; registration
+and public release stay closed.
+
 
 
 

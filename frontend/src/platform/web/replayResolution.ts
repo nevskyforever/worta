@@ -92,7 +92,8 @@ export async function applyReplayResolutionOwner(input: {
       if(nodes.has(h.event_id))return reject()
       if(event.version===1){
         const parent=nodes.get(h.parent_event_id!)
-        if(!parent||!['update','delete'].includes(event.mutation)||h.revision!==parent.revision+1||parent.deleted&&event.mutation!=='delete')return reject()
+        if(!parent||!['update','delete'].includes(event.mutation)||h.revision!==parent.revision+1
+          ||parent.deleted&&event.mutation!=='delete'&&!(parent.event?.version===2&&parent.event.result.operation==='delete'&&event.mutation==='update'))return reject()
         if(frontier.size===1&&frontier.has(h.parent_event_id!))frontier=new Set([h.event_id])
         else{
           const sibling=nodes.get([...frontier][0]!)

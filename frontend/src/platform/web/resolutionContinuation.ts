@@ -122,7 +122,7 @@ export class BrowserResolutionContinuationRuntime {
    if(!root||root!==workingRoot||!parent||parent.project_id!==h.project_id||parent.bootstrap_id!==binding.bootstrap_id||!parentRow||parentRow.server_sequence>=sequence||h.revision!==parent.header.revision+1)fail('note_orphan')
    const parentNote=parent.record_kind==='candidate'?history.opened.get(parent.event_id)!.note:parent.note_id===h.entity_id?root.payload.result.note:root.payload.resolution.strategy==='keep_both'?root.payload.resolution.retained_note:undefined
    if(!parentNote||!same(route(parentNote),route(plaintext.note)))fail('unsupported_local_source')
-   if('deleted_at'in parentNote&&plaintext.mutation!=='delete')fail('unsupported_local_source') // No implicit resurrection.
+   if('deleted_at'in parentNote&&plaintext.mutation!=='delete'&&!(content&&parent.record_kind==='resolution'&&parent.result_operation==='delete'&&plaintext.mutation==='update'))fail('unsupported_local_source') // Only a proven Resolution tombstone authorizes recreation.
    if((v.intents as any[]).some(i=>i.project_id===h.project_id&&i.note_id===h.entity_id))fail('unsupported_local_source')
    const source=await step(this.local.readSnapshot(s,h.project_id))
    if(!same(source.project,v.projects.find((p:any)=>p.project_id===h.project_id))||!same(orderedNotes(source.notes),orderedNotes(v.localNotes.filter((n:any)=>n.project_id===h.project_id) as Array<{note_id:string}>)))fail('stale_source')

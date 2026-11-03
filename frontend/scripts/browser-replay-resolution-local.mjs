@@ -83,6 +83,7 @@ try {
       encryptedSyncV2Api.capabilities = async () => f.anchor.transport
       const items = f.items ?? f.stores.inbox.map(row => JSON.parse(row.wire_item))
       encryptedSyncV3Api.pullRaw = async (_token, _device, since, limit = 100) => {
+        if (window.networkLost) throw new TypeError('connection lost')
         const page = items.slice(since, since + Math.min(limit, 2)), next = since + page.length
         return JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items: page, next_cursor: next, has_more: next < items.length })
       }
@@ -105,7 +106,7 @@ try {
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function(value, ...args) {
-      if (this.name === 'inbox' && (window.interruptEventId ? value.state === 'note_resolution_proven' && value.event_id === window.interruptEventId : window.repeated ? value.state === 'note_resolution_proven' && value.resolution_proof.header.revision === 5 : window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
+      if (this.name === 'inbox' && (window.interruptEventId ? ['note_resolution_proven', 'content_note_proven'].includes(value.state) && value.event_id === window.interruptEventId : window.repeated ? value.state === 'note_resolution_proven' && value.resolution_proof.header.revision === 5 : window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
       return put.call(this, value, ...args)
     }
     try { await adapter.run(); return { refused: false } } catch (error) { return { refused: true, error: String(error?.stack ?? error) } } finally { IDBObjectStore.prototype.put = put }
@@ -120,6 +121,13 @@ try {
   await page.evaluate(() => adapter.store.close()); await context.close()
   page = await launch(); await attach(page)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), partial)
+  if (fixture.finalContent) {
+    assert.equal(await page.evaluate(async () => {
+      window.networkLost = true
+      try { await adapter.run(); return false } catch { return true } finally { window.networkLost = false }
+    }), true)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), partial)
+  }
   const result = await page.evaluate(() => adapter.run())
   assert.equal(result.kind, expectedKind)
   assert.equal(result.ready, false)
@@ -136,7 +144,7 @@ try {
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
   }
 
-  assert.equal(before.rows.at(-1).state, fixture.finalDeleted || fixture.successor && !fixture.repeated ? 'content_note_proven' : 'note_resolution_proven')
+  assert.equal(before.rows.at(-1).state, fixture.finalDeleted || fixture.finalContent || fixture.successor && !fixture.repeated ? 'content_note_proven' : 'note_resolution_proven')
   assert.deepEqual(before.rows.map(row => JSON.parse(row.wire_item)), fixture.items ?? fixture.stores.inbox.map(row => JSON.parse(row.wire_item)))
   if (fixture.selectedNote) {
     const actual = await page.evaluate(async f => {
@@ -172,8 +180,9 @@ try {
   assert.equal((await page.evaluate(() => adapter.run())).kind, expectedKind)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
   for (const kind of ['proof', 'ciphertext']) {
-    const rejected = await page.evaluate(async kind => {
-      const original = structuredClone((await adapter.store.read()).rows.at(-1)), damaged = structuredClone(original)
+    const rejected = await page.evaluate(async ({ kind, eventId }) => {
+      const rows = (await adapter.store.read()).rows
+      const original = structuredClone(eventId ? rows.find(row => row.event_id === eventId) : rows.at(-1)), damaged = structuredClone(original)
       if (kind === 'proof') (damaged.resolution_proof ?? damaged.content_note_proof).outcome_digest = '0'.repeat(64)
       else { const wire = JSON.parse(damaged.wire_item); wire.object.ciphertext = 'AA'; damaged.wire_item = JSON.stringify(wire) }
       const request = indexedDB.open('worta-web-replay', 6)
@@ -185,7 +194,7 @@ try {
       try { await adapter.run() } catch { refused = true }
       await put(original); db.close()
       return refused
-    }, kind)
+    }, { kind, eventId: fixture.finalContent ? fixture.interruptEventId : undefined })
     assert.equal(rejected, true)
   }
   for (const kind of ['resolution', 'group_transition', 'head']) {

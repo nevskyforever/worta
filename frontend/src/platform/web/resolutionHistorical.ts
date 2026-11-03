@@ -273,7 +273,7 @@ export async function verifyContinuationSources(s:BrowserSyncScope,v:ResolutionI
     if(!parent||row&&row.server_sequence<=parent.server_sequence||!row&&c.record_version!==3)bad()
     const parentCandidate=history.dag.events.get(c.header.parent_event_id!)
     const parentDeleted=parentCandidate?.record_kind==='resolution'?parentCandidate.result_operation==='delete':parentCandidate?.header.operation==='delete'
-    if(parentDeleted&&c.header.operation!=='delete')throw new BrowserPersistenceError('unsupported_local_source')
+    if(parentDeleted&&c.header.operation!=='delete'&&!(c.record_version===2&&parentCandidate?.record_kind==='resolution'&&parentCandidate.result_operation==='delete'))throw new BrowserPersistenceError('unsupported_local_source')
     if(c.record_version===3){if(c.intent.mutation_generation!==1||c.intent.snapshot.source_revision<=root.project.source_revision)bad();sourceRevisions.push(c.intent.snapshot.source_revision)}
     if(c.projection){if(c.projection.note_revision!==0||c.projection.source_revision<=root.project.source_revision)bad();sourceRevisions.push(c.projection.source_revision)}
    }

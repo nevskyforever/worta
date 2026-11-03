@@ -55,7 +55,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False, resurrection=False, repeat_resurrection=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -213,7 +213,7 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
                 assert len(content(tmp_path, path_, identity_, user, 'conflicts')) == 1
             decision = content(tmp_path, a, ia, user, 'conflicts')[0]
-            selected = next(v for v in decision['versions'] if v['operation'] == 'upsert')
+            selected = next(v for v in decision['versions'] if v['operation'] == ('delete' if resurrection else 'upsert'))
             assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected['event_id'], now=NOW) == 'Applied'
             assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
             roots.append({'event_id': transport.items[-1]['event']['event_id'], 'sequence': len(transport.items), 'source_before': source_revision})
@@ -221,7 +221,46 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
             for path_, identity_ in ((a, ia), (b, ib)):
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
                 assert content(tmp_path, path_, identity_, user, 'conflicts') == []
-        if mixed:
+        if resurrection:
+            content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
+            pending = content(tmp_path, a, ia, user, 'pending')
+            assert len(pending) == 1
+            restored = json.loads(bytes(pending[0]['frame'][20:]))['event']
+            assert restored['mutation'] == 'update'
+            assert restored['header']['parent_event_id'] == roots[-1]['event_id']
+            assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+            resurrection_event = transport.items[-1]['event']['event_id']
+            resurrection_sequence = len(transport.items)
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+            content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
+            assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+            if repeat_resurrection:
+                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
+                content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_SECOND_FORK'})
+                for path_, identity_ in ((a, ia), (b, ib)):
+                    assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
+                for path_, identity_ in ((a, ia), (b, ib)):
+                    receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                decision = content(tmp_path, a, ia, user, 'conflicts')[0]
+                deleted = next(v for v in decision['versions'] if v['operation'] == 'delete')
+                assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=deleted['event_id'], now=NOW) == 'Applied'
+                assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+                resolution_id = transport.items[-1]['event']['event_id']
+                for path_, identity_ in ((a, ia), (b, ib)):
+                    receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
+                restored_again = json.loads(bytes(content(tmp_path, a, ia, user, 'pending')[0]['frame'][20:]))['event']
+                assert restored_again['mutation'] == 'update' and restored_again['header']['parent_event_id'] == resolution_id
+                assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+                for path_, identity_ in ((a, ia), (b, ib)):
+                    receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
+                assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+                generations += 1
+        elif mixed:
             content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
             assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
             for path_, identity_ in ((a, ia), (b, ib)):
@@ -231,9 +270,11 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         fixture['items'] = transport.items
         fixture['repeated'] = True
         fixture['successor'] = True
-        fixture['selectedNote'] = {'deleted': True} if mixed else selected['note']
+        fixture['selectedNote'] = {'content': 'NATIVE_RESURRECTED_UPDATE'} if resurrection else {'deleted': True} if mixed else selected['note']
+        fixture['finalContent'] = resurrection
         fixture['expectedResolutionCount'] = generations
-        interrupted = roots[len(roots) // 2]
+        interrupted = ({'event_id': resurrection_event, 'sequence': resurrection_sequence, 'source_before': source_revision}
+                       if resurrection else roots[len(roots) // 2])
         fixture['interruptEventId'] = interrupted['event_id']
         fixture['interruptSequence'] = interrupted['sequence']
         fixture['sourceBeforeAbort'] = interrupted['source_before']
@@ -264,6 +305,14 @@ def test_native_two_resolution_generations_dispatch_in_chromium(tmp_path):
 
 def test_native_repeating_resolution_dispatch_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, repeated=True, generations=4, mixed=True)
+
+
+def test_native_resolution_tombstone_resurrection_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True)
+
+
+def test_native_repeated_resolution_resurrection_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True, repeat_resurrection=True)
 
 
 def test_native_parent_browser_content_author_self_echo_in_chromium(tmp_path):
