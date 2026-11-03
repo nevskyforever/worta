@@ -1,3 +1,4 @@
+import { BrowserV10Transport } from './v10Transport'
 import { BrowserResolutionContinuation } from './resolutionContinuation'
 import { applyReplayResolutionOwner } from './replayResolution'
 import { BrowserDeviceRegistration } from './deviceRegistration'
@@ -284,6 +285,19 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
       await owner.history(scope)
     }
     snapshot = await port.read(); check()
+    // Re-deliver the complete committed account history through the existing
+    // v10 transport owner. Never reinterpret inbox10 with the old strict reader.
+    // J authenticates all retained owner history and performs exact sequence/index/wire joins here.
+    const pages: string[] = []
+    let since = 0
+    while (since < snapshot.rows.length) {
+      const response = await auth.authorized(token => encryptedSyncV3Api.pullRaw(token, scope.deviceId, since, 100, signal)); check()
+      const { page } = prepareReplayPage(response.value, since, scope, anchor)
+      if (page.next_cursor <= since || page.has_more !== (page.next_cursor < snapshot.rows.length)) throw new BrowserReplayError('history_incomplete')
+      pages.push(response.value); since = page.next_cursor
+    }
+    const transport = new BrowserV10Transport(port.transaction(snapshot, 0, server), current).bind(auth, bindings, keys, device)
+    await transport.replayInboundHistory(scope, pages); check()
   }
   await reauthenticate(); await server()
   if (!replaySame(await port.read(), snapshot)) throw new BrowserReplayError('metadata_inventory_changed')

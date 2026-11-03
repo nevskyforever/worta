@@ -38,6 +38,34 @@ try {
   }, fixture)
   async function attach(page) {
     await page.evaluate(async f => {
+      const { BrowserV10TransportRuntime } = await import('/src/platform/web/v10Transport.ts')
+      if (!window.pageReplayInstalled) {
+        window.pageReplayInstalled = true; window.pageReplayCalls = 0
+        const replay = BrowserV10TransportRuntime.prototype.replayInboundHistory
+        BrowserV10TransportRuntime.prototype.replayInboundHistory = async function(scope, pages) {
+          window.pageReplayCalls++
+          if (!window.badPage && pages.length === 1) {
+            const whole = JSON.parse(pages[0])
+            pages = whole.items.map((item, i) => JSON.stringify({ ...whole, items: [item], next_cursor: i + 1, has_more: i < whole.items.length - 1 }))
+          }
+          const raw = pages[0]
+          if (window.badPage) {
+            const page = JSON.parse(raw)
+            if (window.badPage === 'wire') page.items[0].object.ciphertext = (page.items[0].object.ciphertext[0] === 'A' ? 'B' : 'A') + page.items[0].object.ciphertext.slice(1)
+            if (window.badPage === 'missing') page.items.splice(1, 1)
+            if (window.badPage === 'reorder') [page.items[0], page.items[1]] = [page.items[1], page.items[0]]
+            if (window.badPage === 'future') page.next_cursor++
+            if (window.badPage === 'protocol') { page.protocol_version = 2; page.encrypted_sync_version = 2 }
+            pages = [JSON.stringify(page), ...pages.slice(1)]
+          }
+          const get = IDBObjectStore.prototype.get
+          if (window.badPage === 'abort') IDBObjectStore.prototype.get = function(...args) {
+            if (this.name === 'inbox') { this.transaction.abort(); throw new DOMException('read abort', 'AbortError') }
+            return get.apply(this, args)
+          }
+          try { return await replay.call(this, scope, pages) } finally { IDBObjectStore.prototype.get = get }
+        }
+      }
       const { NormalUserAuthRuntime } = await import('/src/auth/userAuth.ts')
       const { cloudProjectsApi } = await import('/src/api/cloudProjects.ts')
       const { encryptedSyncV2Api } = await import('/src/api/encryptedSyncV2.ts')
@@ -54,8 +82,10 @@ try {
       cloudProjectsApi.listBootstraps = async () => f.anchor.registry
       encryptedSyncV2Api.capabilities = async () => f.anchor.transport
       const items = f.items ?? f.stores.inbox.map(row => JSON.parse(row.wire_item))
-      encryptedSyncV3Api.pullRaw = async (_token, _device, since) => JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3,
-        items: items.slice(since), next_cursor: f.anchor.registry.current_cursor, has_more: false })
+      encryptedSyncV3Api.pullRaw = async (_token, _device, since, limit = 100) => {
+        const page = items.slice(since, since + Math.min(limit, 2)), next = since + page.length
+        return JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items: page, next_cursor: next, has_more: next < items.length })
+      }
       const store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true)
       if (f.items && !(await store.read()).manifest) {
         let state = await store.start(f.anchor)
@@ -97,6 +127,15 @@ try {
   assert.equal(result.writerAuthorized, false)
   assert.equal(result.projectOpened, false)
   const before = await page.evaluate(() => adapter.store.read())
+  assert.ok(await page.evaluate(() => window.pageReplayCalls > 0))
+  for (const kind of ['wire', 'missing', 'reorder', 'future', 'protocol', 'abort']) {
+    assert.equal(await page.evaluate(async kind => {
+      window.badPage = kind
+      try { await adapter.run(); return false } catch { return true } finally { window.badPage = undefined }
+    }, kind), true)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+  }
+
   assert.equal(before.rows.at(-1).state, fixture.successor ? 'content_note_proven' : 'note_resolution_proven')
   assert.deepEqual(before.rows.map(row => JSON.parse(row.wire_item)), fixture.items ?? fixture.stores.inbox.map(row => JSON.parse(row.wire_item)))
   if (fixture.selectedNote) {

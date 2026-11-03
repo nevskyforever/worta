@@ -148,3 +148,43 @@ it('account inventory row budget fails explicitly rather than truncating the rec
  f.f.db.inbox=Array.from({length:16385},()=>row)
  const before=f.before();await expect(f.transport.listReceived(scope)).rejects.toMatchObject({code:'resource_limit'});expect(f.before()).toEqual(before)
 })
+
+function fullPages(f:Awaited<ReturnType<typeof fixture>>) {
+ const rows=[...f.f.db.inbox].sort((a:any,b:any)=>a.server_sequence-b.server_sequence) as any[]
+ return rows.map((r,i)=>JSON.stringify({protocol_version:r.protocol_version,encrypted_sync_version:r.protocol_version,
+  items:[JSON.parse(r.wire_item)],next_cursor:r.server_sequence,has_more:i<rows.length-1}))
+}
+for(const protocol of [2,3] as const)for(const strategy of ['choose_version','manual_merge','delete','keep_both'] as const)it(`complete original account pages protocol${protocol} ${strategy} authenticate without writes`,async()=>{
+ const f=await fixture(strategy,protocol,protocol===3),before=f.before(),pages=fullPages(f)
+ expect(await f.transport.replayInboundHistory(scope,pages)).toEqual({committed_cursor:f.orphan,new_events:0,replayed_events:pages.length,has_more:false})
+ expect(f.before()).toEqual(before)
+ expect(await f.transport.replayInboundHistory(scope,pages)).toMatchObject({new_events:0})
+ expect(f.before()).toEqual(before)
+})
+for(const kind of ['missing','reorder','wire','more','tail','protocol','proof','source','logout'] as const)it(`complete page reconciliation rejects ${kind} without writes`,async()=>{
+ const f=await fixture(),pages=fullPages(f)
+ if(kind==='missing')pages.splice(1,1)
+ if(kind==='reorder')[pages[0],pages[1]]=[pages[1]!,pages[0]!]
+ if(['wire','more','tail','protocol'].includes(kind)){
+  const p=JSON.parse(pages[0]!);if(kind==='wire')p.items[0].object.ciphertext='AA';if(kind==='more')p.has_more=false;if(kind==='tail')p.next_cursor++;if(kind==='protocol')p.protocol_version=99
+  pages[0]=JSON.stringify(p)
+ }
+ if(kind==='proof')(f.f.db.inbox.find((r:any)=>r.state==='note_resolution_proven') as any).resolution_proof.outcome_digest='0'.repeat(64)
+ if(kind==='source')(f.f.db.localNotes[0] as any).envelope.ciphertext='AA'
+ if(kind==='logout')await f.f.auth.logout()
+ const before=f.before();await expect(f.transport.replayInboundHistory(scope,pages)).rejects.toThrow();expect(f.before()).toEqual(before)
+})
+for(const compressed of [false,true])it(`complete-history replay preserves genuine mixed owners and an unresolved prefix ID${compressed?1:0}`,async()=>{
+ const f=await fixture('keep_both',3,compressed,true,true),before=f.before()
+ expect(await f.transport.replayInboundHistory(scope,fullPages(f))).toMatchObject({new_events:0,replayed_events:before.inbox.length})
+ expect(await f.g.calculate(await f.g.prepare(scope))).toMatchObject({first_blocking_sequence:f.children.at(-1),blocker:'unproven_family',ackAuthorized:false})
+ expect(f.before()).toEqual(before)
+})
+
+it('full-history replay bounds page count and aggregate input before verification',async()=>{
+ const f=await fixture(),before=f.before(),calls=f.f.calls.length
+ for(const pages of [[],Array(16385).fill(''),['x'.repeat(17*1024*1024),'x'.repeat(17*1024*1024)]]){
+  await expect(f.transport.replayInboundHistory(scope,pages)).rejects.toThrow()
+ }
+ expect(f.f.calls.length).toBe(calls);expect(f.before()).toEqual(before)
+})

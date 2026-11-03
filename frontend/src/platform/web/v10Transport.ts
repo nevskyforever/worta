@@ -6,7 +6,7 @@ import {BrowserPersistenceError} from './persistence'
 import {currentBrowserDevice,type VerifiedBrowserDevice} from './deviceRegistration'
 import {snapshotBrowserSyncScope,validateBrowserInboundPage,validateBrowserStoredUploadPair,immutableWireIdentity as identity,type BrowserSyncScope,type BrowserSyncTransaction,type BrowserReceivedInboxRecord} from './syncDurability'
 import {readFutureInboxRecord,resolutionSame as same,type ResolutionReference} from './resolutionRecords'
-import {resolutionInventoryStores,scheduleResolutionInventory,type ResolutionInventorySnapshot} from './resolutionPlanner'
+import {resolutionInventoryStores,scheduleResolutionInventory,MAX_PLANNER_ROWS,MAX_PLANNER_INVENTORY_BYTES,type ResolutionInventorySnapshot} from './resolutionPlanner'
 import {authenticateResolutionHistory} from './resolutionAuthentication'
 import {authenticateContinuationHistory,verifyContinuationSources,MAX_CONTINUATION_MATERIAL_BYTES} from './resolutionHistorical'
 
@@ -76,6 +76,59 @@ export class BrowserV10TransportRuntime {
    if(!row||row.state!=='note_resolution_proven'||row.protocol_version!==2||row.server_sequence!==item.event.server_sequence||!same(JSON.parse(row.wire_item),item))fail('conflicting_record')
    const history=await authenticateContinuationHistory(s,v,amk,current),root=history.resolutions.get(eventId)
    if(!root||root.record.protocol_version!==2||root.record.transport_kind!=='legacy_resolution_v2'||root.record.wire_item!==row.wire_item)fail('conflicting_record')
+   await verifyContinuationSources(s,v,history,amk,current)
+  })
+ }
+
+ /** Full zero-origin reconciliation. Older intervals are admitted only as part
+  * of one complete ordered account history, never as independent replay pages.
+  * This returns no owner, prefix, ACK or reader-readiness certificate. */
+ async replayInboundHistory(input:BrowserSyncScope,rawPages:readonly string[]):Promise<V10PageReplayResult>{
+  const s=snapshotBrowserSyncScope(input)
+  if(!rawPages.length||rawPages.length>MAX_PLANNER_ROWS)fail('conflicting_record')
+  let bytes=0
+  for(const raw of rawPages){
+   if(typeof raw!=='string'||raw.length>MAX_PLANNER_INVENTORY_BYTES)fail('conflicting_record')
+   bytes+=new TextEncoder().encode(raw).length
+   if(bytes>MAX_PLANNER_INVENTORY_BYTES)fail('conflicting_record')
+  }
+  let since=0
+  const items:ReturnType<typeof validateBrowserInboundPage>['items']=[]
+  const protocols:number[]=[]
+  for(let i=0;i<rawPages.length;i++){
+   const page=validateBrowserInboundPage(rawPages[i]!,since,s)
+   if(!page.items.length||page.next_cursor<=since||page.has_more!==(i<rawPages.length-1))fail('conflicting_record')
+   items.push(...page.items);protocols.push(...page.items.map(()=>page.protocol_version));since=page.next_cursor
+   if(items.length>MAX_PLANNER_ROWS)fail('conflicting_record')
+  }
+  const cursor=since
+  return this.inspect(s,(tx,v,current,result,abort)=>{
+   if(!v.history.some(r=>(r as {record_kind:string}).record_kind==='resolution'))fail('conflicting_record')
+   if(v.cursor.pull_cursor!==cursor||v.rows.length!==items.length)fail('stale_cursor')
+   const store=tx.objectStore('inbox')
+   const next=(index:number)=>{
+    if(index===items.length){result({committed_cursor:cursor,new_events:0,replayed_events:items.length,has_more:false});return}
+    const item=items[index]!,sequence=item.event.server_sequence!
+    if(sequence!==index+1)fail('conflicting_record')
+    const bySequence=store.get([s.accountId,sequence]),byEvent=store.index('event').get([s.accountId,item.event.event_id]),out=tx.objectStore('outbox').get([s.accountId,item.event.event_id]),receipt=tx.objectStore('receipts').get([s.accountId,item.event.event_id])
+    let done=0
+    const finish=()=>{if(++done!==4)return;try{
+     if(!current())fail('closed')
+     const row=readFutureInboxRecord(bySequence.result,s),indexed=readFutureInboxRecord(byEvent.result,s)
+     if(row.server_sequence!==sequence||row.event_id!==item.event.event_id||row.protocol_version!==protocols[index]
+       ||!same(row,indexed)||!same(JSON.parse(row.wire_item),item))fail('conflicting_record')
+     if(out.result!==undefined){
+      const outbound=validateBrowserStoredUploadPair(out.result,receipt.result,s),{device_id,server_sequence:_sequence,...descriptor}=item.event
+      if(outbound.protocol_version!==protocols[index]||device_id!==outbound.device_id||!same(JSON.parse(outbound.raw_body).items[0],{event:descriptor,object:item.object})
+        ||receipt.result!==undefined&&receipt.result.server_sequence!==sequence)fail('conflicting_record')
+     }else if(receipt.result!==undefined)fail()
+     next(index+1)
+    }catch(e){abort(e)}}
+    bySequence.onsuccess=finish;byEvent.onsuccess=finish;out.onsuccess=finish;receipt.onsuccess=finish
+   }
+   try{next(0)}catch(e){abort(e)}
+  },async(v,amk,current)=>{
+   const history=await authenticateContinuationHistory(s,v,amk,current)
    await verifyContinuationSources(s,v,history,amk,current)
   })
  }

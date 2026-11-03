@@ -1,5 +1,71 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-03 — Slice 4/5: complete retained-page transport dependency (PARTIAL)
+
+Starting SHA `600f3976ab636d9880d738795f15fa7a8ec92565`, branch `6.0`.
+Selected existing blocker: `transport_v10_page_replay_incomplete`. Its full
+acceptance is jointly dependent on production owner dispatch under the frozen
+contract (source/proof contract section on the ten readiness blockers). That
+dependency is not fully implemented; this entry does NOT close the blocker.
+
+Implemented a production dependency rather than changing the checklist:
+`BrowserV10Transport.replayInboundHistory` reconciles a complete zero-origin
+account history through the existing v10 owner authenticator. It validates every
+page boundary, dense sequence, has_more/tail, protocol, sequence/event index,
+original descriptor/nonce/ciphertext and existing outbound/receipt joins. It
+also authenticates the complete Resolution/continuation proofs and current
+sources, then pins the full native inventory again. Page count, event count and
+aggregate input bytes are bounded by existing planner limits. The transaction
+is readonly and emits only a transport replay result, never an apply/prefix,
+ACK or readiness certificate. The original single-interval replay API keeps
+its strict older-interval refusal.
+
+The existing production replay composition now fetches all pages from sequence
+zero after the supported Resolution/continuation dispatch and invokes this
+transport reconciliation. It no longer relies solely on decoded/structural
+inbox10 comparison or the older strict inbox reader. Registry/mode and empty
+tail checks, account/auth/key/device lifecycle and all negative permission flags
+remain intact. There is no new store, migration, proof format, endpoint,
+capability declaration, writer permission or public project publication.
+
+Acceptance covers all four Resolution strategies and protocols 2/3 through real
+existing planner/apply/continuation owners; ID0/ID1 mixed Metadata, Stage,
+StageOrder, Legacy, Content, retained branches and preserved conflicts are
+reconciled without clearing a blocked prefix. Negative checks cover missing,
+reordered, changed wire, page-more/tail/protocol errors, corrupt proofs/current
+sources, logout and input budgets. These owner fixture tests are not labelled
+as production Rust producer acceptance for every strategy.
+
+Actual production Rust writers in two independent SQLite databases produce the
+choose-version conflict/Resolution and ordinary successor. The Chromium harness
+now returns two events per pull, so production replay collects multiple pages.
+It verifies the v10 transport method is called, preserves the complete ciphertext
+and proof snapshot across retries/restart, and rejects altered wire, missing or
+reordered items, future cursor, incompatible protocol and an aborted native
+readonly replay transaction. Existing owner-write abort/restart and session
+revocation checks remain exercised. This uses the explicit isolated integration
+transport; protected eligible-recipient server-to-browser acceptance is NOT RUN
+for this change. No gate is bypassed and no capability PUT is performed.
+
+Validation: production-writer Chromium pytest 2 PASS; final focused successor
+recheck PASS with the native read-abort case; Rust Resolution filter 56 PASS;
+frontend typecheck/build PASS. Final focused transport/replay/readiness Vitest: **230 passed, 2 optional tests
+skipped** (not counted as PASS). Maintained quick acceptance PASS. Commit/push
+records this verified dependency as PARTIAL, not full reader qualification. Maintenance dry run only,
+no deletions; existing build/Rust warnings remain non-fatal. No CI dispatch/poll.
+
+Status: **PARTIAL**, fully closed readiness blockers **0/10**. Remaining prerequisite
+is `production_v10_reader_dispatch_incomplete`: production coverage is still the
+bounded choose-version cohort and one peer successor, not the full declared
+ordinary1/Resolution2 contract. Full transport/dispatch joint producer-consumer
+acceptance must precede removing either blocker. The other eight existing
+blockers remain unchanged. This is not successful completion of the requested
+full-blocker objective. Next work stays on that dispatch dependency, not Slice 5.
+
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+Registration CLOSED and PUBLIC RELEASE BLOCKED. Overall progress **89.36%**.
+
+
 ## 2026-11-02 — Slice 4/5: production post-Resolution peer update dispatch
 
 Starting SHA `ffce6cbf8a6a12d021543b8f9bd68804a5579b63`, branch `6.0`.
