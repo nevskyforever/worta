@@ -18,7 +18,7 @@ import { authenticateReplaySourceSeed } from './replaySourceSeed'
 export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapshot: ReplaySnapshot, amk: AccountMasterKey,
   current: () => boolean, readSource: (projectId: string) => Promise<{ source: LocalSourceSnapshot; project: NativeLocalProject }>): Promise<ReadonlySet<number>> {
   const sequences = new Set<number>()
-  const root = snapshot.noteHistory?.find(r => r.record_kind === 'resolution')
+  const root = snapshot.noteHistory?.filter(r => r.record_kind === 'resolution').sort((a,b)=>a.server_sequence-b.server_sequence)[0]
   const rows = snapshot.rows.filter(row => row.state === 'note_proven' || row.state === 'content_note_proven').filter(row => root?.record_kind !== 'resolution' || row.server_sequence < root.server_sequence)
   for (const seed of snapshot.manifest?.source_seeds ?? []) {
     if (!current()) throw new BrowserReplayError('session_closed')
@@ -45,7 +45,7 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
     await openHistoryCandidate(scope, candidate, amk)
     sequences.add(row.server_sequence)
   }
-  for (const row of snapshot.rows) if (row.state === 'content_note_conflict_preserved') {
+  for (const row of snapshot.rows) if (row.state === 'content_note_conflict_preserved'&&(!root||row.server_sequence<root.server_sequence)) {
     if (!current() || snapshot.manifest?.contract_version !== 6) throw new BrowserReplayError('note_proof_reauthentication_failed')
     await verifyStoredContentConflictProof(scope, amk, row, replayOrdinaryHistory(snapshot.noteHistory ?? []), snapshot.rows.filter(r => r.state !== 'note_resolution_proven'))
     sequences.add(row.server_sequence)
@@ -57,7 +57,7 @@ export async function reauthenticateReplayNotes(scope: BrowserSyncScope, snapsho
     if (root?.record_kind === 'resolution' && snapshot.rows.some(r => r.server_sequence > root.server_sequence && r.state !== 'received')) {
       const history = await authenticateContinuationHistory(scope, inventory, amk, current)
       await verifyContinuationSources(scope, inventory, history, amk, current)
-      for (const r of snapshot.rows) if (r.server_sequence > root.server_sequence && r.state === 'content_note_proven') sequences.add(r.server_sequence)
+      for (const r of snapshot.rows) if (r.server_sequence > root.server_sequence && (r.state === 'content_note_proven'||r.state==='content_note_conflict_preserved'||r.state==='note_resolution_proven')) sequences.add(r.server_sequence)
     } else await authenticateResolutionHistory(scope, inventory, amk, current)
     for (const r of snapshot.rows) if (r.state === 'note_resolution_proven') sequences.add(r.server_sequence)
   }

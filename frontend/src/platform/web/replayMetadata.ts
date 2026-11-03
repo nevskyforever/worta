@@ -1,6 +1,7 @@
 import { BrowserV10Transport } from './v10Transport'
 import { BrowserResolutionContinuation } from './resolutionContinuation'
-import { applyReplayResolutionOwner } from './replayResolution'
+import { BrowserResolutionPlanner } from './resolutionPlanner'
+import { applyReplayResolutionOwner, openReplayContent } from './replayResolution'
 import { BrowserDeviceRegistration } from './deviceRegistration'
 import { CryptoError } from '@/crypto'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
@@ -33,7 +34,7 @@ export interface ReplayInitialNoteResult extends Omit<ReplayStructuralResult, 'k
   readonly kind: 'initial_legacy_notes_applied'; readonly noteProofs: number
 }
 export interface ReplayOrderedContentResult extends Omit<ReplayInitialNoteResult, 'kind'> {
-  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied' | 'bounded_resolution_continuation_applied'; readonly contentProofs: number
+  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied' | 'bounded_resolution_continuation_applied' | 'bounded_resolution_chain_applied'; readonly contentProofs: number
 }
 export interface MetadataPort {
   read(): Promise<ReplaySnapshot>
@@ -282,7 +283,14 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
     if (snapshot.rows.length > resolutionSequence!) {
       const owner = new BrowserResolutionContinuation(transaction, new BrowserLocalAuthority(transaction), current).bind(auth, bindings, keys, device)
       for (let sequence = resolutionSequence! + 1; sequence <= snapshot.rows.length; sequence++) {
-        await owner.apply(scope, sequence); check()
+        const row=(await port.read()).rows[sequence-1]!
+        if(row.state==='note_resolution_proven')continue // Whole history is reauthenticated below.
+        const content=await lease!.use(amk=>openReplayContent(scope,row,amk));check()
+        if(content.event.version===2){
+          const planner=new BrowserResolutionPlanner(transaction,new BrowserLocalAuthority(transaction),current).bind(auth,bindings,keys,device)
+          const plan=await planner.prepareSuccessor(scope,sequence),apply=planner.atomicApply()
+          await apply.commit(await apply.prepare(plan.token));check()
+        }else{await owner.apply(scope,sequence);check()}
       }
       await owner.history(scope)
     }
@@ -310,7 +318,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   const result = { cursor: snapshot.manifest!.receive_cursor, generation: snapshot.manifest!.generation,
     ownerProofs: snapshot.manifest!.applied_cursor!, projects: snapshot.owners.filter(head => head.owner_kind === 'project_metadata').length,
     projectOpened: false as const, ready: false as const, declarationAllowed: false as const, writerAuthorized: false as const }
-  if (terminalContent) return { ...result, kind: resolutionTail ? (snapshot.rows.length > resolutionSequence! ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied') : peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
+  if (terminalContent) return { ...result, kind: resolutionTail ? (snapshot.rows.filter(r=>r.state==='note_resolution_proven').length>1?'bounded_resolution_chain_applied':snapshot.rows.length > resolutionSequence! ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied') : peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
     stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: snapshot.rows.filter(r => r.state === 'content_note_proven' || r.state === 'content_note_conflict_preserved').length }
   return initialNotes ? { ...result, kind: 'initial_legacy_notes_applied', metadataProofs, stageProofs, stageOrderProofs,
     noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length }

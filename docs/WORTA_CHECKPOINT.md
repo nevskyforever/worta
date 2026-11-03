@@ -1,5 +1,81 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-03 — Slice 4/5: two genuine choose-version Resolution generations
+
+Starting SHA `a0e873110ab69ad684bd812fb7b4bf2826823155`, branch `6.0`.
+Implemented the requested bounded second-generation production route: Content
+genesis → two peer updates → choose-version Resolution2 → two new peer updates
+from that Resolution → second choose-version Resolution2. No new conflict or
+proof system is introduced. Requested two-generation cohort: **LOCAL COMPLETE**. Slice 4 overall remains
+PARTIAL; this entry records acceptance of the specific two-generation cohort, not complete reader readiness.
+
+The existing planner has an explicit `prepareSuccessor` entry. Its initial
+v9-compatible entry remains frozen/strict. The successor entry authenticates
+all preceding Resolution/continuation evidence and current sources, requires a
+dense complete peer-only one-project/one-Note inventory and the terminal second
+choose-version, selects the effective OPEN group rather than the earlier closed
+one, and checks exact parents, frontier, publication, selection and dependencies.
+The private plan remembers its admission mode so apply preparation independently
+renews the same full authentication; it cannot accidentally fall back to the
+initial planner or accept a caller-supplied proof/DTO. The existing atomic apply
+owner generates its real Resolution4/GroupTransition2/Head2/inbox10 records.
+
+Full source authentication now verifies the earlier generation against the
+second owner's authenticated `source_before` and `head_before`, then verifies
+the current second-generation result. This historical view uses original owner
+evidence and received wire, never synthesized persisted proofs or guessed source
+revisions. Both groups/candidates, their exact wire ciphertext and all earlier
+outcomes stay immutable. Local group identity is not equated to a peer's remote
+SQLite group UUID: the existing owner binds the mapping through exact parent
+membership, group snapshot/digest and authenticated resolution evidence.
+
+Replay v6 admits the new real conflict and closure records and checks each
+before/after delta. Each event atomically commits source, candidate/head/group,
+inbox/outcome and manifest coverage in one IndexedDB transaction. Production
+dispatch decodes the incoming codec8 route explicitly, invokes the existing
+continuation owner for each branch, and the Resolution owner for the second
+choice. Restart reauthenticates the complete history and current encrypted
+sources before returning `bounded_resolution_chain_applied`; complete v10 page
+reconciliation follows as before. Nothing is silently dropped or made visible
+as a complete project.
+
+Acceptance uses two independent SQLite production writers: they generate and
+resolve the first conflict, create a second genuine conflict, and generate the
+second native choice. Chromium verifies both results, the final decrypted Note,
+exact incoming wire/proofs, duplicates, physical profile restart, and logout.
+An injected abort on the second Resolution leaves coverage 7, source revision 5,
+the first closure and the second OPEN conflict intact; reopening and retry apply
+the second outcome. Changed outcome proofs for EACH generation independently
+reject; corrupt wire/evidence/transition/head and incompatible page/history cases
+remain rejected. Unit checks cover unknown parents, a sibling proof associated
+with the old closed group, unsupported strategy, full second-transaction rollback
+and fresh retry, frozen initial-entry refusal, revocation of a prepared second
+plan, and refusal to commit a continuation beyond this terminal two-root scope.
+
+Scope remains two peer choose-version resolutions, one Note, no clone/retain-both,
+own-author or self-echo authority, third generation or post-second continuation.
+Those unsupported extensions still fail closed. `further_resolution_chains_not_accepted`
+is NOT removed from the full frozen-contract checklist on this bounded evidence.
+`production_v10_reader_dispatch_incomplete` and `transport_v10_page_replay_incomplete`
+also remain open. **Fully closed readiness blockers: 0/10**.
+
+Validation so far: Rust Resolution filter 56 PASS; focused planner/apply/
+continuation/replay/transport/readiness Vitest 447 PASS, 2 optional tests SKIPPED
+(not counted as PASS); typecheck/build and maintained quick acceptance PASS.
+Dedicated real-writer second-generation Chromium tests PASS including per-root
+proof corruption. Full native Chromium regression: **4 passed**, no skips
+(164.91 seconds). Commit/push records the accepted bounded route. Existing Rust/build warnings remain non-fatal.
+Maintenance dry run only; no unrelated output/user data deletion. No backend,
+server gate, capability, release, main, CI or AGENTS.md changes. Server-to-browser
+recipient acceptance is NOT RUN for this isolated local transport route.
+
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+Registration CLOSED, PUBLIC RELEASE BLOCKED. No capability PUT. CI is not
+manually dispatched or polled. Overall progress remains **89.36%**. Next
+Slice 4 dependency is accepted continuation/more generations and broader
+Resolution strategies; resurrection and author/self-echo remain unqualified.
+
+
 ## 2026-11-03 — Slice 4/5: sequential post-Resolution update/delete dispatch (PARTIAL)
 
 Starting SHA `45ad6b7db90727825934f700b1b34c2e0a1ce6d0`, branch `6.0`.

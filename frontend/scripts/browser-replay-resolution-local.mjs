@@ -7,8 +7,8 @@ import { chromium } from '@playwright/test'
 
 const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const directory = await mkdtemp(join(tmpdir(), 'worta-replay-conflict-'))
-const expectedCursor = fixture.successor ? 5 + (fixture.interruptRevision ?? 4) - 4 : 4
-const expectedKind = fixture.successor ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied'
+const expectedCursor = fixture.repeated ? 7 : fixture.successor ? 5 + (fixture.interruptRevision ?? 4) - 4 : 4
+const expectedKind = fixture.repeated ? 'bounded_resolution_chain_applied' : fixture.successor ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied'
 let context, vite, offlineGate = false, lastGateAuthorization
 const gateRequests = []
 try {
@@ -98,14 +98,14 @@ try {
           items, next_cursor: items.length, has_more: false }))
         await store.finish(state)
       }
-      window.interruptRevision = f.interruptRevision ?? 4; window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
+      window.repeated = !!f.repeated; window.interruptRevision = f.interruptRevision ?? 4; window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
     }, fixture)
   }
   await attach(page)
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function(value, ...args) {
-      if (this.name === 'inbox' && (window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
+      if (this.name === 'inbox' && (window.repeated ? value.state === 'note_resolution_proven' && value.resolution_proof.header.revision === 5 : window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
       return put.call(this, value, ...args)
     }
     try { await adapter.run(); return { refused: false } } catch (error) { return { refused: true, error: String(error?.stack ?? error) } } finally { IDBObjectStore.prototype.put = put }
@@ -116,7 +116,7 @@ try {
   assert.equal(partial.rows.at(-1).state, 'received')
   assert.equal(partial.manifest.applied_cursor, expectedCursor)
   assert.equal(partial.noteHistory.some(r => ['resolution', 'group_transition'].includes(r.record_kind)), !!fixture.successor)
-  assert.equal(partial.sources[0].source_revision, expectedCursor - 1)
+  assert.equal(partial.sources[0].source_revision, fixture.repeated ? 5 : expectedCursor - 1)
   await page.evaluate(() => adapter.store.close()); await context.close()
   page = await launch(); await attach(page)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), partial)
@@ -136,7 +136,7 @@ try {
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
   }
 
-  assert.equal(before.rows.at(-1).state, fixture.successor ? 'content_note_proven' : 'note_resolution_proven')
+  assert.equal(before.rows.at(-1).state, fixture.successor && !fixture.repeated ? 'content_note_proven' : 'note_resolution_proven')
   assert.deepEqual(before.rows.map(row => JSON.parse(row.wire_item)), fixture.items ?? fixture.stores.inbox.map(row => JSON.parse(row.wire_item)))
   if (fixture.selectedNote) {
     const actual = await page.evaluate(async f => {
@@ -154,7 +154,7 @@ try {
   if (fixture.expectedContents) {
     const bothPreserved = await page.evaluate(async f => {
       const { openHistoryCandidate } = await import('/src/platform/web/noteHistory.ts')
-      const state = await adapter.store.read(), group = state.noteHistory.find(row => row.record_kind === 'group')
+      const state = await adapter.store.read(), group = state.noteHistory.find(row => row.record_kind === 'group' && row.common_parent_event_id === f.items[1].event.event_id)
       if (!group || group.members.length !== 2) return false
       const values = []
       for (const member of group.members) {
@@ -243,6 +243,25 @@ try {
     assert.equal(gateRequests.includes('PUT'), false)
     assert.ok(gateRequests.filter(method => method === 'GET').length >= 2)
 
+  }
+  if (fixture.repeated) {
+    const sequences = before.rows.filter(r => r.state === 'note_resolution_proven').map(r => r.server_sequence)
+    assert.equal(sequences.length, 2)
+    for (const sequence of sequences) {
+      assert.equal(await page.evaluate(async sequence => {
+        const state = await adapter.store.read(), original = state.rows.find(r => r.server_sequence === sequence), damaged = structuredClone(original)
+        damaged.resolution_proof.outcome_digest = '0'.repeat(64)
+        const request = indexedDB.open('worta-web-replay', 6)
+        await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+        const db = request.result
+        const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+        await put(damaged)
+        let refused = false
+        try { await adapter.run() } catch { refused = true }
+        await put(original); db.close(); return refused
+      }, sequence), true)
+      assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+    }
   }
   const oldRefused = await page.evaluate(() => new Promise(resolve => {
     const request = indexedDB.open('worta-web-replay', 5)

@@ -1,3 +1,8 @@
+import { decryptObjectBytes, type AccountMasterKey } from '@/crypto'
+import { decodeBase64Url } from '@/api/base64url'
+import { unframeContentNote } from '@/cloud/contentNoteCodec'
+import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
+import { resolutionSame, type FutureInbox } from './resolutionRecords'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { AuthoritativeAccountBinding } from '@/auth/accountBinding'
 import type { RuntimeKeyContext } from '@/auth/keyContext'
@@ -8,6 +13,20 @@ import { readFutureInboxRecord } from './resolutionRecords'
 import { openNoteTransport } from './noteTransport'
 import { BrowserReplayError } from './replayRecords'
 import type { BrowserSyncScope, BrowserSyncTransaction } from './syncDurability'
+
+/** Decode for route admission only. Owner tokens remain the sole apply authority. */
+export async function openReplayContent(scope:BrowserSyncScope,row:FutureInbox,amk:AccountMasterKey){
+  const wire=JSON.parse(row.wire_item),e=wire.event
+  if(row.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||e.device_id===scope.deviceId)throw new BrowserReplayError('unsupported_resolution_cohort')
+  const nonce=decodeBase64Url(wire.object.nonce),ciphertext=decodeBase64Url(wire.object.ciphertext)
+  let bytes:Uint8Array|undefined
+  try{
+    bytes=await decryptObjectBytes(amk,{userId:scope.canonicalUserId,projectId:e.project_id,entityId:e.entity_id,entityType:'note'},{...wire.object,nonce,ciphertext})
+    const content=unframeContentNote(bytes),h=content.event.header
+    if(content.account_id!==scope.canonicalUserId||content.device_id!==e.device_id||h.event_id!==row.event_id||h.project_id!==e.project_id||h.entity_id!==e.entity_id||h.revision!==e.revision||h.updated_at!==canonicalizeSyncTimestamp(e.updated_at))throw new BrowserReplayError('unsupported_resolution_cohort')
+    return content
+  }finally{bytes?.fill(0);nonce.fill(0);ciphertext.fill(0)}
+}
 
 /** Bounded v6 owner entry. The transaction provider owns atomic manifest coverage
  * alongside the inventory; no reader declaration, prefix or ACK is granted here. */
@@ -38,10 +57,10 @@ export async function applyReplayResolutionOwner(input: {
   if (notes.length !== 4 || notes.some((row, index) => row.server_sequence !== sequence - 3 + index
     || row.protocol_version !== 3)) reject()
   const root = notes[0]!, first = notes[1]!, second = notes[2]!, resolution = notes[3]!
-  for (const [index, tail] of rows.slice(sequence).entries()) {
+  for (const tail of rows.slice(sequence)) {
     const e = JSON.parse(tail.wire_item).event, parent = JSON.parse(resolution.wire_item).event
     if (tail.protocol_version !== 3 || tail.state !== 'received' || e.entity_type !== 'note' || e.operation !== 'event'
-      || e.project_id !== parent.project_id || e.entity_id !== parent.entity_id || e.revision !== parent.revision + index + 1
+      || e.project_id !== parent.project_id || e.entity_id !== parent.entity_id || e.revision <= parent.revision
       || e.deleted_at !== null || e.device_id === scope.deviceId) reject()
   }
   if (root.state !== 'content_note_proven' || first.state !== 'content_note_proven'
@@ -59,12 +78,28 @@ export async function applyReplayResolutionOwner(input: {
     for (const row of [root, first, second]) {
       opened.push(await openNoteTransport(scope, amk, 3, row.wire_item, 'content_note_v1')); check()
     }
-    let parent = resolution.event_id, deleted = false
-    for (const tail of rows.slice(sequence)) {
-      const opened = await openNoteTransport(scope, amk, 3, tail.wire_item, 'content_note_v1'); check()
-      if (!['update', 'delete'].includes(opened.plaintext.mutation) || opened.plaintext.header.parent_event_id !== parent
-        || deleted && opened.plaintext.mutation !== 'delete') reject()
-      parent = tail.event_id; deleted = opened.plaintext.mutation === 'delete'
+    const tail=[]
+    for(const row of rows.slice(sequence)){tail.push(await openReplayContent(scope,row,amk));check()}
+    if(tail.some(c=>c.event.version===2)){
+      const a=tail[0],b=tail[1],r=tail[2]
+      if(tail.length!==3||!a||!b||!r)return reject()
+      const first=a.event,second=b.event,result=r.event
+      if(first.version!==1||second.version!==1||result.version!==2)return reject()
+      if(first.mutation!=='update'||second.mutation!=='update'||a.device_id===b.device_id
+        ||first.header.parent_event_id!==resolution.event_id||second.header.parent_event_id!==resolution.event_id
+        ||first.header.revision!==4||second.header.revision!==4||result.header.revision!==5
+        ||result.resolution.strategy!=='choose_version'
+        ||!resolutionSame(result.resolution.resolved_event_ids,[first.header.event_id,second.header.event_id].sort()))return reject()
+      const selected=result.resolution.selected_event_id===first.header.event_id?first:result.resolution.selected_event_id===second.header.event_id?second:undefined
+      if(!selected||result.result.operation!=='upsert'||!resolutionSame(result.result.note,selected.note))return reject()
+    }else{
+      let parent=resolution.event_id,revision=3,deleted=false
+      for(const content of tail){
+        const event=content.event
+        if(event.version!==1||!['update','delete'].includes(event.mutation)||event.header.parent_event_id!==parent
+          ||event.header.revision!==revision+1||deleted&&event.mutation!=='delete')reject()
+        parent=event.header.event_id;revision=event.header.revision;deleted=event.mutation==='delete'
+      }
     }
     const genesis = opened[0]!, one = opened[1]!, two = opened[2]!
     if (genesis.content?.event.mutation !== 'create'

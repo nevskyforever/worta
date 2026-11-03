@@ -52,7 +52,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -174,6 +174,32 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
+    if repeated:
+        for path_, identity_, text in ((a, ia, 'NATIVE_PRIVATE_SECOND_A'), (b, ib, 'NATIVE_PRIVATE_SECOND_B')):
+            content(tmp_path, path_, identity_, user, 'edit', note_id='native-conflict', patch={'content': text})
+        for path_, identity_ in ((a, ia), (b, ib)):
+            assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
+        for path_, identity_ in ((a, ia), (b, ib)):
+            receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+            assert len(content(tmp_path, path_, identity_, user, 'conflicts')) == 1
+        decision = content(tmp_path, a, ia, user, 'conflicts')[0]
+        selected = decision['versions'][-1]
+        assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected['event_id'], now=NOW) == 'Applied'
+        assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+        for path_, identity_ in ((a, ia), (b, ib)):
+            receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+            assert content(tmp_path, path_, identity_, user, 'conflicts') == []
+        fixture['anchor']['registry']['current_cursor'] = len(transport.items)
+        fixture['items'] = transport.items
+        fixture['repeated'] = True
+        fixture['successor'] = True
+        fixture['selectedNote'] = selected['note']
+        path.write_text(json.dumps(fixture), encoding='utf-8')
+        result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
+                                capture_output=True, text=True, timeout=180)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
     return fixture
 
 
@@ -187,3 +213,7 @@ def test_native_post_resolution_successor_dispatch_in_chromium(tmp_path):
 
 def test_native_post_resolution_chain_and_delete_dispatch_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, successor=True, chain=True)
+
+
+def test_native_two_resolution_generations_dispatch_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True)
