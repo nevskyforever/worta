@@ -29,7 +29,12 @@ const category = ref('')
 const count = ref(1)
 
 const categories = computed(() =>
-  props.view === 'inventory' ? props.inventory.categories : props.shop.categories,
+  props.view === 'inventory'
+    ? props.inventory.categories.map((category) => ({
+      ...category,
+      items: category.items.filter((item) => item.count > 0),
+    }))
+    : props.shop.categories,
 )
 
 const selectedCategory = computed(() =>
