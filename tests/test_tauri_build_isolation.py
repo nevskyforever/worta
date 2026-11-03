@@ -78,6 +78,14 @@ def _create_build_fixture(tmp_path: Path) -> tuple[Path, Path]:
         source_path="${@: -2:1}"
         destination_path="${@: -1}"
         mkdir -p "$destination_path"
+        for argument in "$@"; do
+          if [ "$argument" = '--include=*.py' ]; then
+            for file in "$source_path"/*.py; do
+              [ ! -f "$file" ] || cp -p "$file" "$destination_path"/
+            done
+            exit 0
+          fi
+        done
         cp -R "$source_path"/. "$destination_path"/
         """,
     )
