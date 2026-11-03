@@ -1,3 +1,4 @@
+import {requireOwnResolutionPublication} from './resolutionPublication'
 import {authenticateTerminalMetadataInventory,authenticateMetadataHandoffInventory,type MetadataHandoffInspection} from './historicalMetadataDependency'
 import type {ResolutionInventorySnapshot} from './resolutionPlanner'
 import { decryptObjectBytes, type AccountMasterKey } from '@/crypto'
@@ -132,7 +133,7 @@ async function authenticateResolutionHistoryCore(scope:BrowserSyncScope,input:Re
   const authenticate=async(r:BrowserResolution4):Promise<NoteSyncResolutionV2>=>{
     const cached=verified.get(r.event_id);if(cached)return cached
     if(visiting.has(r.event_id))bad();visiting.add(r.event_id)
-    if(r.source_device_id===s.deviceId)bad() // No own Resolution author/self-echo authority exists in this slice.
+    if(r.source_device_id===s.deviceId)requireOwnResolutionPublication(s,r,v)
     if(await digestRecord(r)!==r.record_digest)bad()
     const row=rows.find(row=>row.event_id===r.event_id)
     if(!row||row.state!=='note_resolution_proven'||row.wire_item!==r.wire_item||row.server_sequence!==r.server_sequence||row.protocol_version!==r.protocol_version)bad()

@@ -28,7 +28,7 @@ export async function acceptReplayAuthor({page,fixture,reopen}){
  assert.equal(intent.parent_event_id,before.rows[4].event_id)
  const pending=await page.evaluate(()=>adapter.store.read());assert.equal(await abortLifecycle('seal'),true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),pending)
  await page.evaluate(async s=>{await authorWriter.authority.seal(s,authorIntent.event_id)},fixture.scope)
- const sealed=await page.evaluate(()=>adapter.store.read()),out=sealed.author.out[0],wire=JSON.parse(out.raw_body).items[0]
+ const sealed=await page.evaluate(()=>adapter.store.read()),out=sealed.author.out.find(o=>o.event_id===intent.event_id),wire=JSON.parse(out.raw_body).items[0]
  fixture.items.push({event:{...wire.event,device_id:fixture.scope.deviceId,server_sequence:6},object:wire.object});fixture.anchor.registry.current_cursor=6
  assert.equal(await abortLifecycle('receipt'),true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),sealed)
  await page.evaluate(async({s,id})=>authorWriter.authority.accept(s,id,{protocol_version:3,encrypted_sync_version:3,current_cursor:6,results:[{event_id:id,server_sequence:6,duplicate:false}]}),{s:fixture.scope,id:intent.event_id})
@@ -60,7 +60,7 @@ export async function acceptReplayAuthor({page,fixture,reopen}){
  assert.equal(applied.rows[5].state,'content_note_self_echo_proven');assert.equal(applied.manifest.applied_cursor,6)
  assert.deepEqual(applied.notes,staged.notes);assert.deepEqual(applied.sources,staged.sources);assert.deepEqual(applied.noteHistory,staged.noteHistory)
  assert.deepEqual(applied.rows.slice(0,5),before.rows)
- assert.equal(applied.author.out[0].raw_body,out.raw_body)
+ assert.equal(applied.author.out.find(o=>o.event_id===intent.event_id).raw_body,out.raw_body)
  await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  assert.equal((await page.evaluate(()=>adapter.store.receiveContentAuthorEcho(readerAuth.auth,readerAuth.bindings,readerAuth.keys))).new_events,0)
  page=await reopen(page,fixture);await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)

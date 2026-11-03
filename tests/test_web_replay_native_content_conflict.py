@@ -30,6 +30,7 @@ class Response:
 class LocalTransport:
     def __init__(self):
         self.items = []
+        self.responses = []
 
     def post(self, path, *, headers, json):
         assert path == '/api/v3/sync/encrypted/push'
@@ -44,7 +45,9 @@ class LocalTransport:
                 sequence = len(self.items) + 1
                 self.items.append({'event': {**item['event'], 'device_id': json['device_id'], 'server_sequence': sequence}, 'object': item['object']})
             results.append({'event_id': item['event']['event_id'], 'server_sequence': sequence, 'duplicate': previous is not None})
-        return Response({'results': results})
+        response = {'protocol_version': 3, 'encrypted_sync_version': 3, 'current_cursor': len(self.items), 'results': results}
+        self.responses.append(response)
+        return Response(response)
 
     def get(self, path, *, headers, params):
         assert path == '/api/v3/sync/encrypted/pull'
@@ -52,7 +55,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -71,17 +74,25 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
               display_name=metadata['metadata']['name'], authenticated_metadata=metadata['metadata'])
     assert sync(transport, tmp_path, 'local-only', b, ib, user, amk)['view']['state'] == 'active'
 
+    peers = [(a, ia), (b, ib)]
+    if own_resolution:
+        c, ic = provision(tmp_path, 'content-resolution-author', user, False)
+        bootstrap(tmp_path, c, ic, 'bootstrap_import', bootstrap_id=boot, remote_high_water=1,
+                  display_name=metadata['metadata']['name'], authenticated_metadata=metadata['metadata'])
+        assert sync(transport, tmp_path, 'local-only', c, ic, user, amk)['view']['state'] == 'active'
+        peers.append((c, ic))
+
     content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
     content(tmp_path, a, ia, user, 'begin')
     assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
-    for path, identity in ((a, ia), (b, ib)):
+    for path, identity in peers:
         assert len(receive(transport, tmp_path, 'local-only', path, identity, user, amk)) == 1
 
     for path, identity, text in ((a, ia, 'NATIVE_PRIVATE_A'), (b, ib, 'NATIVE_PRIVATE_B')):
         content(tmp_path, path, identity, user, 'edit', note_id='native-conflict', patch={'content': text})
     for path, identity in ((a, ia), (b, ib)):
         assert len(emit(transport, tmp_path, 'local-only', path, identity, user, amk)) == 1
-    for path, identity in ((a, ia), (b, ib)):
+    for path, identity in peers:
         receive(transport, tmp_path, 'local-only', path, identity, user, amk)
         groups = content(tmp_path, path, identity, user, 'conflicts')
         assert len(groups) == 1
@@ -108,11 +119,12 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
 
     # Exercise the real Desktop choice only after both devices have retained
     # the peer conflict; then deliver the genuine emitted wire to Chromium.
-    decision = content(tmp_path, a, ia, user, 'conflicts')[0]
+    chooser, chooser_identity = (c, ic) if own_resolution else (a, ia)
+    decision = content(tmp_path, chooser, chooser_identity, user, 'conflicts')[0]
     selected = decision['versions'][0]['event_id']
     selected_note = decision['versions'][0]['note']
-    assert content(tmp_path, a, ia, user, 'choose', decision=decision, selected=selected, now=NOW) == 'Applied'
-    pending = content(tmp_path, a, ia, user, 'pending')
+    assert content(tmp_path, chooser, chooser_identity, user, 'choose', decision=decision, selected=selected, now=NOW) == 'Applied'
+    pending = content(tmp_path, chooser, chooser_identity, user, 'pending')
     assert len(pending) == 1
     resolution = json.loads(bytes(pending[0]['frame'][20:]))['event']
     assert resolution['mutation'] == 'resolution'
@@ -121,9 +133,13 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
     assert set(resolution['resolution']['resolved_event_ids']) == {
         item['event']['event_id'] for item in transport.items[-2:]}
     assert resolution['result']['note'] == selected_note
-    assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
+    publication = emit(transport, tmp_path, 'local-only', chooser, chooser_identity, user, amk)
+    assert len(publication) == 1
+    if own_resolution:
+        fixture['scope'] = {'accountId': ic['local_account_id'], 'canonicalUserId': user, 'deviceId': ic['device_id']}
+        fixture['ownResolution'] = {'rawBody': json.dumps(publication[0]), 'response': transport.responses[-1]}
     assert b'NATIVE_PRIVATE_' not in json.dumps(transport.items[-1]).encode()
-    for db_path, identity in ((a, ia), (b, ib)):
+    for db_path, identity in peers:
         receive(transport, tmp_path, 'local-only', db_path, identity, user, amk)
         assert content(tmp_path, db_path, identity, user, 'conflicts') == []
         with sqlite3.connect(db_path) as db:
@@ -134,7 +150,7 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
     fixture['items'] = transport.items
     fixture['selectedNote'] = selected_note
     path.write_text(json.dumps(fixture), encoding='utf-8')
-    result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
+    result = subprocess.run(['node', 'scripts/browser-own-resolution-local.mjs' if own_resolution else 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
                             capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
@@ -271,3 +287,7 @@ def test_native_resolution_browser_replay_author_self_echo(tmp_path):
     result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend', capture_output=True, text=True, timeout=180)
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
+
+def test_native_own_resolution_author_receipt_self_echo(tmp_path):
+    native_content_resolution_history(tmp_path, own_resolution=True)

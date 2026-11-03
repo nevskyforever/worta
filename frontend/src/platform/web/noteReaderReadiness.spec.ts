@@ -22,7 +22,7 @@ for(const legacy of [true,false])for(const strategy of ['choose_version','manual
  const gToken=await f.g.prepare(scope);await f.g.commit(await f.g.prepareCommit(gToken))
  const spies=noNetwork(),before=f.before(),d=await f.inspector.inspect(scope)
  expect(d).toMatchObject({readOnly:true,ready:false,declarationAllowed:false,writerAuthorized:false,localEvidence:'authenticated_bounded_inventory',serverGate:'not_checked',localPrefix:{current:(before.cursors[0] as any).proven_prefix,candidate:(before.cursors[0] as any).pull_cursor,firstBlockingSequence:null}})
- expect(d.blockers).toHaveLength(10);expect(d.blockers).toContain('production_v10_reader_dispatch_incomplete');expect(d.blockers).toContain('own_resolution_author_chain_not_accepted')
+ expect(d.blockers).toHaveLength(9);expect(d.blockers).toContain('production_v10_reader_dispatch_incomplete');expect(d.blockers).not.toContain('own_resolution_author_chain_not_accepted')
  expect(f.before()).toEqual(before);spies.forEach(s=>expect(s).not.toHaveBeenCalled())
  expect(Object.keys(f.inspector)).toEqual(['inspect']);expect(Object.isFrozen(f.inspector)).toBe(true);expect(Object.isFrozen(d.blockers)).toBe(true)
  expect(JSON.stringify(d)).not.toMatch(/PRIVATE_|AUTHENTIC_SUCCESSOR|ciphertext|nonce|event_id|bootstrap_id|passphrase|token/)
@@ -82,7 +82,7 @@ for(const ready of [false,true])it(`explicit gate GET ready=${ready} never grant
  const get=vi.spyOn(encryptedSyncV3Api,'noteReaderGate').mockResolvedValue({ready,missing_devices:ready?0:1})
  const d=await f.inspector.inspect(scope,{checkServerGate:true})
  expect(d).toMatchObject({ready:false,declarationAllowed:false,writerAuthorized:false,serverGate:ready?'checked_account_ready':'checked_blocked',serverMissingDevices:ready?0:1})
- expect(d.blockers).toHaveLength(10);expect(d.blockers).toContain('server_note_gate_not_checked')
+ expect(d.blockers).toHaveLength(9);expect(d.blockers).toContain('server_note_gate_not_checked')
  expect(get).toHaveBeenCalledTimes(1);expect(put).not.toHaveBeenCalled();expect(f.before()).toEqual(before)
 })
 for(const kind of ['network','revocation','proof'] as const)it(`gate observation fails closed on ${kind}`,async()=>{

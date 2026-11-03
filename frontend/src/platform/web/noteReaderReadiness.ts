@@ -10,6 +10,8 @@ import {BrowserResolutionPrefix} from './resolutionPrefix'
 
 // Audited gaps under the frozen ordinary1/Resolution2 claim, NOT runtime grants.
 // Removing a blocker requires its own genuine producer/consumer acceptance.
+// Own Resolution publication ancestry is covered by the production Native writer
+// → sealed outbox/receipt → Chromium planner/apply/self-echo acceptance.
 const blockers=Object.freeze([
  'production_v10_reader_dispatch_incomplete',
  'transport_v10_page_replay_incomplete',
@@ -18,7 +20,6 @@ const blockers=Object.freeze([
  'further_resolution_chains_not_accepted',
  'local_author_after_resolution_not_accepted',
  'own_content_self_echo_not_qualified',
- 'own_resolution_author_chain_not_accepted',
  'multi_device_reader_orchestration_not_proven',
  'server_note_gate_not_checked',
 ] as const)

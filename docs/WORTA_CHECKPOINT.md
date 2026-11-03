@@ -2,6 +2,95 @@
 
 
 
+
+## 2026-11-04 — Slice 4/5: own Resolution author/publication chain accepted
+
+Starting SHA `7c7467bacbcb8d742ffbdfe4f213a70c77c5732f`, branch `6.0`.
+Selected dependency `own_resolution_author_chain_not_accepted`: **LOCAL COMPLETE**.
+Full Reader qualification / Slice 4 remains **PARTIAL**; **1/10 blockers closed**.
+
+The existing Resolution planner/apply now accepts an own production Resolution
+only with the exact original sealed outbox and its actual upload receipt. A
+matching device ID or a pulled event is insufficient. Account/device, protocol,
+event identity, server sequence and immutable encrypted wire must all join;
+codec8 AEAD also authenticates the actual account/author and logical Resolution.
+The existing planner still checks the real conflict frontier, parents, selected
+version, Metadata dependencies and protected canonical source. No alternate
+resolver, browser Resolution writer, new proof format or guessed publication
+sequence was introduced.
+
+The existing internal author owner accepts a sealed production-writer handoff,
+authenticates its choose-version decision against the real open group and parent
+proofs, retains the unchanged body, then records the existing upload receipt.
+It does not create a new Resolution or upload it. The supplied response is
+snapshotted before asynchronous authentication. Sealed/reserved publication does
+not modify the source. The first verified server self echo applies through the
+existing planner and atomic apply owner: source, Resolution4, group transition,
+head2, inbox10/proof1 and manifest coverage commit together. Publication uses
+existing outbox1/receipt1; ordinary descendants retain I2/C3/R2/E2. No synthetic
+ordinary candidate is substituted for a Resolution.
+
+Replay inventory admits only scoped publication reservations associated with an
+actual group/root, checks ordinals and receipt/wire joins, and preserves the
+pre-publication registry boundary across the exact own catch-up. Historical peer
+proof replay may coexist with a later own reservation only after the original
+wire/receipt join AND an AEAD Resolution2 route check; unknown ordinary or future
+payloads are not silently skipped. Subsequent own update/delete still use the
+accepted Content owner. Repeated seal/receipt/self-echo is read-only. Original
+publication evidence is rechecked by Resolution history authentication after
+restart, including while later Content author events are present.
+
+The genuine acceptance uses THREE independent SQLite profiles. A/B publish
+concurrent peer versions. C receives the conflict, chooses through the production
+Rust writer, seals/publishes its actual codec8 Resolution2, records the transport's
+actual receipt, and processes its own echo in SQLite. Chromium uses C's genuine
+identity and original encrypted bytes; it never relabels another producer as C.
+In actual replay-v6 IndexedDB it independently verifies the same history,
+publication and echo, and reads the exact chosen Native Note. The normal
+continuation acceptance then verifies three own updates and a delete without
+reapplying sources or creating false conflicts. Input ciphertext and persisted
+owner proofs remain byte-stable through duplicates and persistent-profile reopen.
+
+Negative acceptance covers a relabelled peer ciphertext despite fabricated
+publication metadata (refused), missing receipt, wrong receipt sequence, wrong
+author, wrong group association, corrupted parent/outcome proofs and ciphertext.
+Native IDB aborts cover sealed publication, receipt, source, group transition,
+Resolution outcome and manifest. Logout during the outcome transaction aborts
+all effects; reopening retains the exact pre-commit inventory and fresh apply
+succeeds. Later caller mutation of the supplied receipt response cannot change
+the captured publication. No new outbox, store, schema or capability is created.
+
+The existing readiness inspector now retains NINE engineering blockers; only
+`own_resolution_author_chain_not_accepted` was removed after this genuine
+producer/consumer acceptance. Full dispatch across the remaining source/strategy
+matrices, dependency recovery, resurrection, full own Content qualification,
+multi-device orchestration and eligible protected-feed acceptance remain open.
+Next concrete dependency: `tombstone_resurrection_not_accepted`, still Slice 4.
+This does not qualify unsupported histories or authorize authoring UI/Slice 5.
+
+Local acceptance:
+- Focused Rust Resolution regressions **56 PASS**, Content writers **4 PASS**.
+- Focused Vitest **1,518 PASS / 2 pre-existing SKIP** across 42 files; final
+  publication/readiness/author owner selection **63 PASS**. SKIP is not PASS.
+- Production Native SQLite / persistent Chromium / IndexedDB regressions
+  **8 PASS**; final own-Resolution transaction-revocation/receipt-snapshot rerun
+  **1 PASS**. No fake positive authorship or receipt proof is used.
+- Isolated PostgreSQL **16** + real FastAPI HTTP + Chromium gate observation
+  **1 PASS**. Reader versions remain zero, ACK zero, encrypted server objects
+  zero, no capability PUT. This is negative gate acceptance, NOT positive
+  server-to-browser encrypted-history qualification. Task container was removed;
+  no unrelated Docker data or user data was touched.
+- Typecheck, frontend build, maintained `quick`, changed Python syntax and diff
+  checks PASS. Existing Rust/build warnings remain non-fatal. Generated-output
+  maintenance DRY RUN only; required bridge binaries and user/worktree data kept.
+
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`. Registration
+and public release remain CLOSED. No VPS/user data, capability PUT or reader-gate
+bypass; no manual CI dispatch/polling. Main, AGENTS.md, CI and release scripts are
+unchanged. The accepted code/checkpoint are committed/pushed to `origin/6.0`.
+Product stage **2/6**, Slice **4/5**, official WORTA progress **89.36%**; full
+Reader readiness and the separately approved declaration lifecycle are pending.
+
 ## 2026-11-03 — Slice 4/5: author/self-echo integrated into replay v6
 
 Starting SHA `b9d50c080b9f6c7bf9cc42b4c5ab34c8582ef88a`, branch `6.0`.

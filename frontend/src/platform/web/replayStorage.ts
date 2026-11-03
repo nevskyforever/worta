@@ -240,11 +240,14 @@ class BrowserReplayStorage {
     const transaction:BrowserSyncTransaction=async(scope,_stores,mode,schedule)=>{
       if(!replaySame(scope,this.scope))fail()
       return this.run(mode,(tx,result,abort)=>this.load(tx,before=>{
-        try{if(mode==='readwrite'&&(!before.manifest||before.manifest.phase!=='received'||before.manifest.revision===Number.MAX_SAFE_INTEGER||!before.noteHistory?.some(r=>r.record_kind==='resolution')))throw new BrowserPersistenceError('unsupported_local_source')
+        try{if(mode==='readwrite'&&(!before.manifest||before.manifest.phase!=='received'||before.manifest.revision===Number.MAX_SAFE_INTEGER||!before.noteHistory?.some(r=>r.record_kind==='resolution'||r.record_kind==='group')))throw new BrowserPersistenceError('unsupported_local_source')
           schedule(tx,value=>{
           if(mode==='readonly'){result(value);return}
-          tx.objectStore('replayManifest').put({...before.manifest!,revision:before.manifest!.revision+1})
-          this.load(tx,after=>{try{assertReplayAuthorTransition(before,after);result(value)}catch(e){abort(e)}},abort)
+          this.load(tx,unchanged=>{try{
+            if(replaySame(before,unchanged)){result(value);return}
+            tx.objectStore('replayManifest').put({...before.manifest!,revision:before.manifest!.revision+1})
+            this.load(tx,after=>{try{assertReplayAuthorTransition(before,after);result(value)}catch(e){abort(e)}},abort)
+          }catch(e){abort(e)}},abort)
         },abort)}catch(e){abort(e)}
       },abort))
     }
@@ -260,7 +263,7 @@ class BrowserReplayStorage {
     const registry=await auth.authorized(token=>cloudProjectsApi.listBootstraps(token,this.signal));check()
     const mode=await auth.authorized(token=>encryptedSyncV2Api.capabilities(token,this.signal));check()
     const anchor=replayAnchor(registry.value,mode.value),previous=before.manifest!
-    if(previous&&replaySame(anchor,previous.anchor)&&before.rows.at(-1)?.state==='content_note_self_echo_proven'){
+    if(previous&&replaySame(anchor,previous.anchor)&&(before.rows.at(-1)?.state==='content_note_self_echo_proven'||before.rows.at(-1)?.state==='note_resolution_proven'&&JSON.parse(before.rows.at(-1)!.wire_item).event.device_id===this.scope.deviceId)){
       await this.applyOrderedContentUpdate(auth,bindings,keys);check()
       return {committed_cursor:previous.receive_cursor,new_events:0,replayed_events:1,has_more:false}
     }

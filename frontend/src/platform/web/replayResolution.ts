@@ -1,3 +1,4 @@
+import {requireOwnResolutionPublication} from './resolutionPublication'
 import { decryptObjectBytes, type AccountMasterKey } from '@/crypto'
 import { decodeBase64Url } from '@/api/base64url'
 import { unframeContentNote } from '@/cloud/contentNoteCodec'
@@ -70,7 +71,8 @@ export async function applyReplayResolutionOwner(input: {
     || JSON.parse(row.wire_item).event.entity_type !== 'project_metadata')) reject()
   const descriptors = notes.map(row => JSON.parse(row.wire_item).event)
   const base = descriptors[0]
-  if (descriptors.some(e => e.operation !== 'event' || e.device_id === scope.deviceId
+  if(descriptors[3].device_id===scope.deviceId)requireOwnResolutionPublication(scope,resolution,inventory)
+  if (descriptors.some((e,index) => e.operation !== 'event' || index!==3&&e.device_id === scope.deviceId
     || e.project_id !== base.project_id || e.entity_id !== base.entity_id || e.deleted_at !== null)
     || descriptors[1].device_id === descriptors[2].device_id) reject()
   await lease!.use(async amk => {

@@ -1,3 +1,4 @@
+import {requireOwnResolutionPublication} from './resolutionPublication'
 import { authenticateContinuationHistory, verifyContinuationSources, continuationDependencyView } from './resolutionHistorical'
 import type {NormalUserAuthRuntime} from '@/auth/userAuth'
 import type {AuthoritativeAccountBinding} from '@/auth/accountBinding'
@@ -101,10 +102,11 @@ export class BrowserResolutionPlannerRuntime {
  private load(s:BrowserSyncScope,current:()=>boolean):Promise<Inventory>{
   return this.transaction(s,stores,'readonly',(tx,result,abort)=>scheduleResolutionInventory(tx,s,current,result,abort))
  }
- private async original(s:BrowserSyncScope,row:BrowserInboxRecord,amk:AccountMasterKey,check:()=>void){
+ private async original(s:BrowserSyncScope,row:BrowserInboxRecord,amk:AccountMasterKey,check:()=>void,inventory:Inventory){
   if(row.state!=='received')fail('invalid_resolution')
   const wire=JSON.parse(row.wire_item),e=wire.event
-  if(e.entity_type!=='note'||e.deleted_at!==null||e.device_id===s.deviceId||!((row.protocol_version===2||row.protocol_version===3)&&e.operation==='resolution'||row.protocol_version===3&&e.operation==='event')||wire.object.crypto_version!==1||wire.object.aad_version!==1)fail('invalid_resolution')
+  if(e.entity_type!=='note'||e.deleted_at!==null||!((row.protocol_version===2||row.protocol_version===3)&&e.operation==='resolution'||row.protocol_version===3&&e.operation==='event')||wire.object.crypto_version!==1||wire.object.aad_version!==1)fail('invalid_resolution')
+  if(e.device_id===s.deviceId)requireOwnResolutionPublication(s,row,inventory)
   const nonce=decodeBase64Url(wire.object.nonce),ciphertext=decodeBase64Url(wire.object.ciphertext);let bytes:Uint8Array|undefined
   try{
    bytes=await decryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:e.project_id,entityId:e.entity_id,entityType:'note'},{...wire.object,nonce,ciphertext});check()
@@ -174,7 +176,7 @@ export class BrowserResolutionPlannerRuntime {
    if(!row||row.state!=='received'||row.server_sequence>v.cursor.pull_cursor)fail('invalid_resolution')
    if(new Set(rows.map(r=>r.event_id)).size!==rows.length||new Set(rows.map(r=>r.server_sequence)).size!==rows.length)fail('invalid_resolution')
    return await step(lease.use(async amk=>{
-    const {resolution,content,transportKind}=await step(this.original(s,row,amk,check)),h=resolution.header,ids=resolution.resolution.resolved_event_ids
+    const {resolution,content,transportKind}=await step(this.original(s,row,amk,check,v)),h=resolution.header,ids=resolution.resolution.resolved_event_ids
     const binding=v.bindings.map(b=>validateBrowserProjectBinding(b,s)).find(b=>b.project_id===h.project_id)
     if(!binding)fail('missing_bootstrap')
     if(binding.remote_state!=='active'||!(binding.mode==='import_remote'&&binding.phase==='captured'||binding.mode==='upload_existing'&&binding.phase==='completing'))fail('missing_bootstrap')
@@ -248,7 +250,7 @@ export class BrowserResolutionPlannerRuntime {
       // cannot be treated as failed Resolution decryption/fallback.
       if(e.operation==='event'){const nonce=decodeBase64Url(w.object.nonce),ciphertext=decodeBase64Url(w.object.ciphertext);let bytes:Uint8Array|undefined
        try{bytes=await step(decryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:e.project_id,entityId:e.entity_id,entityType:'note'},{...w.object,nonce,ciphertext}));const c=unframeContentNote(bytes);if(c.account_id!==s.canonicalUserId||c.device_id!==e.device_id||c.event.header.event_id!==e.event_id)fail('invalid_resolution');if(c.event.version===2&&c.event.resolution.strategy==='keep_both')reservedClones.set(e.event_id,c.event.resolution.retained_note.id)}finally{nonce.fill(0);ciphertext.fill(0);bytes?.fill(0)}
-      }else{const r2=await step(this.original(s,r,amk,check));if(r2.resolution.resolution.strategy==='keep_both')reservedClones.set(e.event_id,r2.resolution.resolution.retained_note.id)}
+      }else{const r2=await step(this.original(s,r,amk,check,v));if(r2.resolution.resolution.strategy==='keep_both')reservedClones.set(e.event_id,r2.resolution.resolution.retained_note.id)}
      }
     }
     this.collision(s,resolution,v,futureChildren,reservedClones)

@@ -1,3 +1,4 @@
+import {authenticateOwnResolutionReservation} from './resolutionPublication'
 import {BrowserContentAuthorityOwner} from './contentAuthorityOwner'
 import {authenticateContentAuthorityInventory} from './contentAuthorityInventory'
 import type {BrowserAnyNoteIntent} from './contentAuthorityRecords'
@@ -211,7 +212,16 @@ export class BrowserLegacyNoteApplyRuntime {
         }
       }
       }
-      const outgoing=inventory.out.map(v=>validateBrowserStoredUploadPair(v,inventory.receipts.find(p=>(p as {event_id:string}).event_id===(v as {event_id:string}).event_id),scope)).filter(r=>{const e=JSON.parse(r.raw_body).items[0].event;return e.project_id===h.project_id&&e.entity_id===h.entity_id&&e.entity_type==='note'})
+      const outgoingAll=inventory.out.map(v=>validateBrowserStoredUploadPair(v,inventory.receipts.find(p=>(p as {event_id:string}).event_id===(v as {event_id:string}).event_id),scope)).filter(r=>{const e=JSON.parse(r.raw_body).items[0].event;return e.project_id===h.project_id&&e.entity_id===h.entity_id&&e.entity_type==='note'})
+      // Historical peer proofs may be rechecked while a later own sealed
+      // Resolution waits for its planner. Exact receipt/wire join is mandatory;
+      // this read-only exception grants no apply outcome to the later event.
+      const reservations=new Set<string>()
+      if(content&&['content_note_proven','content_note_conflict_preserved'].includes(row.state))for(const out of outgoingAll)if(!candidates.some(c=>c.event_id===out.event_id)){
+        const later=inventory.rows.find(r=>r.event_id===out.event_id)
+        if(later?.state==='received'&&later.server_sequence>sequence){await authenticateOwnResolutionReservation(scope,later,inventory,amk);reservations.add(out.event_id)}
+      }
+      const outgoing=outgoingAll.filter(o=>!reservations.has(o.event_id))
       if(outgoing.some(r=>!candidates.some(c=>c.event_id===r.event_id)))fail('candidate_history_unavailable')
       let head=planCausalHead(scope,binding,records,candidates,applied,outgoing)
       if((dormant||content&&row.state!=='content_note_proven'&&row.state!=='content_note_conflict_preserved')&&candidates.some(c=>c.event_id===h.event_id))fail('conflicting_record') // One immutable event authority; no cross-route overwrite or synthetic replay proof.

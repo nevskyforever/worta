@@ -1,3 +1,8 @@
+import {decryptObjectBytes} from '@/crypto'
+import {decodeBase64Url} from '@/api/base64url'
+import {unframeContentNote} from '@/cloud/contentNoteCodec'
+import {verifyContentGroup} from './contentNoteConflictProof'
+import {BrowserSyncDurability,validateBrowserSealedBody} from './syncDurability'
 import {inspectResolutionDag} from './resolutionDag'
 import {authenticateContinuationHistory,verifyContinuationSources} from './resolutionHistorical'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
@@ -105,6 +110,62 @@ export class BrowserContentAuthorityOwner {
     result(p.echo?{status:'self_echo_applied'}:true)
    } catch (e) { abort(e) } }, abort)
   }).then(value=>value===true||typeof value==='object'&&value.status==='self_echo_applied').finally(() => unsubscribe?.())
+ }
+ private publicationTransaction(s:BrowserSyncScope,before:BrowserPrefixInventory,current:()=>boolean):BrowserSyncTransaction{
+  return async(scope,ns,mode,schedule)=>{
+   let activeAbort:((e:unknown)=>void)|undefined
+   const stop=()=>activeAbort?.(new BrowserPersistenceError('closed')),unAuth=this.auth.onInvalidated(stop),unKey=this.keys.onInvalidated(stop)
+   try{return await this.transaction(scope,[...new Set([...stores,...ns])],mode,(tx,result,abort)=>{
+    activeAbort=abort;this.read(tx,s,now=>{try{if(!current())fail('closed');if(!same(now,before))fail('stale_source');schedule(tx,value=>{if(!current()){abort(new BrowserPersistenceError('closed'));return}result(value)},abort)}catch(e){abort(e)}},abort)
+   })}finally{activeAbort=undefined;unAuth();unKey()}
+  }
+ }
+ /** Existing production writer handoff, not a browser Resolution writer. Only
+  * the unchanged original sealed wire is retained; publication stays separate. */
+ async stageResolution(scope:BrowserSyncScope,rawBody:string){
+  const s=snapshotBrowserSyncScope(scope),{lease,current}=await this.guard(s),before=await this.inventory(s)
+  validateBrowserSealedBody(rawBody,s)
+  await lease.use(async amk=>{
+   await authenticateContentAuthorityInventory(s,before,amk,current)
+   const item=JSON.parse(rawBody).items[0],e=item.event,nonce=decodeBase64Url(item.object.nonce),ciphertext=decodeBase64Url(item.object.ciphertext)
+   let bytes:Uint8Array|undefined
+   try{
+    bytes=await decryptObjectBytes(amk,{userId:s.canonicalUserId,projectId:e.project_id,entityId:e.entity_id,entityType:'note'},{...item.object,nonce,ciphertext})
+    const c=unframeContentNote(bytes),r=c.event
+    if(c.account_id!==s.canonicalUserId||c.device_id!==s.deviceId||r.version!==2||e.operation!=='event'||e.entity_type!=='note'||r.header.event_id!==e.event_id||r.header.revision!==e.revision||r.header.project_id!==e.project_id||r.header.entity_id!==e.entity_id||r.header.updated_at!==e.updated_at||r.resolution.strategy!=='choose_version')fail('unsupported_local_source')
+    const retained=before.history.find((v:any)=>v.record_kind==='resolution'&&v.event_id===r.header.event_id)
+    if(retained){const verified=await authenticateContinuationHistory(s,before,amk,current);await verifyContinuationSources(s,{...before,projects:before.projects!},verified,amk,current);if(!same(JSON.parse((before.out.find((o:any)=>o.event_id===r.header.event_id) as {raw_body:string}).raw_body).items[0],item))fail('conflicting_record');return}
+    const dag=inspectResolutionDag(s,before.history),group=dag.history.find(g=>g.record_kind==='group'&&g.project_id===e.project_id&&g.note_id===e.entity_id&&same(g.tip_event_ids,r.resolution.resolved_event_ids)&&!dag.history.some(t=>t.record_kind==='group_transition'&&t.group_id===g.group_id&&t.project_id===g.project_id&&t.note_id===g.note_id))
+    if(!group||group.record_kind!=='group'||before.rows.some(v=>(v as {state:string}).state==='received'))fail('note_conflict_unproven')
+    await verifyContentGroup(s,group,dag.history as never,before.rows as never,amk,{out:before.out,receipts:before.receipts})
+    const selected=dag.events.get(r.resolution.selected_event_id)
+    if(!selected||selected.record_kind!=='candidate'||r.header.revision!==group.tip_revision+1)fail('note_conflict_unproven')
+    const original=await openHistoryCandidate(s,selected,amk)
+    if(original.header.operation!==r.result.operation||!same(original.note,r.result.note)||group.bootstrap_id!==c.dependencies.bootstrap_id)fail('note_conflict_unproven')
+    const view={...before,rows:before.rows.filter(v=>['project_metadata','stage','stage_order'].includes(JSON.parse((v as {wire_item:string}).wire_item).event.entity_type))}
+    const token=await prepareMetadataPrefix(s,view,amk,current,true),seqs=verifiedMetadataSequences(token,s,view)
+    const head=validateBrowserMetadataHead(before.owners.find((o:any)=>o.owner_kind==='project_metadata'&&o.owner_id===e.project_id),s)
+    if(!head.history.some(p=>p.event_id===c.dependencies.metadata_event_id&&p.operation!=='delete'&&seqs.has(p.server_sequence))||c.dependencies.stage_event_ids.length)fail('stale_authority')
+   }finally{bytes?.fill(0);nonce.fill(0);ciphertext.fill(0)}
+   if(!current())fail('closed')
+  })
+  const transaction=this.publicationTransaction(s,before,current)
+  return new BrowserSyncDurability(transaction).enqueue(s,[rawBody])
+ }
+ async acceptResolution(scope:BrowserSyncScope,eventId:string,response:unknown){
+  const publicationResponse=structuredClone(response)
+  const s=snapshotBrowserSyncScope(scope),{current}=await this.guard(s),before=await this.inventory(s)
+  const out=before.out.find((o:any)=>o.event_id===eventId) as import('./syncDurability').BrowserOutboxRecord|undefined
+  if(!out||before.history.some((r:any)=>r.record_kind==='candidate'&&r.event_id===eventId))fail('unsupported_local_source')
+  // Reauthenticate the original sealed decision, group and source before accepting.
+  await this.stageResolution(s,out.raw_body)
+  const transaction=this.publicationTransaction(s,before,current)
+  if(out.state==='accepted'){
+   const expected=prepareBrowserUploadAcceptance(s,out,publicationResponse),old=before.receipts.find((r:any)=>r.event_id===eventId) as {record_version:number;server_sequence:number}|undefined
+   if(!old||old.record_version!==1||old.server_sequence!==expected.server_sequence)fail('conflicting_record')
+   return transaction<'already_accepted'>(s,stores,'readonly',(_tx,result)=>result('already_accepted'))
+  }
+  return new BrowserSyncDurability(transaction).commitUploadAcceptance(s,out,publicationResponse)
  }
  /** Seal only a genuine authenticated I2 prepared by the existing local mutation owner. */
  async seal(scope: BrowserSyncScope, eventId: string): Promise<'sealed' | 'already_sealed'> {

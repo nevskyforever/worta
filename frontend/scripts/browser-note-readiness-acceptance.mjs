@@ -22,8 +22,9 @@ await runResolutionPrefixAcceptance(async c=>{
   assert.equal(d.ready,false);assert.equal(d.declarationAllowed,false);assert.equal(d.writerAuthorized,false)
   assert.equal(d.localEvidence,'authenticated_bounded_inventory');assert.equal(d.serverGate,'not_checked')
   assert.equal(d.localPrefix.current,before.cursors[0].proven_prefix)
-  assert.equal(d.blockers.length,c.decisions.strategy==='manual_merge'?11:10)
-  for(const code of ['production_v10_reader_dispatch_incomplete','transport_v10_page_replay_incomplete','server_note_gate_not_checked','own_resolution_author_chain_not_accepted'])assert.ok(d.blockers.includes(code))
+  assert.equal(d.blockers.includes('own_resolution_author_chain_not_accepted'),false)
+  assert.equal(d.blockers.length,c.decisions.strategy==='manual_merge'?10:9)
+  for(const code of ['production_v10_reader_dispatch_incomplete','transport_v10_page_replay_incomplete','server_note_gate_not_checked'])assert.ok(d.blockers.includes(code))
   assert.deepEqual(result.methods,['inspect']);assert.equal(result.writes,0);writes+=result.writes
   assert.doesNotMatch(JSON.stringify(d),/ciphertext|nonce|event_id|bootstrap_id|passphrase|token/)
   assert.deepEqual(await c.snapshot(),before);assert.deepEqual(traffic,[]);authenticated++

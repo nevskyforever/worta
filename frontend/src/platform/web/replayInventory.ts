@@ -241,7 +241,14 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const authorActive=counts.some(r=>r.result.length),author={out:counts[0]!.result,receipts:counts[1]!.result,intents:counts[2]!.result}
       const authority=inspectContentAuthorityInventory(s,{...author,history:future,rows,bindings:imported,localNotes:notes,cursor:checkpoint})
       const authored=authority.candidates.sort((a,b)=>a.header.revision-b.header.revision),authorMutations=authored.length+authority.intents.filter(i=>i.record_version===2).length
-      if(authorActive&&(!closed||version!==6||authority.out.length!==authored.length||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+      const resolutionsOut=authority.out.filter(o=>!authored.some(c=>c.event_id===o.event_id))
+      for(const o of resolutionsOut){const e=JSON.parse(o.raw_body).items[0].event,root=resolutions.find(r=>r.event_id===o.event_id),group=future.find(g=>g.record_kind==='group'&&g.project_id===e.project_id&&g.note_id===e.entity_id&&e.revision===g.tip_revision+1)
+        if(o.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||!group||!root&&future.some(t=>t.record_kind==='group_transition'&&t.group_id===(group as any).group_id)||root&&root.source_device_id!==s.deviceId)fail()
+        const row=rows.find(r=>r.event_id===o.event_id)
+        if(row){const w=JSON.parse(row.wire_item),{device_id,server_sequence,...event}=w.event,receipt=author.receipts.find((r:any)=>r.event_id===o.event_id) as any;if(device_id!==s.deviceId||!receipt||receipt.record_version!==1||receipt.server_sequence!==server_sequence||!replaySame({event,object:w.object},JSON.parse(o.raw_body).items[0]))fail()}
+      }
+      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+
 
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
       for (const successor of successors) {
@@ -380,7 +387,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (metadata !== (metadataPrefix < 0 ? rows.length : metadataPrefix)) fail()
       for (const record of imported) {
         const remote = manifest?.anchor.registry.projects.find(project => project.project_id === record.project_id)
-        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&(!authorActive||record.remote_high_water===null||record.remote_high_water<closed!.server_sequence||record.remote_high_water>manifest!.anchor.registry.current_cursor)
+        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&(!authorActive||record.remote_high_water===null||record.remote_high_water<(resolutionsOut.length?((closed?.server_sequence??rows.find(r=>resolutionsOut.some(o=>o.event_id===r.event_id))?.server_sequence??manifest!.anchor.registry.current_cursor)-1):(closed?.server_sequence??manifest!.anchor.registry.current_cursor))||record.remote_high_water>manifest!.anchor.registry.current_cursor)
           || !(heads.some(head => head.owner_kind === 'project_metadata' && head.owner_id === record.project_id)
             || manifest?.source_seeds?.some(seed => seed.project_id === record.project_id))) fail()
       }
@@ -500,6 +507,10 @@ export function assertReplayAuthorTransition(before:ReplaySnapshot,after:ReplayS
       ||!replaySame(before.notes?.filter(n=>n.note_id!==i.note_id),after.notes?.filter(n=>n.note_id!==i.note_id)))fail()
   }else if(b.out.length===a.out.length+1){
     const candidates=next.filter(r=>r.record_kind==='candidate'&&r.record_version===3&&!old.some(v=>replaySame(v,r)))
+    if(!candidates.length){
+      if(!replaySame(old,next)||!replaySame(a.receipts,b.receipts)||!replaySame(a.intents,b.intents)||!replaySame(before.sources,after.sources)||!replaySame(before.notes,after.notes)||a.out.some(o=>!b.out.some(v=>replaySame(o,v))))fail()
+      return
+    }
     const c=candidates[0],head=old.find(r=>r.record_kind==='head'&&r.project_id===c?.project_id&&r.note_id===c?.note_id),h=next.find(r=>r.record_kind==='head'&&r.project_id===c?.project_id&&r.note_id===c?.note_id)
     if(candidates.length!==1||!c||c.record_kind!=='candidate'||c.record_version!==3||!head||head.record_kind!=='head'||!h||h.record_kind!=='head'||head.record_version!==2||h.record_version!==2
       ||!replaySame(h,{...head,head_revision:head.head_revision+1,linear_head_event_id:c.event_id,tip_event_ids:[c.event_id],node_ref:{kind:'candidate',event_id:c.event_id}})
