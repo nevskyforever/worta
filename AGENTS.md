@@ -35,8 +35,14 @@ Production Desktop targets:
   Do not package or start a Python runtime, FastAPI sidecar, or Nuitka payload
   in normal Desktop operation. Python may be used for the cloud server and
   explicit migration or development tools outside the normal Desktop runtime.
-* Build macOS Apple Silicon and Intel releases on the owner’s Mac using the
-  existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
+* For Desktop releases, run `Release Tauri All.sh` on the owner’s Mac to build
+  and test macOS Apple Silicon and Intel in parallel. Track both builds through
+  completion and resolve failures before continuing. This script publishes the
+  qualified macOS archives and updates the existing hosting manifests after both
+  builds pass; preserve all release and integrity gates.
+* After both macOS builds succeed, manually dispatch `.github/workflows/build.yml`
+  from `main` to build Windows x64 and publish the release. Keep the release tag,
+  source revision and macOS artifact provenance consistent.
 * Use the existing signing, update, and publication mechanisms. Do not create
   new release mechanisms without separate approval.
 * Every Desktop release description, in-app update description, and Telegram
