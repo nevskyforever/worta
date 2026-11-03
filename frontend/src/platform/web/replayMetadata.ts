@@ -33,7 +33,7 @@ export interface ReplayInitialNoteResult extends Omit<ReplayStructuralResult, 'k
   readonly kind: 'initial_legacy_notes_applied'; readonly noteProofs: number
 }
 export interface ReplayOrderedContentResult extends Omit<ReplayInitialNoteResult, 'kind'> {
-  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied' | 'bounded_resolution_continuation_applied'; readonly contentProofs: 1 | 2 | 3 | 4
+  readonly kind: 'bounded_ordered_content_update_applied' | 'bounded_peer_content_conflict_preserved' | 'bounded_resolution_owner_applied' | 'bounded_resolution_continuation_applied'; readonly contentProofs: number
 }
 export interface MetadataPort {
   read(): Promise<ReplaySnapshot>
@@ -183,7 +183,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   const anchor = snapshot.manifest.anchor
   const resolutionSequence = terminalContent && snapshot.manifest.contract_version === 6
     ? snapshot.rows.find(r => { const e = JSON.parse(r.wire_item).event; return e.entity_type === 'note' && e.operation === 'event' && e.revision === 3 })?.server_sequence : undefined
-  const resolutionTail = resolutionSequence !== undefined && snapshot.rows.length <= resolutionSequence + 1
+  const resolutionTail = resolutionSequence !== undefined
   const contentEnd = resolutionTail ? resolutionSequence! - 1 : snapshot.rows.length
   const contentRows = snapshot.rows.slice(0, contentEnd)
   const peerConflict = terminalContent && snapshot.manifest.contract_version === 6 && contentRows.slice(-2).length === 2
@@ -273,7 +273,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
   if (resolutionTail) {
     const transaction: BrowserSyncTransaction = async (...args) => {
       const expected = await port.read()
-      const target = expected.manifest!.applied_cursor! < resolutionSequence! ? resolutionSequence! : snapshot.rows.length
+      const target = Math.min(expected.manifest!.applied_cursor! + 1, snapshot.rows.length)
       return port.transaction(expected, target, server)(...args)
     }
     const device = await new BrowserDeviceRegistration(transaction, current).bind(auth, bindings).registerVerified(scope)
@@ -281,7 +281,9 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
       transaction, current, auth, bindings, keys, device })
     if (snapshot.rows.length > resolutionSequence!) {
       const owner = new BrowserResolutionContinuation(transaction, new BrowserLocalAuthority(transaction), current).bind(auth, bindings, keys, device)
-      await owner.apply(scope, snapshot.rows.length)
+      for (let sequence = resolutionSequence! + 1; sequence <= snapshot.rows.length; sequence++) {
+        await owner.apply(scope, sequence); check()
+      }
       await owner.history(scope)
     }
     snapshot = await port.read(); check()
@@ -309,7 +311,7 @@ async function composeReplayOwners(port: MetadataPort, scope: BrowserSyncScope, 
     ownerProofs: snapshot.manifest!.applied_cursor!, projects: snapshot.owners.filter(head => head.owner_kind === 'project_metadata').length,
     projectOpened: false as const, ready: false as const, declarationAllowed: false as const, writerAuthorized: false as const }
   if (terminalContent) return { ...result, kind: resolutionTail ? (snapshot.rows.length > resolutionSequence! ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied') : peerConflict ? 'bounded_peer_content_conflict_preserved' : 'bounded_ordered_content_update_applied', metadataProofs, stageProofs,
-    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: resolutionTail && snapshot.rows.length > resolutionSequence! ? 4 : contentGenesis ? 3 : peerConflict ? 2 : 1 }
+    stageOrderProofs, noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length, contentProofs: snapshot.rows.filter(r => r.state === 'content_note_proven' || r.state === 'content_note_conflict_preserved').length }
   return initialNotes ? { ...result, kind: 'initial_legacy_notes_applied', metadataProofs, stageProofs, stageOrderProofs,
     noteProofs: snapshot.rows.filter(row => row.state === 'note_proven').length }
     : structural ? { ...result, kind: 'structural_owners_applied', metadataProofs, stageProofs, stageOrderProofs }

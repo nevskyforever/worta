@@ -52,7 +52,7 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -155,6 +155,25 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
+    if chain:
+        assert successor
+        for db_path, identity, action, patch in ((a, ia, 'edit', {'content': 'NATIVE_PRIVATE_CHAIN'}), (b, ib, 'delete', None)):
+            kwargs = {'patch': patch} if patch else {'stage_id': None}
+            content(tmp_path, db_path, identity, user, action, note_id='native-conflict', **kwargs)
+            assert len(emit(transport, tmp_path, 'local-only', db_path, identity, user, amk)) == 1
+            for path_, identity_ in ((a, ia), (b, ib)):
+                receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
+                assert content(tmp_path, path_, identity_, user, 'conflicts') == []
+        fixture['anchor']['registry']['current_cursor'] = len(transport.items)
+        fixture['items'] = transport.items
+        fixture['interruptRevision'] = 5
+        fixture['selectedNote'] = {'deleted': True}
+        path.write_text(json.dumps(fixture), encoding='utf-8')
+        result = subprocess.run(['node', 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
+                                capture_output=True, text=True, timeout=180)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+
     return fixture
 
 
@@ -164,3 +183,7 @@ def test_native_content_genesis_and_peer_conflict_in_chromium(tmp_path):
 
 def test_native_post_resolution_successor_dispatch_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, successor=True)
+
+
+def test_native_post_resolution_chain_and_delete_dispatch_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, successor=True, chain=True)

@@ -7,7 +7,7 @@ import { chromium } from '@playwright/test'
 
 const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const directory = await mkdtemp(join(tmpdir(), 'worta-replay-conflict-'))
-const expectedCursor = fixture.successor ? 5 : 4
+const expectedCursor = fixture.successor ? 5 + (fixture.interruptRevision ?? 4) - 4 : 4
 const expectedKind = fixture.successor ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied'
 let context, vite, offlineGate = false, lastGateAuthorization
 const gateRequests = []
@@ -98,14 +98,14 @@ try {
           items, next_cursor: items.length, has_more: false }))
         await store.finish(state)
       }
-      window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
+      window.interruptRevision = f.interruptRevision ?? 4; window.successor = !!f.successor; window.readerAuth = { auth, bindings, keys }; window.adapter = { store, run: () => store.applyOrderedContentUpdate(auth, bindings, keys) }
     }, fixture)
   }
   await attach(page)
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function(value, ...args) {
-      if (this.name === 'inbox' && (window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === 4 : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
+      if (this.name === 'inbox' && (window.successor ? value.state === 'content_note_proven' && value.content_note_proof.header.revision === window.interruptRevision : value.state === 'note_resolution_proven')) { this.transaction.abort(); throw new DOMException('test abort', 'AbortError') }
       return put.call(this, value, ...args)
     }
     try { await adapter.run(); return { refused: false } } catch (error) { return { refused: true, error: String(error?.stack ?? error) } } finally { IDBObjectStore.prototype.put = put }
@@ -116,7 +116,7 @@ try {
   assert.equal(partial.rows.at(-1).state, 'received')
   assert.equal(partial.manifest.applied_cursor, expectedCursor)
   assert.equal(partial.noteHistory.some(r => ['resolution', 'group_transition'].includes(r.record_kind)), !!fixture.successor)
-  assert.equal(partial.sources[0].source_revision, fixture.successor ? 4 : 3)
+  assert.equal(partial.sources[0].source_revision, expectedCursor - 1)
   await page.evaluate(() => adapter.store.close()); await context.close()
   page = await launch(); await attach(page)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), partial)
@@ -146,9 +146,10 @@ try {
       const bytes = await decryptObjectBytes(Uint8Array.from(f.key), { userId: f.scope.canonicalUserId,
         projectId: row.project_id, entityId: row.note_id, entityType: 'note' },
         { ...envelope, nonce: decodeBase64Url(envelope.nonce), ciphertext: decodeBase64Url(envelope.ciphertext) })
-      try { return JSON.parse(new TextDecoder().decode(bytes)).source.note.content } finally { bytes.fill(0) }
+      try { return JSON.parse(new TextDecoder().decode(bytes)).source } finally { bytes.fill(0) }
     }, fixture)
-    assert.equal(actual, fixture.selectedNote.content)
+    assert.equal(actual.state, fixture.selectedNote.deleted ? 'tombstone' : 'live')
+    if (!fixture.selectedNote.deleted) assert.equal(actual.note.content, fixture.selectedNote.content)
   }
   if (fixture.expectedContents) {
     const bothPreserved = await page.evaluate(async f => {

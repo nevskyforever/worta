@@ -1,5 +1,68 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-03 — Slice 4/5: sequential post-Resolution update/delete dispatch (PARTIAL)
+
+Starting SHA `45ad6b7db90727825934f700b1b34c2e0a1ce6d0`, branch `6.0`.
+Production replay now dispatches a complete linear peer Content update/delete
+chain after the accepted choose-version Resolution2, within the existing
+account/event/byte bounds. The former one-successor restriction is removed.
+Every event is applied in account sequence through the existing
+`BrowserResolutionContinuation` owner, with a fresh per-event inventory CAS and
+atomic owner/source/candidate/head/inbox/proof/manifest coverage transaction.
+This is still the accepted one-project, stage-less Content-genesis peer cohort,
+not a generic full ordinary1/Resolution2 reader or live generation advancement.
+
+Before Resolution apply, the full pending tail is decoded and checked for
+consecutive revisions, exact parents, peer/scope/route, update/delete semantics
+and no implicit resurrection. The inventory joins every successor to its
+immediate predecessor, counts all applied source/head revisions and compares
+the current encrypted Note with the latest projection; earlier candidate
+snapshots remain immutable. Restart authentication uses the existing complete
+continuation-history and current-source verifiers. Historical pre-closure
+ordinary proofs retain their existing transient validation view; no fabricated
+persisted proof, source revision or receipt is introduced. The production
+zero-origin v10 page replay checks the entire chain after dispatch. Ordinary
+pre-Resolution/frozen migration behavior remains unchanged.
+
+Real native acceptance adds two sequential edits from the independent SQLite
+writers and a genuine delete after Resolution. Chromium decrypts the expected
+terminal tombstone, preserves every original wire/ciphertext and owner proof,
+and performs exact duplicate/restart reconciliation. An IndexedDB abort on the
+middle update retains the prior applied successor at coverage 6/source revision
+5 and leaves the remaining tail received; physical profile restart and retry
+finish the chain. Existing corruption, page order/boundary/protocol, source/
+closure proof, readonly transport abort, old-reader refusal and logout tests
+also run over this longer history. Additional negative admission tests reject
+wrong parent, own-device tail, revision gaps, corrupt ciphertext and unsupported
+resurrection before applying Resolution. These malformed-input unit fixtures
+are negative evidence, not fabricated positive owner proofs.
+
+Local acceptance: **3 production Rust-writer/Chromium pytest tests passed**;
+Rust Resolution filter **56 passed**; focused replay/continuation/transport/
+readiness Vitest **303 passed, 2 optional tests skipped** (not counted as PASS);
+typecheck, production build, diff checks and maintained quick acceptance PASS.
+Maintenance dry run only, no deletions. Existing Rust/build warnings are
+non-fatal. No PostgreSQL/backend behavior changes; encrypted server-to-browser
+recipient acceptance is NOT RUN for this local dispatch extension. No gate
+bypass or capability PUT is performed. Commit/push records this verified part.
+CI is not dispatched or polled.
+
+`production_v10_reader_dispatch_incomplete`: **OPEN**. Further Resolution
+requires extending the planner's currently v9-only admission and effective
+open-group selection, plus multi-generation source verification; it cannot
+safely be obtained by invoking that owner again on stripped history. Resurrection
+and own author/self-echo need their existing owner/source/receipt authorities
+extended and accepted; they remain rejected here. Interleaved post-Resolution
+families and owned-generation advancement also remain outside this cohort.
+`transport_v10_page_replay_incomplete`: **OPEN**, because its joint full dispatch
+acceptance prerequisite is still unmet. **Fully closed blockers: 0/10**; all ten
+existing diagnostic blockers are retained. Next work stays on the dispatch
+owner dependencies within Slice 4. No Slice 5 or new qualification architecture.
+
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+Registration CLOSED, PUBLIC RELEASE BLOCKED. Overall progress remains **89.36%**.
+
+
 ## 2026-11-03 — Slice 4/5: complete retained-page transport dependency (PARTIAL)
 
 Starting SHA `600f3976ab636d9880d738795f15fa7a8ec92565`, branch `6.0`.

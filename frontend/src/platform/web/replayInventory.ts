@@ -88,7 +88,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
     return
   }
   const closed = before.noteHistory?.find(r => r.record_kind === 'resolution')
-  if (closed?.record_kind === 'resolution' && row?.state === 'content_note_proven' && sequence === closed.server_sequence + 1) {
+  if (closed?.record_kind === 'resolution' && row?.state === 'content_note_proven' && sequence > closed.server_sequence) {
     const proof = row.content_note_proof
     const { content_note_proof: _proof, ...wire } = row
     const old = before.noteHistory ?? [], next = after.noteHistory ?? []
@@ -98,7 +98,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
       || !replaySame({ ...wire, record_version: 1, state: 'received' }, previous)
       || !replaySame(before.rows.filter(r => r.server_sequence !== sequence), after.rows.filter(r => r.server_sequence !== sequence))
       || !replaySame(before.bindings, after.bindings) || !replaySame(before.owners, after.owners)
-      || proof.header.parent_event_id !== closed.event_id || proof.mutation !== 'update'
+      || proof.header.parent_event_id !== before.rows[sequence - 2]?.event_id || !['update', 'delete'].includes(proof.mutation)
       || !candidate || candidate.record_kind !== 'candidate' || candidate.record_digest !== proof.candidate_digest
       || next.length !== old.length + 1
       || old.filter(r => !(r.record_kind === 'head' && r.project_id === closed.project_id && r.note_id === closed.note_id)).some(r => !next.some(v => replaySame(v, r)))) fail()
@@ -203,14 +203,13 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (resolutions.length > 1 || resolutions.length !== transitions.length || version < 6 && resolutions.length) fail()
       const closed = resolutions[0]
       if (closed && (closed.strategy !== 'choose_version' || closed.transport_kind !== 'content_note_resolution_v2'
-        || closed.retained_note_id !== null || (closed.server_sequence !== rows.length && closed.server_sequence !== rows.length - 1)
+        || closed.retained_note_id !== null || closed.server_sequence > rows.length
         || transitions[0]?.resolution_event_id !== closed.event_id)) fail()
       inspectResolutionDag(s, future)
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
-      const successor = successors[0]
-      if (successor) {
+      for (const [index, successor] of successors.entries()) {
         const e = JSON.parse(successor.wire_item).event
-        if (successors.length !== 1 || e.entity_type !== 'note' || e.operation !== 'event' || e.revision !== 4
+        if (e.entity_type !== 'note' || e.operation !== 'event' || e.revision !== closed!.header.revision + index + 1
           || e.project_id !== closed!.project_id || e.entity_id !== closed!.note_id || e.device_id === s.deviceId
           || !['received', 'content_note_proven'].includes(successor.state)) fail()
       }
@@ -219,7 +218,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (closed) {
         const head = future.find(r => r.record_kind === 'head' && r.record_version === 2)
         const row = rows.find(r => r.server_sequence === closed.server_sequence)
-        if (!head || head.record_kind !== 'head' || head.head_revision !== 4 + appliedSuccessors.length || head.linear_head_event_id !== (appliedSuccessors[0]?.event_id ?? closed.event_id)
+        if (!head || head.record_kind !== 'head' || head.head_revision !== 4 + appliedSuccessors.length || head.linear_head_event_id !== (appliedSuccessors.at(-1)?.event_id ?? closed.event_id)
           || row?.state !== 'note_resolution_proven' || row.event_id !== closed.event_id
           || row.resolution_proof.resolution_digest !== closed.record_digest
           || row.resolution_proof.transition_digest !== transitions[0]!.record_digest
@@ -267,10 +266,10 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
           if (row.state === 'content_note_proven') {
             const candidate = future.find(r => r.record_kind === 'candidate' && r.event_id === row.event_id)
             if (!candidate || candidate.record_kind !== 'candidate' || candidate.record_version !== 2
-              || candidate.header.parent_event_id !== closed.event_id || candidate.header.revision !== 4
-              || row.content_note_proof.mutation !== 'update' || candidate.wire_item !== row.wire_item
+              || candidate.header.parent_event_id !== rows[row.server_sequence - 2]?.event_id || candidate.header.revision !== closed.header.revision + row.server_sequence - closed.server_sequence
+              || !['update', 'delete'].includes(row.content_note_proof.mutation) || candidate.wire_item !== row.wire_item
               || candidate.record_digest !== row.content_note_proof.candidate_digest
-              || !replaySame(candidate.projection, notes.find(n => n.note_id === closed.note_id))) fail()
+              || (appliedSuccessors.at(-1) === row && !replaySame(candidate.projection, notes.find(n => n.note_id === closed.note_id)))) fail()
           }
           continue // The continuation owner authenticates these proofs and sources.
         }

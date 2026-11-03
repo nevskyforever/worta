@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { plannerFixture } from './resolutionPlanner.testFixture'
 import { scope } from './bootstrap.testFixture'
 import type { BrowserSyncTransaction } from './syncDurability'
+import { contentRow } from './noteTransport.testFixture'
 import { applyReplayResolutionOwner } from './replayResolution'
 afterEach(() => vi.restoreAllMocks())
 async function setup() {
@@ -48,4 +49,14 @@ it('rolls back the complete owner write when the transaction aborts', async () =
     current: () => true, auth: f.f.auth, bindings: f.f.bindings as never, keys: f.f.keys as never,
     device: f.device })).rejects.toThrow('injected_abort')
   expect(f.before()).toEqual(saved)
+})
+
+it.each(['parent','self','revision','ciphertext','resurrection'] as const)('rejects unsupported tail %s before applying Resolution',async kind=>{
+ const {f,run}=await setup()
+ const first=await contentRow(f.f as never,f.sequence+1,{parent:f.resolution.header.event_id,revision:4,
+  mutation:kind==='resurrection'?'delete':'update',change:e=>{if(e.event.version===1)e.event.note.content_format='plain';if(kind==='self')e.device_id=scope.deviceId}})
+ const second=await contentRow(f.f as never,f.sequence+2,{parent:kind==='parent'?crypto.randomUUID():first.row.event_id,
+  revision:kind==='revision'?9:5,mutation:'update',change:e=>{if(e.event.version===1)e.event.note.content_format='plain'}})
+ if(kind==='ciphertext'){const w=JSON.parse(second.row.wire_item);w.object.ciphertext='AA';second.row.wire_item=JSON.stringify(w)}
+ const before=f.before();await expect(run()).rejects.toThrow();expect(f.before()).toEqual(before)
 })
