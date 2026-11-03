@@ -129,7 +129,7 @@ jobs:
                 while IFS=$'\t' read -r state path; do
                   [[ "$state" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
                   case "$path" in
-                    .github/workflows/build.yml|AGENTS.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
+                    .github/workflows/build.yml|AGENTS.md|docs/DEVELOPMENT_RUNBOOK.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
                     *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
                   esac
                 done <<< "$changes"
@@ -904,7 +904,7 @@ jobs:
               while IFS=$'\t' read -r status path; do
                 [[ "$status" == M ]] || { echo 'Unexpected release change.' >&2; exit 1; }
                 case "$path" in
-                  .github/workflows/build.yml|AGENTS.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
+                  .github/workflows/build.yml|AGENTS.md|docs/DEVELOPMENT_RUNBOOK.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
                   *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
                 esac
               done <<< "$changes"

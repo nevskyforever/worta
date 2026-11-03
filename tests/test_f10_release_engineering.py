@@ -164,6 +164,7 @@ def test_desktop_release_notes_and_telegram_use_versioned_user_facing_format():
     assert "does not match $version" in workflow
     assert "Обновление [версия]" in agents
     assert "## Текст Desktop-релиза" in runbook
+    assert workflow.count("docs/DEVELOPMENT_RUNBOOK.md") == 2
 
 
 def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(tmp_path):
