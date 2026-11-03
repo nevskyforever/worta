@@ -136,6 +136,12 @@ fi
         text = output_file.read_text() if output_file.exists() else result.stderr
         assert output in text
 
+    edit_step = next(step for step in steps
+                     if step.get('name') == 'Update existing Telegram post without resending')
+    assert edit_step['if'] == "steps.telegram_receipt.outputs.already_sent == 'true'"
+    assert '/editMessageText' in edit_step['run']
+    assert 'message_id=${message_id}' in edit_step['run']
+
 
 def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
@@ -144,6 +150,20 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     assert "retention-days: 1" in workflow
     assert "Remove temporary Actions artifact after publication attempt" in workflow
     assert "actions: write" in workflow
+
+
+def test_desktop_release_notes_and_telegram_use_versioned_user_facing_format():
+    workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    runbook = (ROOT / "docs/DEVELOPMENT_RUNBOOK.md").read_text(encoding="utf-8")
+
+    assert '$header = "Обновление $version"' in workflow
+    assert '$releaseNotes = "$header`n`n$releaseNotes"' in workflow
+    assert '$telegramMessage = "$header`n`n$telegramMessage"' in workflow
+    assert '$telegramMessage = $releaseNotes' in workflow
+    assert "does not match $version" in workflow
+    assert "Обновление [версия]" in agents
+    assert "## Текст Desktop-релиза" in runbook
 
 
 def test_host_inspection_stops_without_macos_and_selects_windows_build_or_reuse(tmp_path):

@@ -375,7 +375,7 @@ jobs:
       # Release notes
       # ------------------------------------------------------------
 
-      - name: Prepare release notes
+      - name: Prepare release notes and Telegram post
         id: release_notes
         shell: pwsh
 
@@ -426,23 +426,58 @@ jobs:
             }
           }
 
-          if ([string]::IsNullOrWhiteSpace($releaseNotes)) {
-            $releaseNotes = `
-              "Исправлены ошибки и улучшена стабильность."
-          }
-
           $telegramMessage = (
             [string]$env:MANUAL_TELEGRAM_MESSAGE
           ).Trim()
 
-          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
-            if (-not [string]::IsNullOrWhiteSpace($message)) {
-              $telegramMessage = $message
+          $version = $env:APP_VERSION
+          $header = "Обновление $version"
+
+          foreach ($text in @($releaseNotes, $telegramMessage)) {
+            if ([string]::IsNullOrWhiteSpace($text)) {
+              continue
             }
-            else {
-              $telegramMessage = $releaseNotes
+
+            $firstLine = ($text -split "`r?`n", 2)[0].Trim()
+            if ($firstLine -match '^Обновление\s+(.+)$') {
+              if ($Matches[1].Trim() -ne $version) {
+                throw "Release text version '$($Matches[1].Trim())' does not match $version."
+              }
             }
           }
+
+          if (-not [string]::IsNullOrWhiteSpace($releaseNotes)) {
+            $releaseNotes = [regex]::Replace(
+              $releaseNotes,
+              ('^Обновление\s+' + [regex]::Escape($version) + '\s*(\r?\n\s*\r?\n)?'),
+              '',
+              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+            ).Trim()
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseNotes)) {
+            $releaseNotes = "Исправлены ошибки и улучшена стабильность."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = $releaseNotes
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = [regex]::Replace(
+              $telegramMessage,
+              ('^Обновление\s+' + [regex]::Escape($version) + '\s*(\r?\n\s*\r?\n)?'),
+              '',
+              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+            ).Trim()
+          }
+
+          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = $releaseNotes
+          }
+
+          $releaseNotes = "$header`n`n$releaseNotes"
+          $telegramMessage = "$header`n`n$telegramMessage"
 
           $notesPath = Join-Path `
             $env:RUNNER_TEMP `
@@ -1196,9 +1231,7 @@ jobs:
           export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html"
           ./scripts/upload-release.sh release-assets/releases.json releases.json
 
-          if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" == true ]]; then
-            echo 'Release and Telegram receipt already exist; manifests refreshed without duplicate publication.'
-          elif gh release view \
+          if gh release view \
             "$tag" \
             --repo "$GITHUB_REPOSITORY" \
             >/dev/null 2>&1
@@ -1257,6 +1290,10 @@ jobs:
               --latest
           fi
 
+          if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" == true ]]; then
+            echo 'Existing release description and manifests refreshed; Telegram post will be edited, not resent.'
+          fi
+
       - name: Verify published release and hosting
         shell: bash
         run: |
@@ -1289,6 +1326,37 @@ jobs:
       # ------------------------------------------------------------
       # Telegram
       # ------------------------------------------------------------
+
+      - name: Update existing Telegram post without resending
+        if: steps.telegram_receipt.outputs.already_sent == 'true'
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          TELEGRAM_MESSAGE: ${{ needs.build_windows.outputs.telegram_message }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/telegram-receipt/telegram-receipt.json"
+          message_id=$(jq -er --arg version "$APP_VERSION" \
+            'select(.version == $version and .status == "sent") | .message_id' "$receipt")
+          [[ "$message_id" =~ ^[0-9]+$ ]] || { echo 'Invalid Telegram message receipt.' >&2; exit 1; }
+          [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHANNEL_ID" ]] || {
+            echo 'Telegram credentials are required to update the existing release post.' >&2
+            exit 1
+          }
+          response=$(curl --fail --silent --show-error --request POST \
+            --data-urlencode "chat_id=${TELEGRAM_CHANNEL_ID}" \
+            --data-urlencode "message_id=${message_id}" \
+            --data-urlencode "text=${TELEGRAM_MESSAGE}" \
+            --data-urlencode "disable_web_page_preview=true" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText")
+          if ! jq -e '.ok == true' <<< "$response" >/dev/null; then
+            if ! jq -e '.ok == false and .description == "Bad Request: message is not modified"' <<< "$response" >/dev/null; then
+              echo 'Telegram rejected the edit of the existing release post.' >&2
+              exit 1
+            fi
+          fi
+          echo "Updated existing Telegram message ${message_id}; no new post was sent."
 
       - name: Notify Telegram channel
         if: steps.telegram_receipt.outputs.already_sent != 'true'

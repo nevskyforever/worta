@@ -39,6 +39,18 @@ Production Desktop targets:
   existing release scripts; build Windows x64 with the existing GitHub Actions workflow.
 * Use the existing signing, update, and publication mechanisms. Do not create
   new release mechanisms without separate approval.
+* Every Desktop release description, in-app update description, and Telegram
+  release post must use this exact structure:
+
+  ```text
+  Обновление [версия]
+
+  [понятное для простого пользователя описание изменений]
+  ```
+
+  Replace `[версия]` with the release version, omit the brackets, and write
+  the description in plain language. Normalize supplied text to this structure;
+  publication must reject a heading whose version differs from the release.
 * GitHub Releases remains the official release record and archive. Legacy
   desktop builds keep using the existing `nfproject.ru/app` update manifest
   and files. New WORTA builds use `worta.ru/app` for updater manifests and
