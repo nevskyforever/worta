@@ -1,5 +1,92 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: recovery negative acceptance (partial)
+
+Starting/Final HEAD `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`; changes remain
+uncommitted on 6.0. Native Stage/plain history in Chromium exercises the
+replayStorage adapter's first three owner commits: each is interrupted by an
+IndexedDB transaction abort and a local transport failure, then reopened and
+retried; logout during the Stage commit's server check is also followed by
+reopen and successful retry. Full snapshots, encrypted wire, proof absence and
+coverage are compared around each refusal. Existing corruption checks run after
+normal replay. Chromium **1 passed**, Rust **1 passed**, Vitest **89 passed**,
+typecheck/build and quick acceptance passed.
+
+The current fixture supplies a local in-process transport, not genuine FastAPI
+HTTP. Adapter-specific concurrent-snapshot mutation, wrong sequence, foreign
+binding and corrupted proof before the recovery commit remain untested in
+Chromium. Do not commit or claim the requested negative acceptance until those
+are verified with the required real transport. Next: isolated PostgreSQL/FastAPI
+fixture with the existing server gate intact, then those four failures and
+reopen/retry; separately implement Resolution/prefix recovery. Security flags
+remain false; no capability PUT. Readiness remains 2/10 blockers closed.
+
+## 2026-11-05 — Slice 4/5: recovery through replayStorage (bounded acceptance)
+
+Starting SHA `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`.
+`recoverV10` now binds the existing recovery engine to ownerPort per operation:
+fresh expected snapshot, next contiguous applied sequence, fresh registry/mode
+and tail HTTP checks, existing CAS/coverage and atomic owner transaction. The
+adapter runs at most one owner commit per call. Non-owner writes through the
+base inspection transaction are refused. `importRecoveryProject` reuses the
+existing authenticated source seed and imported binding admission.
+
+Native Stage/plain history in persistent Chromium PASS: before binding, actual
+recovery returns dependency_unavailable without writes; close/reopen; genuine
+replay bootstrap import; three recovery calls apply Metadata, Stage and
+StageOrder; close/reopen preserves all proofs and coverage; complete normal
+replay then verifies the full Native history, corruption refusals and rollback.
+No injected dependency error is used for this positive browser scenario.
+This qualifies the replay bootstrap import path, not a direct arbitrary
+BrowserProjectBindings.importRemote write into the replay database.
+
+Remaining unaccepted cases: adapter-specific concurrent snapshot mutation,
+foreign binding import and session/network revocation during a recovery commit;
+full Resolution/prefix recovery writes (base inspection intentionally read-only)
+and all-family orphan orchestration. Keep orphan blocker OPEN, 2/10 closed;
+ready=false, declarationAllowed=false, writerAuthorized=false. No capability
+PUT, no positive protected-feed acceptance, no CI dispatch/polling. Earlier
+uncommitted classification/tests are retained in this implementation.
+
+## 2026-11-05 — Slice 4/5: StageOrder binding retry (partial)
+
+Starting SHA `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`; working tree
+continues the uncommitted Stage dependency classification. A focused mixed
+owner test now removes the actual project binding before the first event, checks
+that the encrypted StageOrder remains received without a proof, calls existing
+`importRemote`, creates a fresh recovery runtime and verifies that the real
+StageOrder owner applies and writes its proof without changing the wire. This
+is an in-memory owner test, not Native SQLite/Chromium acceptance.
+
+The remaining production integration is specific: replayStorage's ownerPort
+requires an expected full replay snapshot, the exact single sequence, a fresh
+server check and atomic replayCoverage update for each mutation. The dormant
+BrowserV10Recovery accepts a generic transaction provider and can process
+multiple owners in a pass. It cannot safely be wired to a generic IndexedDB
+transaction without preserving those per-event replay invariants. Implement and
+verify that adapter, then exercise the real binding import across persistent
+Chromium restarts and Native SQLite history. Orphan readiness remains open;
+2/10 blockers closed, all security flags false.
+
+## 2026-11-05 — Slice 4/5: Stage dependency retry classification (partial)
+
+Starting SHA `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`.
+The existing bounded, manually invoked `BrowserV10Recovery` now maps the
+Stage/StageOrder owner's `stage_dependency_missing` to its existing retryable
+`dependency_unavailable` result. It does not mark the inbox proven, change
+ciphertext or advance coverage; foreign Stage and corruption still fail closed.
+A focused test injects that transient owner error, checks retention, then uses a
+fresh recovery runtime and the real owner for retry. This is an injected fault,
+not a Native-writer orphan acceptance and not production composition of K.
+
+An account bootstrap/project binding not yet imported is a concrete temporarily
+missing authority case: `v10Recovery.spec.ts` covers the ordinary owner retry
+after `importRemote`, but a genuine Native SQLite to Chromium acceptance across
+the binding import/reopen boundary remains missing. General Stage/Metadata/Note
+recovery and server pull also remain unqualified. Consequently
+`orphan_dependency_recovery_not_accepted` remains open; readiness 2/10 closed,
+all three security flags false. Resurrection qualification remains unchanged.
+
 ## 2026-11-05 — Slice 4/5: resurrection and orphan criteria separated
 
 Starting SHA `25ac040838799b0fd4c0b7c4ceefd21c4b49212b`.

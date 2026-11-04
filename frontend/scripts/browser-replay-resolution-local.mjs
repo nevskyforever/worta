@@ -79,7 +79,10 @@ try {
       const lease = { localAccountId: f.scope.accountId, canonicalUserId: f.scope.canonicalUserId, authEpoch: context.authEpoch,
         isCurrent: () => auth.isCurrent(context), use: async fn => { const key = Uint8Array.from(f.key); try { return await fn(key) } finally { key.fill(0) } } }
       const bindings = { ensureForCurrentUser: async () => ({ context }) }, keys = { leaseForAccount: () => lease, onInvalidated: () => () => undefined }
-      cloudProjectsApi.listBootstraps = async () => f.anchor.registry
+      cloudProjectsApi.listBootstraps = async () => {
+        if (window.logoutBeforeCommit) await window.readerAuth.auth.logout()
+        return f.anchor.registry
+      }
       encryptedSyncV2Api.capabilities = async () => f.anchor.transport
       const items = f.items ?? f.stores.inbox.map(row => JSON.parse(row.wire_item))
       encryptedSyncV3Api.pullRaw = async (_token, _device, since, limit = 100) => {
@@ -121,6 +124,55 @@ try {
     }, fixture)
   }
   await attach(page)
+  if (fixture.stageRoute) {
+    const beforeBinding = await page.evaluate(() => adapter.store.read())
+    const recovery = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
+    assert.equal(recovery.blocker?.kind, 'dependency_unavailable')
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
+    await page.evaluate(() => adapter.store.close()); await context.close()
+    page = await launch(); await attach(page)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
+    await page.evaluate(f => adapter.store.importRecoveryProject(f.items[0].event.project_id, readerAuth.auth, readerAuth.bindings, readerAuth.keys), fixture)
+    for (let sequence = 1; sequence <= 3; sequence++) {
+      const before = await page.evaluate(() => adapter.store.read())
+      for (const fault of ['network', 'abort']) {
+        const refused = await page.evaluate(async fault => {
+          const put = IDBObjectStore.prototype.put
+          if (fault === 'network') window.networkLost = true
+          else IDBObjectStore.prototype.put = function(value, ...args) {
+            const request = put.call(this, value, ...args)
+            if (this.name === 'inbox' && value.state !== 'received') request.addEventListener('success', () => this.transaction.abort(), { once: true })
+            return request
+          }
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+          catch { return true }
+          finally { window.networkLost = false; IDBObjectStore.prototype.put = put }
+        }, fault)
+        assert.equal(refused, true)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+        await page.evaluate(() => adapter.store.close()); await context.close()
+        page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+      }
+      if (sequence === 2) {
+        assert.equal(await page.evaluate(async () => {
+          window.logoutBeforeCommit = true
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+          catch { return true } finally { window.logoutBeforeCommit = false }
+        }), true)
+        await context.close(); page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+      }
+      await page.evaluate(async sequence => {
+        const result = await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys)
+        if (result.applied.length !== 1 || result.applied[0].sequence !== sequence) throw Error('recovery_sequence')
+      }, sequence)
+    }
+    const imported = await page.evaluate(() => adapter.store.read())
+    await page.evaluate(() => adapter.store.close()); await context.close()
+    page = await launch(); await attach(page)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), imported)
+  }
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function(value, ...args) {

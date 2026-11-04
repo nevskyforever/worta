@@ -1,4 +1,5 @@
 import {BrowserContentNoteIntents} from './contentNoteIntents'
+import {BrowserV10Recovery} from './v10Recovery'
 import {assertReplayAuthorTransition} from './replayInventory'
 import { BrowserNoteReaderReadiness } from './noteReaderReadiness'
 import { BrowserDeviceRegistration } from './deviceRegistration'
@@ -300,6 +301,44 @@ class BrowserReplayStorage {
       return await new BrowserNoteReaderReadiness(transaction, current).bind(auth, bindings, keys, device).inspect(this.scope, options)
     } finally { unAuth(); unKey() }
   }
+  /** Bounded recovery; each owner commit retains the ordinary replay CAS and coverage. */
+  async importRecoveryProject(projectId: string, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+    await this.seedNoteSource(projectId, auth, bindings, keys)
+    await this.admitInitialNoteBinding(projectId, auth, keys)
+  }
+  async recoverV10(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+    const stop = () => { void this.close() }
+    const unAuth = auth.onInvalidated(stop), unKey = keys.onInvalidated(stop)
+    try {
+      const current = () => { try { this.check(); return true } catch { return false } }
+      const port = this.ownerPort()
+      const readonly: BrowserSyncTransaction = async (scope, stores, mode, schedule) => {
+        if (mode !== 'readonly') throw new BrowserPersistenceError('unsupported_local_source')
+        return port.transaction(await this.read(), 0, async () => { throw new BrowserPersistenceError('closed') })(scope, stores, mode, schedule)
+      }
+      const device = await new BrowserDeviceRegistration(readonly, current).bind(auth, bindings).registerVerified(this.scope)
+      const ownerTransaction = async (sequence: number) => {
+        const expected = await this.read(), manifest = expected.manifest
+        if (!manifest || manifest.contract_version !== 6 || manifest.phase !== 'received' || sequence !== (manifest.applied_cursor ?? 0) + 1) throw new BrowserPersistenceError('stale_cursor')
+        const context = auth.requireContext(), lease = keys.leaseForAccount(this.scope.accountId)
+        const server = async () => {
+          this.check()
+          if (!auth.isCurrent(context) || !lease?.isCurrent()) throw new BrowserPersistenceError('closed')
+          const registry = await auth.authorized(token => cloudProjectsApi.listBootstraps(token, this.signal))
+          const mode = await auth.authorized(token => encryptedSyncV2Api.capabilities(token, this.signal))
+          if (!replaySame(replayAnchor(registry.value, mode.value), manifest.anchor)) throw new BrowserPersistenceError('stale_authority')
+          const tail = await auth.authorized(token => encryptedSyncV3Api.pullRaw(token, this.scope.deviceId, manifest.anchor.registry.current_cursor, 1, this.signal))
+          const { page } = prepareReplayPage(tail.value, manifest.anchor.registry.current_cursor, this.scope, manifest.anchor)
+          if (page.items.length || page.has_more) throw new BrowserPersistenceError('stale_authority')
+          this.check()
+          if (!auth.isCurrent(context) || !lease.isCurrent()) throw new BrowserPersistenceError('closed')
+        }
+        return port.transaction(expected, sequence, server)
+      }
+      return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction)
+        .bind(auth, bindings, keys, device).run(this.scope, { maxEvents: 1 })
+    } finally { unAuth(); unKey() }
+  }
   private ownerPort(): MetadataPort {
     return { read: () => this.read(), transaction: (expected, sequence, server) => async (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope)) fail()
@@ -401,7 +440,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)

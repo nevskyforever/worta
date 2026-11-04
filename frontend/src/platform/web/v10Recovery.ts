@@ -48,13 +48,16 @@ function gap(v:ResolutionInventorySnapshot,s:BrowserSyncScope):number|null {
 /** Manual, isolated K factory. No production composition, background timer, pull,
  * ACK or declaration surface. Each mutation belongs to an accepted atomic owner. */
 export class BrowserV10Recovery {
- constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthority,private readonly profileCurrent:()=>boolean){}
+ constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthority,private readonly profileCurrent:()=>boolean,
+  private readonly ownerTransaction?:(sequence:number)=>Promise<BrowserSyncTransaction>){}
  /** Separate dormant manual slice; the historical bind below is unchanged. */
  bindMixedSources(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindMixedV10Recovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  /** Explicit bounded .18 route; historical K/G/Q bindings keep their contracts. */
  bindPostFMetadata(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindPostFMetadataRecovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  bind(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){
-  const tx=this.transaction,current=this.profileCurrent,local=this.local
+  let operation:BrowserSyncTransaction|undefined
+  const tx:BrowserSyncTransaction=(scope,stores,mode,schedule)=>(operation??this.transaction)(scope,stores,mode,schedule)
+  const current=this.profileCurrent,local=this.ownerTransaction?new BrowserLocalAuthority(tx):this.local
   const transport=new BrowserV10Transport(tx,current).bind(auth,bindings,keys,device)
   const planner=new BrowserResolutionPlanner(tx,local,current).bind(auth,bindings,keys,device),resolution=planner.atomicApply()
   const continuation=new BrowserResolutionContinuation(tx,local,current).bind(auth,bindings,keys,device)
@@ -144,6 +147,7 @@ export class BrowserV10Recovery {
       const token=await step(prepare);if(!same(await load(),v))fail('stale_source');return step(apply(token))
      }
      try{
+      if(this.ownerTransaction)operation=await step(this.ownerTransaction(row.server_sequence))
       let status:'applied'|'conflict_preserved'='applied'
       if(route==='resolution'){
        const p=await step(planner.prepare(s,row.server_sequence));await commit(resolution.prepare(p.token),t=>resolution.commit(t))
@@ -158,14 +162,14 @@ export class BrowserV10Recovery {
       if(route==='continuation'&&status==='conflict_preserved'){block('unresolved_fork');break}
      }catch(error){
       check()
-      if(error instanceof ResolutionPlannerError&&['missing_parent','missing_publication','missing_bootstrap','dependency_unavailable','missing_conflict'].includes(error.code)||error instanceof BrowserPersistenceError&&['note_orphan','missing_history','ineligible_lineage','stale_authority'].includes(error.code)){
+      if(error instanceof ResolutionPlannerError&&['missing_parent','missing_publication','missing_bootstrap','dependency_unavailable','missing_conflict'].includes(error.code)||error instanceof BrowserPersistenceError&&['note_orphan','missing_history','ineligible_lineage','stale_authority','stage_dependency_missing'].includes(error.code)){
        block('dependency_unavailable',true);break
       }
       if(error instanceof BrowserPersistenceError&&['unsupported_local_source','note_conflict_unproven','local_incompatible'].includes(error.code)||error instanceof ResolutionPlannerError&&['source_incompatible','clone_collision'].includes(error.code)){
        block('unsupported_route');break
       }
       throw error // Corruption, crypto failure, native failure and revocation never become retry-success.
-     }
+     }finally{operation=undefined}
     }
     v=await load()
     if(hasResolution(v)){

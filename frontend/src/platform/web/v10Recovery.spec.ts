@@ -10,6 +10,8 @@ import {encodeNoteSyncResolutionV2} from '@/cloud/noteSyncResolutionV2Codec'
 import {createNoteSyncPlaintext} from '@/cloud/encryptedSyncProtocol'
 import {encodeNoteSyncPlaintext} from '@/cloud/noteSyncCodec'
 import type {BrowserSyncTransaction} from './syncDurability'
+import {BrowserStageOrderRuntime} from './stageOrderApply'
+import {BrowserPersistenceError} from './persistence'
 afterEach(()=>vi.restoreAllMocks())
 for(const protocol of [2,3] as const)for(const strategy of ['choose_version','manual_merge','delete','keep_both'] as const)it(`real pending-to-F/H/G protocol${protocol}/${strategy}`,async()=>{
  const f=await recoveryFixture(strategy,protocol,protocol===3),before=f.before()
@@ -40,6 +42,33 @@ it('missing binding is explicit; a genuine import enables a fresh dependency ret
  expect(blocked).toMatchObject({blocker:{sequence:1,kind:'dependency_unavailable',retryable:true},applied:[],more:true});expect(f.before()).toEqual(before)
  await f.f.projects.importRemote(scope,{project_id:binding.project_id,bootstrap_id:binding.bootstrap_id,remote_state:'active',remote_high_water:0})
  expect((await f.runtime.run(scope,{maxEvents:32})).blocker).toBeNull()
+})
+it('imports the actual binding before applying Stage and StageOrder after restart',async()=>{
+ const f=await recoveryFixture('choose_version',3,false,true),binding=f.f.db.projectBindings[0] as any
+ f.f.db.projectBindings=[]
+ const before=f.before(),blocked=await f.runtime.run(scope,{maxEvents:32})
+ expect(blocked).toMatchObject({blocker:{sequence:1,kind:'dependency_unavailable',retryable:true},applied:[]})
+ expect(f.before()).toEqual(before)
+ const order=(f.f.db.inbox as any[]).find(row=>JSON.parse(row.wire_item).event.entity_type==='stage_order')
+ expect(order.state).toBe('received');expect(order.stage_order_proof).toBeUndefined()
+ await f.f.projects.importRemote(scope,{project_id:binding.project_id,bootstrap_id:binding.bootstrap_id,remote_state:'active',remote_high_water:0})
+ const result=await f.create().run(scope,{maxEvents:32})
+ expect(result.blocker).toBeNull()
+ const saved=(f.f.db.inbox as any[]).find(row=>row.event_id===order.event_id)
+ expect(saved.state).toBe('stage_order_proven');expect(saved.stage_order_proof).toBeTruthy();expect(saved.wire_item).toBe(order.wire_item)
+})
+it('retains StageOrder and retries after its owner reports a temporarily missing Stage',async()=>{
+ const f=await recoveryFixture('choose_version',3,false,true)
+ const original=BrowserStageOrderRuntime.prototype.prepare
+ const fault=vi.spyOn(BrowserStageOrderRuntime.prototype,'prepare').mockImplementationOnce(async()=>{throw new BrowserPersistenceError('stage_dependency_missing')})
+ const blocked=await f.runtime.run(scope,{maxEvents:32})
+ expect(blocked.blocker).toMatchObject({sequence:3,kind:'dependency_unavailable',retryable:true})
+ const before=f.before(),row=(f.f.db.inbox as any[]).find(r=>r.server_sequence===3)
+ expect(row.state).toBe('received');expect(row.stage_order_proof).toBeUndefined()
+ fault.mockRestore()
+ expect(BrowserStageOrderRuntime.prototype.prepare).toBe(original)
+ expect((await f.create().run(scope,{maxEvents:32})).blocker).toBeNull()
+ expect((f.f.db.inbox as any[]).find(r=>r.server_sequence===3).wire_item).toBe((before.inbox as any[]).find(r=>r.server_sequence===3).wire_item)
 })
 for(const max of [0,33,1.5,NaN,Infinity])it(`rejects event budget ${max}`,async()=>{
  const f=await recoveryFixture(),before=f.before();await expect(f.runtime.run(scope,{maxEvents:max})).rejects.toThrow();expect(f.before()).toEqual(before)
