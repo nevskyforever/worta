@@ -18,6 +18,7 @@ import {BrowserNoteReaderReadiness,type BrowserNoteReadinessDiagnostic} from './
 import {BrowserV10Transport} from './v10Transport'
 import {BrowserLegacyNoteApply} from './legacyNoteApply'
 import {BrowserContentNoteApply} from './contentNoteApply'
+import {BrowserContentAuthorityOwner} from './contentAuthorityOwner'
 import {BrowserImportedMetadataApply} from './importedMetadataApply'
 import {BrowserStageApply} from './stageApply'
 import {BrowserStageOrderApply} from './stageOrderApply'
@@ -25,7 +26,7 @@ import {openBrowserCanonicalObject} from './canonicalReaders'
 import {openNoteTransport} from './noteTransport'
 import {bindMixedV10Recovery,bindPostFMetadataRecovery} from './v10MixedRecovery'
 
-type Route='metadata'|'stage'|'stage_order'|'legacy'|'content'|'resolution'|'continuation'
+type Route='metadata'|'stage'|'stage_order'|'legacy'|'content'|'content_self_echo'|'resolution'|'continuation'
 export interface RecoveryBlocker {
  sequence:number;kind:'missing_sequence'|'dependency_unavailable'|'unsupported_route'|'unsupported_generation'|'unresolved_fork'|'unqualified_family'|'budget_exhausted'
  retryable:boolean
@@ -66,6 +67,7 @@ export class BrowserV10Recovery {
   const prefix=new BrowserResolutionPrefix(tx,current).bind(auth,bindings,keys,device)
   const readiness=new BrowserNoteReaderReadiness(tx,current).bind(auth,bindings,keys,device)
   const notes=new BrowserLegacyNoteApply(tx,local,current),legacy=notes.bind(auth,bindings,keys),content=new BrowserContentNoteApply(notes).bind(auth,bindings,keys)
+  const contentAuthority=new BrowserContentAuthorityOwner(tx,current,auth,bindings,keys)
   const metadata=new BrowserImportedMetadataApply(tx,new BrowserSyncDurability(tx)),stage=new BrowserStageApply(tx,current).bind(auth,bindings,keys),order=new BrowserStageOrderApply(tx,current).bind(auth,bindings,keys)
   let busy=false
   // A closure keeps the mutable pass guard and accepted component handles out of
@@ -132,13 +134,15 @@ export class BrowserV10Recovery {
        }finally{nonce.fill(0);ciphertext.fill(0)}
       }))
       if(classified===null){block('unsupported_route');break}
-      // Only the Resolution planner may authenticate an own publication and
-      // its sealed wire/receipt. Never treat another own event as a peer event.
-      if(own&&classified!=='resolution'){block('unsupported_route');break}
+      // Own ordinary Content must pass the author owner's sealed publication
+      // and receipt checks; it must never fall back to peer application.
+      if(own&&classified!=='resolution'&&e.operation!=='event'){block('unsupported_route');break}
       if(resolvingBarrier&&classified!=='resolution'){block('unresolved_fork');break}
       if(classified==='resolution'){
        if(hasResolution(v)&&!this.ownerTransaction){block('unsupported_generation');break} // Dormant legacy contract stays frozen.
        route='resolution'
+      }else if(own){
+       route='content_self_echo'
       }else{
        const h=(classified as NoteSyncPlaintext).header
        if(hasResolution(v)){
@@ -166,6 +170,11 @@ export class BrowserV10Recovery {
       let status:'applied'|'conflict_preserved'='applied'
       if(route==='resolution'){
        const p=await step(hasResolution(v)?planner.prepareSuccessor(s,row.server_sequence):planner.prepare(s,row.server_sequence));await commit(resolution.prepare(p.token),t=>resolution.commit(t))
+      }else if(route==='content_self_echo'){
+       const token=await step(contentAuthority.prepareEcho(s,row.server_sequence))
+       if(!token)fail('unsupported_local_source')
+       if(!same(await load(),v))fail('stale_source')
+       await step(contentAuthority.commitEcho(token))
       }else if(route==='continuation')status=await commit(continuation.prepare(s,row.server_sequence),t=>continuation.commit(t))
       else if(route==='legacy'||route==='content'){
        const reader=route==='legacy'?legacy:content,value=await commit(reader.prepare(s,row.server_sequence),t=>reader.commit(t))

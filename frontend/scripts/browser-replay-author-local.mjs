@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-export async function acceptReplayAuthor({page,fixture,reopen}){
+export async function acceptReplayAuthor({page,fixture,reopen,recovery=false}){
  const before=await page.evaluate(()=>adapter.store.read())
  await page.evaluate(async()=>{
   const a=readerAuth
@@ -48,24 +48,33 @@ export async function acceptReplayAuthor({page,fixture,reopen}){
  assert.equal(received.new_events,1)
  const staged=await page.evaluate(()=>adapter.store.read())
  assert.equal(staged.manifest.applied_cursor,5);assert.equal(staged.rows[5].state,'received')
- const failed=await page.evaluate(async()=>{
+ const failed=await page.evaluate(async recovery=>{
   const put=IDBObjectStore.prototype.put;let fired=false
   IDBObjectStore.prototype.put=function(value,...args){const r=put.call(this,value,...args);if(this.name==='inbox'&&value.state==='content_note_self_echo_proven'){fired=true;r.addEventListener('success',()=>this.transaction.abort(),{once:true})}return r}
-  try{await adapter.run();return false}catch{return fired}finally{IDBObjectStore.prototype.put=put}
- })
+  try{if(recovery)await adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys);else await adapter.run();return false}catch{return fired}finally{IDBObjectStore.prototype.put=put}
+ },recovery)
  assert.equal(failed,true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged)
- assert.equal(await abortLifecycle('manifest'),true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged)
- await page.evaluate(()=>adapter.run())
+ if(recovery){
+  const revoked=await page.evaluate(async()=>{const put=IDBObjectStore.prototype.put;let fired=false
+   IDBObjectStore.prototype.put=function(value,...args){const r=put.call(this,value,...args);if(this.name==='inbox'&&value.state==='content_note_self_echo_proven'){fired=true;r.addEventListener('success',()=>void readerAuth.auth.logout(),{once:true})}return r}
+   try{await adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys);return false}catch{return fired}finally{IDBObjectStore.prototype.put=put}})
+  assert.equal(revoked,true);page=await reopen(page,fixture);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged)
+  const result=await page.evaluate(()=>adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys))
+  assert.equal(result.applied[0]?.route,'content_self_echo',JSON.stringify(result))
+ }else{assert.equal(await abortLifecycle('manifest'),true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged);await page.evaluate(()=>adapter.run())}
  const applied=await page.evaluate(()=>adapter.store.read())
  assert.equal(applied.rows[5].state,'content_note_self_echo_proven');assert.equal(applied.manifest.applied_cursor,6)
+ // Prefix owner intentionally does not yet qualify author P2/inbox9 evidence.
+ if(recovery){assert.equal(applied.checkpoint.proven_prefix,5);assert.equal(applied.checkpoint.ack_cursor,0);assert.equal(applied.rows[5].wire_item,JSON.stringify(fixture.items[5]));assert.equal(applied.checkpoint.next_local_ordinal,staged.checkpoint.next_local_ordinal)}
  assert.deepEqual(applied.notes,staged.notes);assert.deepEqual(applied.sources,staged.sources);assert.deepEqual(applied.noteHistory,staged.noteHistory)
  assert.deepEqual(applied.rows.slice(0,5),before.rows)
  assert.equal(applied.author.out.find(o=>o.event_id===intent.event_id).raw_body,out.raw_body)
- await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
+ assert.deepEqual(applied.author.receipts,staged.author.receipts)
+ if(recovery)await page.evaluate(()=>adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys));else await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  assert.equal((await page.evaluate(()=>adapter.store.receiveContentAuthorEcho(readerAuth.auth,readerAuth.bindings,readerAuth.keys))).new_events,0)
- page=await reopen(page,fixture);await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
+ page=await reopen(page,fixture);if(recovery)await page.evaluate(()=>adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys));else await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  for(const kind of ['receipt','receipt_sequence','authorship','author_device','dependency','parent','proof','ciphertext']){
-   assert.equal(await page.evaluate(async kind=>{
+   assert.equal(await page.evaluate(async ({kind,recovery})=>{
      const q=indexedDB.open('worta-web-replay',6);await new Promise((resolve,reject)=>{q.onsuccess=resolve;q.onerror=()=>reject(q.error)});const db=q.result
      const snapshot=()=>new Promise((resolve,reject)=>{const tx=db.transaction([...db.objectStoreNames]),v={};let count=0;for(const name of db.objectStoreNames){const r=tx.objectStore(name).getAll();r.onsuccess=()=>{v[name]=r.result;if(++count===db.objectStoreNames.length)resolve(v)}};tx.onabort=()=>reject(tx.error)})
      const before=await snapshot(),name=kind.startsWith('receipt')?'receipts':['proof','ciphertext'].includes(kind)?'inbox':'legacyNoteHistory'
@@ -80,10 +89,10 @@ export async function acceptReplayAuthor({page,fixture,reopen}){
      if(kind==='ciphertext'){const w=JSON.parse(row.wire_item);w.object.ciphertext=(w.object.ciphertext[0]==='A'?'B':'A')+w.object.ciphertext.slice(1);row.wire_item=JSON.stringify(w)}
      const write=rows=>new Promise((resolve,reject)=>{const tx=db.transaction(name,'readwrite');for(const r of rows)tx.objectStore(name).put(r);tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error)})
      await write([row]);const damaged=await snapshot();let failed=false
-     try{await adapter.run()}catch{failed=true}
+     try{if(recovery)await adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys);else await adapter.run()}catch{failed=true}
      if(JSON.stringify(await snapshot())!==JSON.stringify(damaged))throw Error('negative_changed_inventory')
      await write(before[name]);db.close();return failed
-   },kind),true)
+   },{kind,recovery}),true)
    assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  }
  await page.evaluate(()=>readerAuth.auth.logout())

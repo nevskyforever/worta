@@ -1,5 +1,48 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — own Content self-echo recovery (partial)
+
+Starting HEAD `dd3299406f4432b7dd9ca18f9d5b1bb0824819c2`, branch 6.0,
+working tree clean. BrowserV10Recovery now routes own ordinary codec8 Content
+only to the existing Content authority `prepareEcho`/`commitEcho`, with no peer
+fallback. The owner validates its genuine sealed outbox, receipt, encrypted
+source and authorship; recovery commits through replayStorage.ownerPort.
+Dormant recovery remains peer-only. The ownerPort obtains a fresh full snapshot,
+checks the server anchor and sequence, then compares the complete before-state
+within the IndexedDB transaction and atomically checks coverage. The same port
+is used by own Resolution; peer-history concurrent CAS was accepted previously,
+but an own-Resolution-specific concurrent test was NOT run.
+
+The Native Rust/three SQLite conflict and Resolution history followed by a real
+browser Content owner intent/seal/receipt/self-echo passed in Chromium via
+`recoverV10`: applied once, duplicate delivery, receipt/ciphertext/ordinal
+preservation, abort on inbox proof write, logout at that write, safe retry, and
+IndexedDB reopen. Corrupted receipt, authorship, parent/dependency, proof and
+ciphertext are rejected by recovery. The author publication and receipt used an
+isolated local transport; they are not an actual HTTP server publication, and
+an independently authored Rust Content self-echo remains untested. After the
+own event at sequence 6, applied coverage is 6 but the persisted authenticated
+prefix stays at 5: existing Prefix owner explicitly excludes P2/inbox9 from
+qualification. ACK remains 0. A further own recovery past this prefix barrier
+is not qualified. Do not change this policy without authenticating P2 throughout
+prefix calculation, coverage, restart and negative cases.
+
+Validation: focused Chromium Native test 1 passed; focused Vitest 152 passed;
+existing compiled Rust resolution self-echo test 1 passed; typecheck, frontend
+build, quick acceptance and diff check passed. Rust binary is the existing local
+build, not a fresh cross-platform Cargo build. Server-to-browser acceptance is
+NOT established; no reader-gate bypass, capability PUT, CI dispatch/poll or VPS.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`; registration
+and public release closed. Stage 2/6, Slice 4/5 PARTIAL, 2/10 readiness blockers
+closed; orphan dependency recovery remains open. Next: qualify real P2 Content
+self-echo in the existing Prefix owner, including exact source/proof/receipt
+and restart/rollback, then verify continuation through recoverV10; separately
+exercise a Native Rust authored own Content publication, and own Resolution
+specific concurrent CAS if an independent valid owner operation is available.
+The code and this checkpoint are intended for a single commit on 6.0; final SHA
+is that commit's `git rev-parse HEAD`. No pre-existing changes were present.
+
+
 ## 2026-11-05 — own Resolution recovery negative acceptance (partial)
 
 Starting HEAD `1f2cba7c04830f11b706f4ee65dc1dcea04b1bfa`. Native three-device

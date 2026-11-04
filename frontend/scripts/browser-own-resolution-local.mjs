@@ -84,6 +84,6 @@ try{
  }
  await page.evaluate(()=>readerAuth.auth.logout());assert.equal(await page.evaluate(async()=>{try{await adapter.run();return false}catch{return true}}),true)
  page=await reopen(page);await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
- page=await acceptReplayAuthor({page,fixture,reopen})
+ page=await acceptReplayAuthor({page,fixture,reopen,recovery:true})
  await page.evaluate(()=>adapter.store.close());console.log(JSON.stringify({pass:true,ownResolution:true}))
 }finally{await context?.close();await vite?.close();await rm(profile,{recursive:true,force:true})}
