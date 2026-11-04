@@ -1,5 +1,48 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — own Resolution recovery negative acceptance (partial)
+
+Starting HEAD `1f2cba7c04830f11b706f4ee65dc1dcea04b1bfa`. Native three-device
+SQLite/Chromium own Resolution fixture now invokes replayStorage.recoverV10
+for the actual source, conflict-group, Resolution inbox-proof and manifest
+abort injections, and for logout at the Resolution inbox write. Every failed
+attempt retains the original full snapshot; after logout a real profile reopen
+preserves it and the subsequent recoverV10 creates the proof and persisted
+prefix. Ciphertext, real receipt, author ordinal, no duplicate and ACK=0 are
+checked by the existing acceptance. Chromium **1 passed**, Rust **1 passed**,
+Vitest **141 passed**, typecheck/build and quick acceptance passed.
+
+Own-Resolution-specific stale CAS is NOT yet accepted. This fixture has only
+one own staged/accepted Resolution, so duplicate stage/receipt is idempotent;
+the previously accepted competing replay CAS belongs to a peer Resolution
+history. Next: extend the Native author fixture with an independently valid
+concurrent owner event and prove stale recoverV10 CAS, then own Content
+self-echo recovery. Local transport only; no server-to-browser acceptance.
+2/10 readiness blockers closed, orphan remains open; all security flags false.
+No capability PUT, CI dispatch/polling or VPS. Initial uncommitted checkpoint
+entry was preserved and included in this work.
+
+## 2026-11-05 — own Resolution recovery verification
+
+Requested starting SHA `90c3f04b361476e8116cd441ba4fac7c7c31be96` was
+already followed by `1f2cba7c04830f11b706f4ee65dc1dcea04b1bfa`, which
+implements own Resolution recovery via the existing publication-aware planner.
+Working tree was clean at entry. Rechecked Native SQLite/Chromium own
+Resolution receipt/self-echo/persisted prefix and independent competing replay
+prefix CAS: **2 passed**; Rust **1 passed**, Vitest **209 passed**, typecheck,
+build and quick acceptance passed. Original encrypted wire and receipt survive
+restart and duplicates. ACK remains zero.
+
+Scope: own Resolution happy path uses recoverV10; injected Resolution rollback,
+logout and corrupt-parent checks in this browser harness still call normal
+`applyOrderedContentUpdate`, and the stale prefix CAS scenario uses a peer
+Resolution history. Dedicated recovery-path own Resolution rollback/logout and
+stale CAS are not claimed. Local transport only; no server-to-browser acceptance.
+General orphan blocker remains open; 2/10 blockers closed. Security flags remain
+false; no capability PUT, reader gate bypass, CI dispatch or polling. Next: add
+the recovery-specific fault injections for own Resolution, then continue own
+Content recovery. This verification adds only this checkpoint update.
+
 ## 2026-11-05 — Slice 4/5: own Resolution through replay recovery
 
 Starting SHA `90c3f04b361476e8116cd441ba4fac7c7c31be96`. The replay-bound
