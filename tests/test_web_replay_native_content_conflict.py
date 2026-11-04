@@ -65,7 +65,7 @@ def test_native_two_project_bootstraps_share_account_transport(tmp_path):
     path, identity = provision(tmp_path, 'two-project-author', user, False)
     with sqlite3.connect(path) as db:
         for index, project in enumerate(('isolation-A', 'isolation-B')):
-            db.execute("INSERT INTO projects(id,name,infinite,unit,status,payload_json) VALUES(?,?,1,'symbols','active','{}')", (project, project))
+            db.execute("INSERT INTO projects(id,name,infinite,unit,status,payload_json) VALUES(?,?,1,'symbols','активен','{}')", (project, project))
             db.execute('INSERT INTO project_order VALUES(?,?)', (project, index))
     boots = {}
     for project in ('isolation-A', 'isolation-B'):
@@ -84,6 +84,47 @@ def test_native_two_project_bootstraps_share_account_transport(tmp_path):
         assert response.status_code == 200
     assert boots['isolation-A'] != boots['isolation-B']
     assert [item['event']['project_id'] for item in transport.items] == ['isolation-A', 'isolation-B']
+    # Apply the published metadata through the native receive owner before
+    # either project's structural writer is allowed to create Stage history.
+    cursor = 0
+    for item in transport.items:
+        row = dict(item['event']); row['source_device_id'] = row.pop('device_id'); row['envelope'] = item['object']
+        opened = _crypto_bridge(tmp_path, dict(action='metadata_open', canonical_user_id=user, amk=amk, item=item))
+        catalog_native(tmp_path, path, identity, user, action='metadata_authority', project_id=row['project_id'], step='receive',
+            command=dict(account_id=identity['local_account_id'], device_id=identity['device_id'], canonical_user_id=user,
+                         expected_cursor=cursor, next_cursor=row['server_sequence'], has_more=False, items=[row]), opened=opened)
+        cursor = row['server_sequence']
+    source = json.loads((Path(__file__).resolve().parents[1] / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
+    for project in ('isolation-A', 'isolation-B'):
+        stage_id = 'stage-' + project
+        with sqlite3.connect(path) as db:
+            db.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                       (stage_id, project, source['name'], source['goal'], int(source['infinite']), source['unit'], source['status'], source['created_at'], json.dumps(source)))
+            db.execute('INSERT INTO stage_order VALUES(?,?,0)', (stage_id, project))
+        structural(tmp_path, path, identity, user, 'begin', project_id=project)
+        emitted = publish_pending(transport, tmp_path, 'local-only', path, identity, user, amk, project_id=project)
+        assert len(emitted) == 1 and emitted[0]['header']['entity_type'] == 'stage'
+        pull_structure(transport, tmp_path, 'local-only', path, identity, user, amk)
+        structural(tmp_path, path, identity, user, 'advance', project_id=project)
+        order = publish_pending(transport, tmp_path, 'local-only', path, identity, user, amk, project_id=project)
+        assert len(order) == 1 and order[0]['header']['entity_type'] == 'stage_order'
+        pull_structure(transport, tmp_path, 'local-only', path, identity, user, amk)
+        structural(tmp_path, path, identity, user, 'advance', project_id=project)
+    assert [(item['event']['project_id'], item['event']['entity_type']) for item in transport.items[2:]] == [
+        ('isolation-A', 'stage'), ('isolation-A', 'stage_order'),
+        ('isolation-B', 'stage'), ('isolation-B', 'stage_order')]
+    fixture = {'scope': {'accountId': str(uuid4()), 'canonicalUserId': user, 'deviceId': str(uuid4())}, 'key': amk,
+        'anchor': {'registry': {'current_cursor': len(transport.items), 'projects': [
+            {'project_id': project, 'bootstrap_id': boots[project], 'origin_device_id': identity['device_id'],
+             'state': 'active', 'initial_event_count': 0, 'initial_max_server_sequence': 0}
+            for project in ('isolation-A', 'isolation-B')]},
+            'transport': {'supported_transport_version': 2, 'writer_transport_version': 3, 'cutover_epoch': 1}},
+        'items': transport.items}
+    fixture_path = tmp_path / 'two-project-browser.json'
+    fixture_path.write_text(json.dumps(fixture), encoding='utf-8'); fixture_path.chmod(0o600)
+    result = subprocess.run(['node', 'scripts/browser-two-project-recovery-local.mjs', str(fixture_path)],
+        cwd=Path(__file__).resolve().parents[1] / 'frontend', capture_output=True, text=True, timeout=180)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def native_stage_prefix(tmp_path, transport, a, ia, b, ib, user, amk):

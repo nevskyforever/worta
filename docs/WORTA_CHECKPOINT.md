@@ -1,5 +1,26 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: two-project browser recovery isolation
+
+Starting SHA `15970f9acac703eaa9d15c7fa29da7dae4451034`. One Native account
+publishes separate Metadata, Stage and StageOrder histories for two genuine
+project bootstraps. Persistent Chromium replay creates authenticated encrypted
+seeds and imports both bindings. With A's local binding deliberately removed,
+B's genuine binding cannot authorize A: recovery refuses without a completed
+event; A is restored through `importRecoveryProject`, and all six original
+events apply with coverage and unchanged ciphertext. Full inventory is compared
+before and after the negative attempt and after IndexedDB reopen. `applyStructure`
+then reauthenticates the complete owner history following another reopen.
+
+This tests B present while A is missing; it does not relabel B's binding as A or
+assert that both exist during the negative attempt. Test transport is local, not
+server-to-browser acceptance. Native SQLite/Chromium **1 passed**, Rust **1
+passed**, Vitest **227 passed** (Legacy3, Content continuation, recovery),
+typecheck/build and quick acceptance passed. Existing Stage rollback and
+resurrection regressions remain covered by the previous accepted runs.
+Orphan blocker remains OPEN for Resolution/prefix and other histories; 2/10
+closed, all security flags false. No capability PUT, CI dispatch or polling.
+
 ## 2026-11-05 — Slice 4/5: Native two-project bootstrap fixture (partial)
 
 Starting SHA `66ef7228a29be27efa8ceeb9633faa314c21c90e`. A focused Native
