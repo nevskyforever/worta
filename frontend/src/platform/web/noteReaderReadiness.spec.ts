@@ -22,7 +22,7 @@ for(const legacy of [true,false])for(const strategy of ['choose_version','manual
  const gToken=await f.g.prepare(scope);await f.g.commit(await f.g.prepareCommit(gToken))
  const spies=noNetwork(),before=f.before(),d=await f.inspector.inspect(scope)
  expect(d).toMatchObject({readOnly:true,ready:false,declarationAllowed:false,writerAuthorized:false,localEvidence:'authenticated_bounded_inventory',serverGate:'not_checked',localPrefix:{current:(before.cursors[0] as any).proven_prefix,candidate:(before.cursors[0] as any).pull_cursor,firstBlockingSequence:null}})
- expect(d.blockers).toHaveLength(9);expect(d.blockers).toContain('production_v10_reader_dispatch_incomplete');expect(d.blockers).not.toContain('own_resolution_author_chain_not_accepted')
+ expect(d.blockers).toHaveLength(8);expect(d.blockers).toContain('production_v10_reader_dispatch_incomplete');expect(d.blockers).not.toContain('own_resolution_author_chain_not_accepted')
  expect(f.before()).toEqual(before);spies.forEach(s=>expect(s).not.toHaveBeenCalled())
  expect(Object.keys(f.inspector)).toEqual(['inspect']);expect(Object.isFrozen(f.inspector)).toBe(true);expect(Object.isFrozen(d.blockers)).toBe(true)
  expect(JSON.stringify(d)).not.toMatch(/PRIVATE_|AUTHENTIC_SUCCESSOR|ciphertext|nonce|event_id|bootstrap_id|passphrase|token/)
@@ -30,7 +30,7 @@ for(const legacy of [true,false])for(const strategy of ['choose_version','manual
 })
 for(const route of [{compressed:false},{compressed:true},{stage:true,format:'plain' as const,compressed:true,order:true,mixedInventory:true}])it(`canonical ID1 and complete bounded prefix do not imply Note support ${JSON.stringify(route)}`,async()=>{
  const f=await fixture('keep_both',false,route),d=await f.inspector.inspect(scope)
- expect(d.ready).toBe(false);expect(d.declarationAllowed).toBe(false);expect(d.serverGate).toBe('not_checked');expect(d.blockers).toContain('tombstone_resurrection_not_accepted')
+ expect(d.ready).toBe(false);expect(d.declarationAllowed).toBe(false);expect(d.serverGate).toBe('not_checked');expect(d.blockers).not.toContain('tombstone_resurrection_not_accepted')
 })
 for(const kind of ['key','logout','profile','epoch'] as const)it(`revoked ${kind} cannot inspect fresh accepted evidence`,async()=>{
  const f=await fixture();await f.inspector.inspect(scope)
@@ -58,10 +58,11 @@ it('new unresolved independent conflict is authentic but stays blocked',async()=
  const before=f.before(),d=await f.inspector.inspect(scope)
  expect(d.localPrefix.firstBlockingSequence).toBe(fork.sequence);expect(d.blockers).toContain('local_prefix_blocked');expect(d.ready).toBe(false);expect(f.before()).toEqual(before)
 })
-it('received resurrection is retained with an explicit prefix barrier',async()=>{
- const f=await fixture('delete'),upsert=await f.receive(),before=f.before()
- await expect(f.runtime.apply(scope,upsert.sequence)).rejects.toThrow()
- const d=await f.inspector.inspect(scope);expect(d.localPrefix.firstBlockingSequence).toBe(upsert.sequence);expect(d.blockers).toContain('tombstone_resurrection_not_accepted');expect(f.before()).toEqual(before)
+it('accepted deleted Resolution continuation no longer reports the resurrection blocker',async()=>{
+ const f=await fixture('delete'),upsert=await f.receive()
+ expect(await f.runtime.apply(scope,upsert.sequence)).toBe('applied')
+ const before=f.before(),d=await f.inspector.inspect(scope)
+ expect(d.blockers).not.toContain('tombstone_resurrection_not_accepted');expect(d.blockers).toContain('orphan_dependency_recovery_not_accepted');expect(d.ready).toBe(false);expect(f.before()).toEqual(before)
 })
 it('missing sequence cannot be covered by an existing receipt or diagnostic',async()=>{
  const f=await fixture('choose_version',true);f.f.db.inbox=f.f.db.inbox.filter((r:any)=>r.server_sequence!==1)
@@ -82,7 +83,7 @@ for(const ready of [false,true])it(`explicit gate GET ready=${ready} never grant
  const get=vi.spyOn(encryptedSyncV3Api,'noteReaderGate').mockResolvedValue({ready,missing_devices:ready?0:1})
  const d=await f.inspector.inspect(scope,{checkServerGate:true})
  expect(d).toMatchObject({ready:false,declarationAllowed:false,writerAuthorized:false,serverGate:ready?'checked_account_ready':'checked_blocked',serverMissingDevices:ready?0:1})
- expect(d.blockers).toHaveLength(9);expect(d.blockers).toContain('server_note_gate_not_checked')
+ expect(d.blockers).toHaveLength(8);expect(d.blockers).toContain('server_note_gate_not_checked')
  expect(get).toHaveBeenCalledTimes(1);expect(put).not.toHaveBeenCalled();expect(f.before()).toEqual(before)
 })
 for(const kind of ['network','revocation','proof'] as const)it(`gate observation fails closed on ${kind}`,async()=>{

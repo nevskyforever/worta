@@ -1,5 +1,30 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: resurrection and orphan criteria separated
+
+Starting SHA `25ac040838799b0fd4c0b7c4ceefd21c4b49212b`.
+`tombstone_resurrection_not_accepted` is CLOSED after the genuine Native
+project/plain and Stage/plain/html resurrection acceptance. **2/10** blockers
+closed, Slice 4 remains PARTIAL. Previous entries incorrectly made this closure
+depend on the independently scoped `orphan_dependency_recovery_not_accepted`.
+
+The source/proof contract now records A/B/C precisely. A: interrupted or
+reordered transport recovers the contiguous prefix, as verified in persistent
+Chromium. B: a correctly emitted codec8 Note cannot have a lower account server
+sequence than its referenced Stage: Stage reference coverage requires its apply
+ledger, whose apply requires the original received server sequence. Local
+unpublished structural intents do not satisfy this requirement. The server
+assigns increasing account sequences and returns ordered pages; duplicates keep
+their original sequence. There is no Content StageOrder reference field.
+C: invalid/foreign Stage references fail closed; Stage/StageOrder negative owner
+tests remain accepted. This conclusion does not close general orphan recovery
+for other families, historical sources or account-wide orchestration.
+
+Reader readiness retains eight blockers and all three false security flags;
+the old diagnostic test expecting rejection of the now-accepted deleted
+Resolution continuation was updated to exercise the real owner and verify
+that the independent orphan blocker remains. No capability PUT or gate bypass.
+
 ## 2026-11-05 — Slice 4/5: Stage replay prefix interruption (partial)
 
 Starting SHA `48901de9137b75c853ac49fc0b5aed2d9b334300`. Real Native SQLite

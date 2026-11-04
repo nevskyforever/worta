@@ -968,6 +968,34 @@ The current readiness source names these unresolved acceptance items:
   accepted as complete for readiness.
 - `tombstone_resurrection_not_accepted`: resurrection after deletion is
   deliberately rejected by the current tested path.
+
+Qualification update (2026-11-05): the preceding list records the original
+gaps. The resurrection item is now accepted for the production codec8 sources
+project/plain and Stage/plain/html: a deleted choose-version Resolution result
+can have an ordinary update child. Ordinary tombstone-to-upsert remains a
+rejected transition. Native SQLite writers and persistent Chromium acceptance
+cover repeated cycles, original ciphertext, owner proofs, rollback and reopen.
+This closes the resurrection item independently of general orphan recovery.
+
+Dependency cases are distinct. (A) Incomplete or reordered network pages are
+rejected atomically and retried from the last contiguous receive cursor. The
+Native Stage resurrection acceptance reopens IndexedDB at both Stage and
+StageOrder delivery boundaries before completing the ordered history.
+(B) A correctly emitted codec8 Note cannot precede its referenced Stage in the
+account server sequence: `content_note_writer::frame` obtains the Stage tips;
+`content_note_sync::ready` calls `stage_sync::content_reference_ready`, whose
+`reference_coverage` requires an applied Stage ledger entry for every reference.
+Stage application itself requires the original inbox/server sequence. Server
+`services.py` assigns a monotonically increasing account sequence on insertion;
+`repositories.py` pulls by that sequence and duplicates retain the original
+identity/sequence. A not-yet-published local Stage is insufficient authority.
+Codec8 contains no StageOrder event reference. This conclusion is specific to
+these writers; it does not close general Metadata/Stage/Note orphan recovery.
+(C) Unknown, foreign-project or forged Stage refs must fail owner authentication
+without source, proof or coverage changes; they are not recoverable by accepting
+an unrelated Stage. Existing Content Stage and StageOrder negative tests retain
+these barriers. No readiness grant or capability lifecycle follows from this
+qualification update.
 - `further_resolution_chains_not_accepted` and
   `local_author_after_resolution_not_accepted`: later Resolution lineage and
   local-author continuation remain outside accepted readiness.

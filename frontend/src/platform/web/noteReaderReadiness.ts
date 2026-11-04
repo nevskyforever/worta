@@ -16,7 +16,6 @@ const blockers=Object.freeze([
  'production_v10_reader_dispatch_incomplete',
  'transport_v10_page_replay_incomplete',
  'orphan_dependency_recovery_not_accepted',
- 'tombstone_resurrection_not_accepted',
  'further_resolution_chains_not_accepted',
  'local_author_after_resolution_not_accepted',
  'own_content_self_echo_not_qualified',

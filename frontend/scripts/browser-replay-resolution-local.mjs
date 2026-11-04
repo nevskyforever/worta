@@ -277,7 +277,7 @@ try {
     }, fixture)
     assert.equal(result.serverGate, 'checked_blocked')
     assert.equal(result.ready, false); assert.equal(result.declarationAllowed, false); assert.equal(result.writerAuthorized, false)
-    assert.equal(result.blockers.length, 9)
+    assert.equal(result.blockers.length, 8)
     assert.equal(result.blockers.includes('server_note_gate_not_checked'), true)
     offlineGate = true
     assert.equal(await page.evaluate(async () => {
