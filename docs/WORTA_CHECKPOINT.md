@@ -1,5 +1,27 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: Stage replay prefix interruption (partial)
+
+Starting SHA `48901de9137b75c853ac49fc0b5aed2d9b334300`. Real Native SQLite
+Stage/plain and Stage/html resurrection histories now additionally test
+attempting to deliver the original encrypted Note before the Stage and before
+the StageOrder server-sequence positions. Chromium refuses each page without
+writes, reopens IndexedDB at both boundaries, receives the missing prefix in
+server order, reopens again, and completes the authenticated resurrection.
+Both Chromium scenarios **passed**; Rust Stage orphan-retry **1 passed**, focused
+Vitest **221 passed**, typecheck/build and quick acceptance passed.
+
+This proves recovery from interrupted ordered page delivery, not acceptance of
+a later-sequenced Stage dependency. `replayMetadata.ts` requires contiguous
+server sequence, and codec8 `content_note_writer.rs` records `stage_event_ids`
+but no StageOrder event dependency; it requires a Stage tip before emitting the
+Note. A claim that the same authentic event directly depends on a later
+StageOrder event would require a different contract. The distinct
+`orphan_dependency_recovery_not_accepted` remains open. Resurrection blocker
+also remains open pending explicit qualification of actual orphan/foreign Stage
+dependencies and their recovery; no criteria were removed. **1/10** closed.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`.
+
 ## 2026-11-05 — Slice 4/5: Native Stage resurrection Chromium acceptance
 
 Starting SHA `0e66a351c9d8d047acd08b263c9d937c2e4d48b6`. Native structural

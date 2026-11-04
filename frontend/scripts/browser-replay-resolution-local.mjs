@@ -87,7 +87,7 @@ try {
         const page = items.slice(since, since + Math.min(limit, 2)), next = since + page.length
         return JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items: page, next_cursor: next, has_more: next < items.length })
       }
-      const store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true)
+      let store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true)
       if (f.items && !(await store.read()).manifest) {
         let state = await store.start(f.anchor)
         const swapped = [...items]; [swapped[2], swapped[3]] = [swapped[3], swapped[2]]
@@ -95,7 +95,25 @@ try {
         try { await store.commitPage(state, 0, JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3,
           items: swapped, next_cursor: items.length, has_more: false })) } catch { rejected = true }
         if (!rejected || JSON.stringify(await store.read()) !== JSON.stringify(state)) throw Error('out_of_order_not_atomic')
-        state = await store.commitPage(state, 0, JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3,
+        if (f.stageRoute) {
+          const page = (items, next, more) => JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items, next_cursor: next, has_more: more })
+          state = await store.commitPage(state, 0, page(items.slice(0, 1), 1, true))
+          const note = items.find(item => item.event.entity_type === 'note')
+          for (const next of [1, 2]) {
+            const before = await store.read()
+            let refused = false
+            try { await store.commitPage(before, next, page([note], note.event.server_sequence, true)) } catch { refused = true }
+            if (!refused || JSON.stringify(await store.read()) !== JSON.stringify(before)) throw Error('missing_stage_not_atomic')
+            await store.close()
+            store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true)
+            if (JSON.stringify(await store.read()) !== JSON.stringify(before)) throw Error('missing_stage_reopen_changed')
+            state = await store.commitPage(await store.read(), next, page(items.slice(next, next + 1), next + 1, true))
+          }
+          await store.close()
+          store = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true)
+          if (JSON.stringify(await store.read()) !== JSON.stringify(state)) throw Error('stage_prefix_reopen_changed')
+          state = await store.commitPage(state, 3, page(items.slice(3), items.length, false))
+        } else state = await store.commitPage(state, 0, JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3,
           items, next_cursor: items.length, has_more: false }))
         await store.finish(state)
       }
