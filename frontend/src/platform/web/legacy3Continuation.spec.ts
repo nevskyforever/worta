@@ -13,6 +13,15 @@ import {amk} from './bootstrap.testFixture'
 afterEach(()=>vi.restoreAllMocks())
 const strategies=['choose_version','manual_merge','delete','keep_both'] as const
 const setup=(strategy:typeof strategies[number]='keep_both')=>continuationFixture(strategy,true,undefined,false,2,true)
+it('Content3 resurrection is authorized only by a Content Resolution root, never a Legacy3 root',async()=>{
+ const legacy=await setup('delete'),content=await continuationFixture('delete',false,{format:'plain'})
+ const child=await legacy.receive({protocol:3,unchecked:true}),before=legacy.before()
+ await expect(legacy.runtime.apply(scope,child.sequence)).rejects.toMatchObject({code:'unsupported_local_source'})
+ expect(legacy.before()).toEqual(before)
+ const accepted=await content.receive({protocol:3})
+ expect(await content.runtime.apply(scope,accepted.sequence)).toBe('applied')
+ expect((await content.runtime.history(scope)).resolutions).toBe(1)
+})
 const inventory=(f:Awaited<ReturnType<typeof setup>>)=>{const d=f.f.db;return{history:d.legacyNoteHistory!,rows:d.inbox,bindings:d.projectBindings,owners:d.ownerHeads!,out:d.outbox,receipts:d.receipts,projects:d.localProjects!,localNotes:d.localNotes!,intents:d.legacyNoteIntents!,checkpoints:d.cursors,cursor:d.cursors[0] as any}}
 for(const protocol of [2,3] as const)for(const strategy of strategies)it(`Legacy3 ${strategy} -> genuine ordinary${protocol}, retained role, later history and exact replay`,async()=>{
  const f=await setup(strategy),before=f.before(),root=f.received

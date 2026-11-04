@@ -1,5 +1,46 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: Legacy3 resurrection isolation regression
+
+Starting SHA `422d994aab35e50c93f1e99ae87989493e698d9e`, branch 6.0.
+The Content resurrection guard checked the child's codec but omitted the root's
+transport family, allowing ordinary3 after a deleted Legacy3 Resolution despite
+H's frozen no-resurrection contract. Apply and historical reauthentication now
+require `content_note_resolution_v2` on the immediate Resolution parent. The
+existing Legacy3 negative test is unchanged. A paired regression verifies that
+the same ordinary3 transition rejects under Legacy3 but succeeds and history
+authenticates under a real Content root. No wire or proof format changes.
+
+Focused four-file Vitest selection: 215 passed before the added paired test;
+final full Legacy3 selection **97 passed**, Native SQLite/Chromium Stage/plain
+resurrection **1 passed**. Typecheck/build and quick
+acceptance passed. Reader qualification stays PARTIAL, 2/10 blockers closed;
+ready=false, declarationAllowed=false, writerAuthorized=false. No capability
+PUT or reader-gate bypass. CI was neither launched nor polled.
+Unrelated existing browser-replay-resolution-local.mjs test additions remain
+uncommitted and preserved. Next task is the remaining recovery adapter wrong
+sequence/foreign-binding negative acceptance, then Resolution/prefix recovery.
+
+## 2026-11-05 — Slice 4/5: recovery adapter acceptance continuation
+
+Starting SHA `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`; validated bounded
+adapter committed and pushed as `422d994a` (Final HEAD). Further Chromium test
+changes and this checkpoint are uncommitted. A Native Stage/plain history now
+also verifies concurrent replay-manifest revision drift during the server check:
+recovery returns retryable dependency_unavailable, writes no owner proof or
+coverage, then after restoring the externally changed manifest, reopen/retry
+succeeds. Corrupt Stage proof before recovery is rejected and unchanged history
+is restored; nonexistent project import is refused. Chromium **1 passed** with
+local in-process transport. The latter is not a cross-project binding test.
+
+Rust **1 passed**, Vitest **89 passed**, typecheck/build and quick acceptance
+passed. Required isolated HTTP/PG acceptance, a genuine foreign binding and
+adapter wrong-sequence rejection remain unverified. The independent orphan
+blocker stays OPEN (2/10 closed); ready=false, declarationAllowed=false,
+writerAuthorized=false. No capability PUT or CI polling. Next: complete those
+specific tests on real replayStorage/IndexedDB and server gate, then commit
+remaining test changes; Resolution/prefix recovery remains a separate task.
+
 ## 2026-11-05 — Slice 4/5: recovery negative acceptance (partial)
 
 Starting/Final HEAD `d473d2fd6c34168cde5327ed6688b0cf0b679ee5`; changes remain
