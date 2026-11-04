@@ -1,5 +1,22 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: own Resolution through replay recovery
+
+Starting SHA `90c3f04b361476e8116cd441ba4fac7c7c31be96`. The replay-bound
+BrowserV10Recovery admits an own event only if authenticated codec8 classifies
+it as Resolution; the existing Resolution planner validates the actual sealed
+outbox, receipt, wire, group and parents. Other own events remain blocked, and
+the dormant non-replay recovery keeps its peer-only rule.
+
+Native three-device SQLite/Chromium own Resolution acceptance **1 passed**:
+real writer choice, sealed source, receipt and self-echo apply through recoverV10;
+actual proven_prefix=5 persists, ACK=0, reopen, repeated delivery, proof/wire/
+receipt tampering and author continuation tests pass. Rust **1 passed**, focused
+Vitest **238 passed**, typecheck/build and quick acceptance passed. Local transport
+only; server-to-browser qualification is not claimed. General orphan recovery,
+other own Content recovery routes and full reader qualification remain open.
+Readiness 2/10 closed, all security flags false; no capability PUT or CI polling.
+
 ## 2026-11-05 — Slice 4/5: persisted prefix accepted with competing replay CAS
 
 Starting SHA `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`. Persisted prefix

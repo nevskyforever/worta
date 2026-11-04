@@ -115,7 +115,8 @@ export class BrowserV10Recovery {
      if(result.applied.length===max){result.blocker={sequence:row.server_sequence,kind:'budget_exhausted',retryable:true};break}
      const block=(kind:RecoveryBlocker['kind'],retryable=false)=>{result.blocker={sequence:row.server_sequence,kind,retryable}}
      const wire=JSON.parse(row.wire_item),e=wire.event
-     if(e.device_id===s.deviceId){block('unsupported_route');break} // No own author/self-echo activation.
+     const own=e.device_id===s.deviceId
+     if(own&&!this.ownerTransaction){block('unsupported_route');break} // Dormant recovery keeps its frozen peer-only contract.
      let route:Route
      if(e.entity_type==='note'){
       const classified=await step(lease.use(async amk=>{
@@ -131,6 +132,9 @@ export class BrowserV10Recovery {
        }finally{nonce.fill(0);ciphertext.fill(0)}
       }))
       if(classified===null){block('unsupported_route');break}
+      // Only the Resolution planner may authenticate an own publication and
+      // its sealed wire/receipt. Never treat another own event as a peer event.
+      if(own&&classified!=='resolution'){block('unsupported_route');break}
       if(resolvingBarrier&&classified!=='resolution'){block('unresolved_fork');break}
       if(classified==='resolution'){
        if(hasResolution(v)&&!this.ownerTransaction){block('unsupported_generation');break} // Dormant legacy contract stays frozen.
@@ -144,6 +148,7 @@ export class BrowserV10Recovery {
        }else route=e.operation==='event'?'content':'legacy'
       }
      }else{
+      if(own){block('unsupported_route');break}
       if(hasResolution(v)){block('unsupported_route');break}
       if(e.entity_type==='project_metadata')route='metadata'
       else if(e.entity_type==='stage')route='stage'

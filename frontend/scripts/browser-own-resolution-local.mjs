@@ -48,7 +48,10 @@ try{
  const staged=await page.evaluate(()=>adapter.store.read())
  for(const phase of ['source','group','outcome','manifest']){assert.equal(await failWrite(phase),true);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged)}
  assert.equal(await failWrite('revoked'),true);page=await reopen(page);assert.deepEqual(await page.evaluate(()=>adapter.store.read()),staged)
- await page.evaluate(()=>adapter.run());const applied=await page.evaluate(()=>adapter.store.read())
+ const recovered=await page.evaluate(()=>adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys))
+ assert.equal(recovered.applied[0]?.route,'resolution',JSON.stringify(recovered));assert.equal(recovered.ready,false)
+ const applied=await page.evaluate(()=>adapter.store.read())
+ assert.equal(applied.checkpoint.proven_prefix,5);assert.equal(applied.checkpoint.ack_cursor,0)
  assert.equal(applied.rows[4].state,'note_resolution_proven');assert.equal(applied.manifest.applied_cursor,5)
  assert.equal(applied.noteHistory.find(r=>r.record_kind==='resolution').source_device_id,fixture.scope.deviceId)
  const selected=await page.evaluate(async()=>{const local=adapter.store.contentAuthorOwner(readerAuth.auth,readerAuth.bindings,readerAuth.keys).local,s=await adapter.store.read(),project=s.sources[0].project_id,source=await local.readSnapshot(scope,project);return local.withDecryptedSnapshot(scope,source.token,async value=>{const {revision:_revision,...note}=value.notes[0].note;return note})});assert.deepEqual(selected,fixture.selectedNote)
