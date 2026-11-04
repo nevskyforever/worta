@@ -135,6 +135,13 @@ try {
   assert.equal(result.writerAuthorized, false)
   assert.equal(result.projectOpened, false)
   const before = await page.evaluate(() => adapter.store.read())
+  if (fixture.stageRoute) {
+    for (const [kind, state, proof] of [['stage', 'stage_proven', 'stage_proof'], ['stage_order', 'stage_order_proven', 'stage_order_proof']]) {
+      const row = before.rows.find(value => JSON.parse(value.wire_item).event.entity_type === kind)
+      assert.equal(row?.state, state)
+      assert.ok(row?.[proof])
+    }
+  }
   assert.ok(await page.evaluate(() => window.pageReplayCalls > 0))
   for (const kind of ['wire', 'missing', 'reorder', 'future', 'protocol', 'abort']) {
     assert.equal(await page.evaluate(async kind => {
@@ -162,7 +169,8 @@ try {
   if (fixture.expectedContents) {
     const bothPreserved = await page.evaluate(async f => {
       const { openHistoryCandidate } = await import('/src/platform/web/noteHistory.ts')
-      const state = await adapter.store.read(), group = state.noteHistory.find(row => row.record_kind === 'group' && row.common_parent_event_id === f.items[1].event.event_id)
+      const genesis = f.items.find(item => item.event.entity_type === 'note' && item.event.revision === 1)
+      const state = await adapter.store.read(), group = state.noteHistory.find(row => row.record_kind === 'group' && row.common_parent_event_id === genesis.event.event_id)
       if (!group || group.members.length !== 2) return false
       const values = []
       for (const member of group.members) {
@@ -179,6 +187,26 @@ try {
   page = await launch(); await attach(page)
   assert.equal((await page.evaluate(() => adapter.run())).kind, expectedKind)
   assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+  if (fixture.stageRoute) {
+    for (const kind of ['stage', 'stage_order']) {
+      assert.equal(await page.evaluate(async kind => {
+        const original = structuredClone((await adapter.store.read()).rows.find(row => JSON.parse(row.wire_item).event.entity_type === kind))
+        const damaged = structuredClone(original)
+        const proof = kind === 'stage' ? damaged.stage_proof : damaged.stage_order_proof
+        proof.outcome_digest = '0'.repeat(64)
+        const request = indexedDB.open('worta-web-replay', 6)
+        await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+        const db = request.result
+        const put = row => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+        await put(damaged)
+        let refused = false
+        try { await adapter.run() } catch { refused = true }
+        await put(original); db.close()
+        return refused
+      }, kind), true)
+      assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+    }
+  }
   for (const kind of ['proof', 'ciphertext']) {
     const rejected = await page.evaluate(async ({ kind, eventId }) => {
       const rows = (await adapter.store.read()).rows

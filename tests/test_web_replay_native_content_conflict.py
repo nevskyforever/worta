@@ -15,6 +15,8 @@ from nfprogress.core.sqlite.connection import register_remote_apply_authorizatio
 from test_cloud_c15_headless_cross_runtime import PROJECT_ID
 from test_cloud_c18_authority_cross_runtime import provision, bootstrap, native, publish, sync
 from test_cloud_c18_content_note_acceptance import NOW, content, emit, receive
+from test_cloud_c18_structural_cross_runtime import structural
+from test_cloud_c18_structural_integration import publish_pending, pull_structure
 
 
 class Response:
@@ -55,7 +57,43 @@ class LocalTransport:
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False, resurrection=False, repeat_resurrection=False):
+def native_stage_prefix(tmp_path, transport, a, ia, b, ib, user, amk):
+    """Create and publish a Stage through the actual SQLite structural writer."""
+    source = json.loads((Path(__file__).resolve().parents[1] / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
+    with sqlite3.connect(a) as db:
+        db.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                   ('S1', PROJECT_ID, source['name'], source['goal'], int(source['infinite']), source['unit'], source['status'], source['created_at'], json.dumps(source)))
+        db.execute('INSERT INTO stage_order VALUES(?,?,0)', ('S1', PROJECT_ID))
+    structural(tmp_path, a, ia, user, 'begin')
+    stage = publish_pending(transport, tmp_path, 'local-only', a, ia, user, amk)
+    assert len(stage) == 1 and stage[0]['header']['entity_type'] == 'stage'
+    for path, identity in ((a, ia), (b, ib)):
+        pull_structure(transport, tmp_path, 'local-only', path, identity, user, amk)
+    order = publish_pending(transport, tmp_path, 'local-only', a, ia, user, amk)
+    assert len(order) == 1 and order[0]['header']['entity_type'] == 'stage_order'
+    for path, identity in ((a, ia), (b, ib)):
+        pull_structure(transport, tmp_path, 'local-only', path, identity, user, amk)
+    return stage[0], order[0]
+
+
+def test_native_stage_prefix_writer(tmp_path):
+    transport, user, amk = LocalTransport(), str(uuid4()), list(range(32))
+    a, ia = provision(tmp_path, 'stage-a', user, True)
+    b, ib = provision(tmp_path, 'stage-b', user, False)
+    boot = bootstrap(tmp_path, a, ia, 'bootstrap_prepare')['bootstrap_id']
+    bootstrap(tmp_path, a, ia, 'bootstrap_prepare_capture', bootstrap_id=boot, remote_high_water=0)
+    bootstrap(tmp_path, a, ia, 'bootstrap_confirm_active', bootstrap_id=boot, remote_high_water=0)
+    native(tmp_path, a, ia, user, 'begin')
+    metadata, _ = publish(transport, tmp_path, 'local-only', a, ia, user, amk)
+    assert sync(transport, tmp_path, 'local-only', a, ia, user, amk)['view']['state'] == 'active'
+    bootstrap(tmp_path, b, ib, 'bootstrap_import', bootstrap_id=boot, remote_high_water=1,
+              display_name=metadata['metadata']['name'], authenticated_metadata=metadata['metadata'])
+    assert sync(transport, tmp_path, 'local-only', b, ib, user, amk)['view']['state'] == 'active'
+    native_stage_prefix(tmp_path, transport, a, ia, b, ib, user, amk)
+    assert [item['event']['entity_type'] for item in transport.items] == ['project_metadata', 'stage', 'stage_order']
+
+
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False, resurrection=False, repeat_resurrection=False, stage_format=None):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -82,14 +120,17 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         assert sync(transport, tmp_path, 'local-only', c, ic, user, amk)['view']['state'] == 'active'
         peers.append((c, ic))
 
-    content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
+    if stage_format:
+        native_stage_prefix(tmp_path, transport, a, ia, b, ib, user, amk)
+    stage_id = 'S1' if stage_format else None
+    content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=stage_id, content_format=stage_format or 'plain')
     content(tmp_path, a, ia, user, 'begin')
     assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
     for path, identity in peers:
         assert len(receive(transport, tmp_path, 'local-only', path, identity, user, amk)) == 1
 
     for path, identity, text in ((a, ia, 'NATIVE_PRIVATE_A'), (b, ib, 'NATIVE_PRIVATE_B')):
-        content(tmp_path, path, identity, user, 'edit', note_id='native-conflict', patch={'content': text})
+        content(tmp_path, path, identity, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': text})
     for path, identity in ((a, ia), (b, ib)):
         assert len(emit(transport, tmp_path, 'local-only', path, identity, user, amk)) == 1
     for path, identity in peers:
@@ -99,23 +140,24 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         assert {version['event_id'] for version in groups[0]['versions']} == {
             item['event']['event_id'] for item in transport.items[-2:]}
 
-    assert len(transport.items) == 4
-    assert [item['event']['revision'] for item in transport.items[1:]] == [1, 2, 2]
+    assert len(transport.items) == (6 if stage_format else 4)
+    assert [item['event']['revision'] for item in transport.items[-3:]] == [1, 2, 2]
     assert [item['event']['device_id'] for item in transport.items[-2:]] == [ia['device_id'], ib['device_id']]
     assert all(b'NATIVE_PRIVATE_' not in json.dumps(item).encode() for item in transport.items)
-    anchor = {'registry': {'current_cursor': 4, 'projects': [{'project_id': PROJECT_ID, 'bootstrap_id': boot,
+    anchor = {'registry': {'current_cursor': len(transport.items), 'projects': [{'project_id': PROJECT_ID, 'bootstrap_id': boot,
         'origin_device_id': ia['device_id'], 'state': 'active', 'initial_event_count': 0, 'initial_max_server_sequence': 0}]},
         'transport': {'supported_transport_version': 2, 'writer_transport_version': 3, 'cutover_epoch': 1}}
     fixture = {'scope': {'accountId': str(uuid4()), 'canonicalUserId': user, 'deviceId': str(uuid4())},
                'key': amk, 'anchor': anchor, 'items': transport.items,
-               'expectedContents': ['NATIVE_PRIVATE_A', 'NATIVE_PRIVATE_B']}
+               'expectedContents': ['NATIVE_PRIVATE_A', 'NATIVE_PRIVATE_B'], 'stageRoute': bool(stage_format)}
     path = tmp_path / 'native-browser-fixture.json'
     path.write_text(json.dumps(fixture), encoding='utf-8'); path.chmod(0o600)
     root = Path(__file__).resolve().parents[1]
-    result = subprocess.run(['node', 'scripts/browser-replay-conflict-local.mjs', str(path)], cwd=root / 'frontend',
-                            capture_output=True, text=True, timeout=120)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+    if not stage_format:
+        result = subprocess.run(['node', 'scripts/browser-replay-conflict-local.mjs', str(path)], cwd=root / 'frontend',
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
     # Exercise the real Desktop choice only after both devices have retained
     # the peer conflict; then deliver the genuine emitted wire to Chromium.
@@ -146,17 +188,18 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
             saved = json.loads(db.execute("SELECT payload_json FROM notes WHERE id='native-conflict'").fetchone()[0])
         assert saved['content'] == selected_note['content']
 
-    fixture['anchor']['registry']['current_cursor'] = 5
+    fixture['anchor']['registry']['current_cursor'] = len(transport.items)
     fixture['items'] = transport.items
     fixture['selectedNote'] = selected_note
     path.write_text(json.dumps(fixture), encoding='utf-8')
-    result = subprocess.run(['node', 'scripts/browser-own-resolution-local.mjs' if own_resolution else 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
-                            capture_output=True, text=True, timeout=120)
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+    if not stage_format:
+        result = subprocess.run(['node', 'scripts/browser-own-resolution-local.mjs' if own_resolution else 'scripts/browser-replay-resolution-local.mjs', str(path)], cwd=root / 'frontend',
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
 
     if successor:
-        content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_PRIVATE_AFTER_RESOLUTION'})
+        content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': 'NATIVE_PRIVATE_AFTER_RESOLUTION'})
         assert len(emit(transport, tmp_path, 'local-only', b, ib, user, amk)) == 1
         for db_path, identity in ((a, ia), (b, ib)):
             receive(transport, tmp_path, 'local-only', db_path, identity, user, amk)
@@ -196,16 +239,16 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         source_revision = 4
         for generation in range(2, generations + 1):
             if mixed:
-                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_LINEAR_{generation}'})
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': f'NATIVE_LINEAR_{generation}'})
                 assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
                 for path_, identity_ in ((a, ia), (b, ib)):
                     receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
                 source_revision += 1
             if mixed:
-                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
+                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=stage_id)
             else:
-                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_GENERATION_{generation}_A'})
-            content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': f'NATIVE_GENERATION_{generation}_B'})
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': f'NATIVE_GENERATION_{generation}_A'})
+            content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': f'NATIVE_GENERATION_{generation}_B'})
             for path_, identity_ in ((a, ia), (b, ib)):
                 assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
             source_revision += 1
@@ -222,7 +265,7 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
                 assert content(tmp_path, path_, identity_, user, 'conflicts') == []
         if resurrection:
-            content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
+            content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=stage_id, content_format=stage_format or 'plain')
             pending = content(tmp_path, a, ia, user, 'pending')
             assert len(pending) == 1
             restored = json.loads(bytes(pending[0]['frame'][20:]))['event']
@@ -233,13 +276,13 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
             resurrection_sequence = len(transport.items)
             for path_, identity_ in ((a, ia), (b, ib)):
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
-            content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
+            content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
             assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
             for path_, identity_ in ((a, ia), (b, ib)):
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
             if repeat_resurrection:
-                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
-                content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_SECOND_FORK'})
+                content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=stage_id)
+                content(tmp_path, b, ib, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': 'NATIVE_SECOND_FORK'})
                 for path_, identity_ in ((a, ia), (b, ib)):
                     assert len(emit(transport, tmp_path, 'local-only', path_, identity_, user, amk)) == 1
                 for path_, identity_ in ((a, ia), (b, ib)):
@@ -251,17 +294,17 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
                 resolution_id = transport.items[-1]['event']['event_id']
                 for path_, identity_ in ((a, ia), (b, ib)):
                     receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
-                content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=None, content_format='plain')
+                content(tmp_path, a, ia, user, 'create', note_id='native-conflict', stage_id=stage_id, content_format=stage_format or 'plain')
                 restored_again = json.loads(bytes(content(tmp_path, a, ia, user, 'pending')[0]['frame'][20:]))['event']
                 assert restored_again['mutation'] == 'update' and restored_again['header']['parent_event_id'] == resolution_id
                 assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
                 for path_, identity_ in ((a, ia), (b, ib)):
                     receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
-                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
+                content(tmp_path, a, ia, user, 'edit', note_id='native-conflict', stage_id=stage_id, patch={'content': 'NATIVE_RESURRECTED_UPDATE'})
                 assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
                 generations += 1
         elif mixed:
-            content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=None)
+            content(tmp_path, a, ia, user, 'delete', note_id='native-conflict', stage_id=stage_id)
             assert len(emit(transport, tmp_path, 'local-only', a, ia, user, amk)) == 1
             for path_, identity_ in ((a, ia), (b, ib)):
                 receive(transport, tmp_path, 'local-only', path_, identity_, user, amk)
@@ -340,3 +383,11 @@ def test_native_resolution_browser_replay_author_self_echo(tmp_path):
 
 def test_native_own_resolution_author_receipt_self_echo(tmp_path):
     native_content_resolution_history(tmp_path, own_resolution=True)
+
+
+def test_native_stage_plain_resurrection_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True, stage_format='plain')
+
+
+def test_native_stage_html_resurrection_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True, stage_format='html')

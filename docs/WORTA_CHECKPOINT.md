@@ -1,5 +1,25 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: Native Stage resurrection Chromium acceptance
+
+Starting SHA `0e66a351c9d8d047acd08b263c9d937c2e4d48b6`. Native structural
+migration writers publish genuine Stage and StageOrder events into the existing
+isolated transport and two independent SQLite profiles. Both Stage/plain and
+Stage/html then exercise real Content conflict, choose-version Resolution with
+a deleted result, resurrection and a further update in Chromium replay v6.
+Both pass with an abort at resurrection, persistent IndexedDB reopen, repeat
+delivery, original ciphertext comparison and actual Stage/StageOrder and Note
+owner proofs. Corrupted Stage, StageOrder and resurrection proofs or ciphertext
+are rejected. Local transport loss and logout are covered; no capability PUT.
+
+Focused Rust **5 passed**, Vitest **157 passed**, Stage Chromium **2 passed**;
+frontend typecheck/build and quick acceptance passed. This does not establish
+late-arriving Stage dependency recovery in Chromium: the accepted histories
+deliver Stage and StageOrder before their dependent Note. The existing
+`tombstone_resurrection_not_accepted` remains open pending that recovery and
+invalid Stage dependency acceptance; readiness remains **1/10 blockers closed**.
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`.
+
 ## 2026-11-04 — Slice 4/5: Stage prefix admission for Resolution (partial)
 
 Starting SHA `66a4779b6087e845312ecc6c6a06df5fea77bff5`.

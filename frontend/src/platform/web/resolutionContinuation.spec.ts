@@ -153,8 +153,8 @@ it('corrupted earlier ordinary proof cannot be hidden by the Resolution closure'
  await expect(f.runtime.apply(scope,child.sequence)).rejects.toThrow();expect(f.before()).toEqual(before)
 })
 
-it('recreates a Content note only from the authenticated deleted Resolution result',async()=>{
- const f=await continuationFixture('delete',false,{format:'plain'}),child=await f.receive(),before=f.before()
+it.each([{format:'plain' as const}, {stage:true,format:'plain' as const}, {stage:true,format:'html' as const}])('recreates a Content note only from the authenticated deleted Resolution result: $format, stage=$stage',async route=>{
+ const f=await continuationFixture('delete',false,route),child=await f.receive(),before=f.before()
  const wire=(f.f.db.inbox.find((r:any)=>r.event_id===child.event_id) as any).wire_item
  expect(await f.runtime.apply(scope,child.sequence)).toBe('applied')
  expect((f.f.db.inbox.find((r:any)=>r.event_id===child.event_id) as any).wire_item).toBe(wire)
