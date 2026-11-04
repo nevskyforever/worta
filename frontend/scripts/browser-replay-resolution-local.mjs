@@ -11,6 +11,7 @@ const expectedCursor = fixture.interruptSequence ? fixture.interruptSequence - 1
 const expectedKind = fixture.repeated ? 'bounded_resolution_chain_applied' : fixture.successor ? 'bounded_resolution_continuation_applied' : 'bounded_resolution_owner_applied'
 let context, vite, offlineGate = false, lastGateAuthorization
 const gateRequests = []
+const prefixCasComplete = Symbol('prefix CAS acceptance complete')
 try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } })
   await vite.listen()
@@ -276,6 +277,87 @@ try {
         page = await launch(); await attach(page)
         assert.deepEqual(await page.evaluate(() => adapter.store.read()), pending)
       }
+      if (sequence === 7) {
+        const original = await page.evaluate(() => adapter.store.read())
+        const refused = await page.evaluate(async () => {
+          const put = IDBObjectStore.prototype.put; let hit = false
+          IDBObjectStore.prototype.put = function(value, ...args) {
+            const request = put.call(this, value, ...args)
+            if (this.name === 'cursors' && value.proven_prefix > 0) { hit = true; request.addEventListener('success', () => this.transaction.abort(), { once: true }) }
+            return request
+          }
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+          catch { return hit } finally { IDBObjectStore.prototype.put = put }
+        })
+        assert.equal(refused, true)
+        const after = await page.evaluate(() => adapter.store.read())
+        assert.equal(after.checkpoint.proven_prefix, original.checkpoint.proven_prefix)
+        assert.equal(after.checkpoint.ack_cursor, 0)
+        assert.equal(after.rows.find(row => row.server_sequence === 7).state, 'note_resolution_proven')
+        assert.deepEqual(after.rows.map(row => JSON.parse(row.wire_item)), fixture.items)
+        await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), after)
+        assert.equal(await page.evaluate(async () => {
+          const { BrowserResolutionPrefixRuntime } = await import('/src/platform/web/resolutionPrefix.ts')
+          const prepare = BrowserResolutionPrefixRuntime.prototype.prepareCommit
+          let hit = false
+          BrowserResolutionPrefixRuntime.prototype.prepareCommit = async function(token) {
+            const result = await prepare.call(this, token); hit = true
+            window.prefixLogoutSnapshot = await adapter.store.read()
+            await readerAuth.auth.logout()
+            return result
+          }
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+          catch { return hit } finally { BrowserResolutionPrefixRuntime.prototype.prepareCommit = prepare }
+        }), true)
+        const beforeLogout = await page.evaluate(() => window.prefixLogoutSnapshot)
+        assert.equal(beforeLogout.checkpoint.proven_prefix, after.checkpoint.proven_prefix)
+        await context.close(); page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeLogout)
+        if (fixture.prefixCas) {
+          const raced = await page.evaluate(async () => {
+            const { BrowserResolutionPrefixRuntime } = await import('/src/platform/web/resolutionPrefix.ts')
+            const prepare = BrowserResolutionPrefixRuntime.prototype.prepareCommit
+            let competed = false, before, committed
+            BrowserResolutionPrefixRuntime.prototype.prepareCommit = async function(token) {
+              const result = await prepare.call(this, token)
+              before = await adapter.store.read()
+              await adapter.run()
+              committed = await adapter.store.read(); competed = true
+              return result
+            }
+            let rejected = false, code
+            try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys) }
+            catch (error) { rejected = true; code = error?.code }
+            finally { BrowserResolutionPrefixRuntime.prototype.prepareCommit = prepare }
+            return { competed, rejected, code, before, committed, after: await adapter.store.read() }
+          })
+          assert.equal(raced.competed, true); assert.equal(raced.rejected, true)
+          assert.ok(['stale_authority', 'stale_source'].includes(raced.code), raced.code)
+          assert.ok(raced.committed.manifest.applied_cursor > raced.before.manifest.applied_cursor)
+          assert.deepEqual(raced.after, raced.committed)
+          assert.deepEqual(raced.after.checkpoint, raced.before.checkpoint)
+          assert.deepEqual(raced.after.rows.map(row => JSON.parse(row.wire_item)), fixture.items)
+          await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+          assert.deepEqual(await page.evaluate(() => adapter.store.read()), raced.committed)
+          const fresh = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
+          assert.equal(fresh.applied.length, 0)
+          const persisted = await page.evaluate(() => adapter.store.read())
+          assert.equal(persisted.checkpoint.proven_prefix, persisted.manifest.applied_cursor)
+          assert.equal(persisted.checkpoint.ack_cursor, 0)
+          await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+          assert.deepEqual(await page.evaluate(() => adapter.store.read()), persisted)
+          await page.evaluate(() => adapter.run())
+          assert.deepEqual(await page.evaluate(() => adapter.store.read()), persisted)
+          console.log(JSON.stringify({ pass: true, concurrentPrefixCas: true }))
+          throw prefixCasComplete
+        }
+        const retry = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
+        assert.ok(retry.prefix?.candidate_proven_prefix > 0)
+        const persisted = await page.evaluate(() => adapter.store.read())
+        assert.ok(persisted.checkpoint.proven_prefix > 0)
+        continue
+      }
       const result = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
       assert.equal(result.applied[0]?.sequence, sequence, JSON.stringify(result))
       if (sequence === 7) {
@@ -291,7 +373,7 @@ try {
     if (fixture.repeated && fixture.interruptSequence > 7) {
       const secondResolution = fixture.items.find(item => item.event.entity_type === 'note' && item.event.revision === 6 && item.event.server_sequence > 7)
       if (!secondResolution) throw Error('missing_successor_resolution')
-      for (let sequence = 8; sequence <= secondResolution.event.server_sequence; sequence++) {
+      for (let sequence = resolved.manifest.applied_cursor + 1; sequence <= secondResolution.event.server_sequence; sequence++) {
         if (sequence === secondResolution.event.server_sequence) {
           const before = await page.evaluate(() => adapter.store.read())
           const refused = await page.evaluate(async () => {
@@ -313,7 +395,22 @@ try {
       }
       const successor = await page.evaluate(() => adapter.store.read())
       assert.equal(successor.rows.find(row => row.server_sequence === secondResolution.event.server_sequence)?.state, 'note_resolution_proven')
+      assert.ok(successor.checkpoint.proven_prefix > 0)
+      assert.equal(successor.checkpoint.ack_cursor, 0)
+      assert.ok(successor.checkpoint.proven_prefix <= successor.manifest.applied_cursor)
       await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+      assert.deepEqual(await page.evaluate(() => adapter.store.read()), successor)
+      assert.equal(await page.evaluate(async () => {
+        const state = await adapter.store.read(), original = state.checkpoint
+        const request = indexedDB.open('worta-web-replay', 6)
+        await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+        const db = request.result
+        const put = row => new Promise((resolve, reject) => { const tx = db.transaction('cursors', 'readwrite'); tx.objectStore('cursors').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+        await put({ ...original, proven_prefix: state.manifest.applied_cursor + 1 })
+        let refused = false
+        try { await adapter.store.read() } catch { refused = true }
+        await put(original); db.close(); return refused
+      }), true)
       assert.deepEqual(await page.evaluate(() => adapter.store.read()), successor)
     }
   }
@@ -534,6 +631,8 @@ try {
   }
   await page.evaluate(() => adapter.store.close())
   console.log(JSON.stringify({ pass: true, scenarios: 10 }))
+} catch (error) {
+  if (error !== prefixCasComplete) throw error
 } finally {
   await context?.close().catch(() => undefined); await vite?.close().catch(() => undefined)
   await rm(directory, { recursive: true, force: true })

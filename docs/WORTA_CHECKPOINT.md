@@ -1,5 +1,151 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: persisted prefix accepted with competing replay CAS
+
+Starting SHA `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`. Persisted prefix
+implementation and previous uncommitted fixes are accepted for the bounded
+replay contract. Native two-Resolution Chromium CAS test **1 passed**: after
+real Prefix prepareCommit, normal production replay applies the remaining
+published Content/Resolution events through ownerPort. Its applied_cursor,
+sources, history and proofs commit in IndexedDB. The original prefix commit
+rejects stale_authority/stale_source. Complete post-failure snapshot equals
+the competing replay result; raw checkpoint/prefix/ACK stays unchanged.
+After close/reopen, a fresh recovery call applies no event and commits the
+authenticated prefix to manifest applied_cursor; reopen plus full replay
+reauthentication is byte-stable. No raw cursor assignment or invented sequence.
+
+The concurrent cursor here is manifest.applied_cursor, as advanced by the
+existing replay ownerPort. The test does not claim a competing mutation of
+pull_cursor or proven_prefix. It exercises the full snapshot CAS that includes
+both manifest coverage and the raw checkpoint. Native prefix abort/logout,
+two-Resolution and author/self-echo Chromium regressions **2 passed**; Rust
+**1 passed**, Vitest **255 passed**, typecheck/build and quick acceptance passed.
+No IDB version/store/proof changes; existing v6 zero checkpoints stay valid.
+Old implementations reject positive prefix under their prior zero invariant.
+
+Product stage 2/6, Slice 4/5 remains PARTIAL; 2/10 blockers closed. General
+orphan/own Resolution recovery and broader reader qualification remain open.
+ready=false, declarationAllowed=false, writerAuthorized=false, ACK zero;
+local transport only, no protected-feed qualification or capability PUT. No
+manual CI dispatch/poll. Next: own Resolution/self-echo recovery through the
+same adapter and persisted prefix; preserve Legacy3 isolation. All current
+prefix changes are included in the new commit; no unrelated files changed.
+
+## 2026-11-05 — Slice 4/5: prefix cursor race attempt (partial)
+
+Starting/Final HEAD `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`. Existing
+uncommitted persisted-prefix implementation is preserved. Attempted a genuine
+competing `contentAuthorOwner.local.updateNote` after Prefix prepareCommit on
+the Native Stage/plain history. The production author owner refused with
+`missing_local_source` before making an intent or cursor write. Consequently
+no competing transaction committed and stale cursor CAS is NOT proven; the
+failed exploratory hook was removed without altering earlier tests.
+
+After removal, Native Chromium prefix abort/logout/retry/two-Resolution test
+**1 passed**, Rust **1 passed**, Vitest **128 passed**, typecheck/build and quick
+acceptance passed. Earlier actual author/self-echo Chromium test passed on the
+project/plain route. Next: use a supported project/plain author lifecycle or
+another legitimate owner to commit a real cursor-changing operation between
+Prefix prepareCommit and commit, then verify stale CAS/reopen/retry. Do not
+substitute raw IndexedDB cursor edits. No commit/push: acceptance incomplete.
+Uncommitted: replayInventory, replayStorage, v10Recovery, v10Recovery.spec,
+browser-replay-resolution-local.mjs and checkpoint. Slice 4 PARTIAL, readiness
+2/10 closed; security flags false, ACK zero, no CI/gate/capability changes.
+
+## 2026-11-05 — Slice 4/5: prefix logout acceptance (partial)
+
+Starting/Final HEAD `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`. Persistent
+Chromium Native Stage/plain acceptance now logs out immediately after the real
+Prefix owner's prepareCommit, reopens IndexedDB under a fresh session and checks
+the exact pre-logout snapshot; the next retry persists the prefix. The earlier
+cursor-write abort, two Resolution generations and replay reopen remain in the
+same test. The earlier Native author/self-echo test also passed after restoring
+exact cursor/ordinal transitions. Final Stage Chromium **1 passed**; previous
+Native author Chromium **1 passed**, Rust **1 passed**, Vitest **128 passed**,
+typecheck/build and quick acceptance passed. No ACK or capability PUT.
+
+The requested concurrent *valid* cursor transaction between prefix prepare and
+commit is NOT yet demonstrated in Chromium; injecting a cursor value would not
+prove this requirement. Construct a second legitimate owner transaction whose
+cursor transition changes the snapshot without invalidating its inventory, then
+verify stale CAS, reopen and retry. Until then no commit/push. Working changes
+remain in replayInventory, replayStorage, v10Recovery, v10Recovery.spec,
+browser-replay-resolution-local.mjs and this checkpoint. Orphan blocker stays
+open, 2/10 closed; ready=false, declarationAllowed=false, writerAuthorized=false.
+No server-to-browser qualification or CI dispatch/polling.
+
+## 2026-11-05 — Slice 4/5: persisted prefix negative acceptance (partial)
+
+Starting/Final HEAD `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`; working
+changes remain uncommitted. Native Stage/plain two-Resolution Chromium now
+aborts the actual Prefix owner's IndexedDB cursor put. The earlier atomic
+Resolution commit remains; prefix and ACK do not advance. Reopen and retry
+persist a genuine authenticated prefix; later history continues. Real Native
+author/self-echo Chromium regression also passes after correcting snapshot
+transitions to account for exact permitted ordinal and pull-cursor changes.
+Chromium **2 passed**, focused Vitest **132 passed**, Rust **1 passed**,
+typecheck/build and quick acceptance passed. Tests use the local integration
+transport; no server-to-browser qualification.
+
+The test does NOT yet inject logout between prefix prepare/commit or a genuine
+concurrent cursor modification there. Both remain required before commit/push.
+Next: add those real IndexedDB fault hooks, assert no partial prefix, reopen
+and retry, repeat authored ordinal/receipt tests, then update this checkpoint.
+Orphan blocker OPEN, readiness 2/10 closed; ready=false,
+declarationAllowed=false, writerAuthorized=false. No ACK, capability PUT,
+reader-gate bypass or CI dispatch/polling. Uncommitted files: replay inventory,
+storage, recovery, recovery tests, Chromium script and this checkpoint.
+
+## 2026-11-05 — Slice 4/5: persisted prefix implementation (partial acceptance)
+
+Starting/Final HEAD `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`; uncommitted.
+ReplaySnapshot now includes the validated checkpoint when a manifest exists,
+so ownerPort snapshot CAS covers cursor changes. v6 inventory accepts nonzero
+proven_prefix only up to applied_cursor; older versions retain the zero rule.
+The existing Prefix owner prepares/calculates/commits through a dedicated
+transaction adapter with fresh snapshot, ordinary server anchor/tail checks,
+full CAS and post-write validation allowing only monotonic proven_prefix change.
+Manifest, wire, source, owner proofs, pull and ACK cursors must stay unchanged.
+No new store, proof format, IDB version or schema migration: existing cursor
+field is reused and historical v6 zero cursors remain valid. Older readers reject
+the positive cursor under their previous zero invariant; no fallback is added.
+
+Native two-Resolution Stage/plain Chromium **1 passed**: positive prefix persisted,
+ACK zero, reopen with full snapshot comparison, subsequent full-history replay,
+and above-coverage cursor corruption refused/restored. Rust **1 passed**, focused
+Vitest **158 passed**, typecheck/build and quick acceptance passed. Existing
+owner rollback tests remain covered, but prefix-transaction-specific native IDB
+abort/logout/concurrent-cursor scenarios and authored replay regression are NOT
+yet accepted. Do not commit/claim full local completion until those pass.
+Next: inject failure in the Prefix owner's cursor put, reopen and reauthenticate
+without replaying a committed owner event; verify stale cursor CAS, logout and
+author ordinal transitions under the expanded snapshot. Orphan blocker OPEN,
+2/10 closed, all security flags false. No ACK, capability PUT, reader gate bypass
+or CI actions. Working changes: replayInventory, replayStorage, v10Recovery,
+v10Recovery.spec, browser-replay-resolution-local.mjs and this checkpoint.
+
+## 2026-11-05 — Slice 4/5: persisted prefix coverage guard (partial)
+
+Starting/Final HEAD `68052ce15ae2e18f7b79b947f6ae1777d2fc33c2`. The replay
+recovery adapter now refuses an authenticated prefix candidate beyond the
+current manifest applied coverage. A focused recovery test checks that failed
+coverage validation cannot write the cursor; Native two-Resolution Chromium
+regression **1 passed**, Rust **1 passed**, Vitest **127 passed**, final recovery
+**60 passed**, typecheck/build and quick acceptance passed. ACK remains zero.
+
+This is not persisted prefix reconciliation. `scheduleReplaySnapshot` currently
+rejects any nonzero `proven_prefix`, and ReplaySnapshot omits the cursor; simply
+invoking the existing Prefix owner commit would invalidate reopen and leave the
+cursor outside replay's full-snapshot CAS. The necessary next implementation is
+to include and validate the cursor in replay snapshot/CAS, require authenticated
+prefix <= manifest coverage, and wrap the existing Prefix owner commit with
+fresh snapshot, server check and atomic post-transition validation; then prove
+reopen and all negative scenarios in real IndexedDB. Do not relax the zero
+guard before that transition is implemented. Slice 4 PARTIAL; 2/10 blockers
+closed; orphan blocker remains OPEN. All security flags false, no capability PUT,
+no server-to-browser acceptance, no CI dispatch/polling. Uncommitted changes are
+the coverage guard, its test and this checkpoint; no commit/push yet.
+
 ## 2026-11-05 — Slice 4/5: successor Resolution recovery (partial)
 
 Starting SHA `1a16775c82b0ed9295c636eb95183942106fb841`. Replay-bound

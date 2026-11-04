@@ -15,6 +15,7 @@ import { validateNoteHistorySet, type BrowserNoteHistoryRecord, type BrowserNote
 import { REPLAY_LIMITS, replayExact, replaySame, replayUuid, validateReplayManifest, type ReplayManifest } from './replayRecords'
 
 export interface ReplaySnapshot {
+  checkpoint?: ReturnType<typeof validateBrowserSyncCursor>
   manifest: ReplayManifest | null; rows: FutureInbox[]; bindings: BrowserProjectBinding[]; owners: Array<BrowserMetadataHead | BrowserStageHead | BrowserStageOrderHead>
   author?: {out:unknown[];receipts:unknown[];intents:unknown[]}
   sources?: LocalProjectRecord[]
@@ -218,7 +219,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         || b.record_version !== 1 || b.local_account_id !== s.accountId || b.canonical_user_id !== s.canonicalUserId) fail()
       const manifest = manifests.result.length ? validateReplayManifest(manifests.result[0], s, version) : null
       const checkpoint = validateBrowserSyncCursor(cursors.result[0], s), metadata = manifest?.metadata_cursor ?? 0, applied = version >= 3 ? manifest?.applied_cursor ?? 0 : metadata
-      if (checkpoint.ack_cursor !== 0 || checkpoint.proven_prefix !== 0 || checkpoint.next_local_ordinal !== 1+counts[0]!.result.length+counts[2]!.result.length
+      if (checkpoint.ack_cursor !== 0 || (version < 6 ? checkpoint.proven_prefix !== 0 : checkpoint.proven_prefix > applied) || checkpoint.next_local_ordinal !== 1+counts[0]!.result.length+counts[2]!.result.length
         || checkpoint.pull_cursor !== rows.length || !manifest && (rows.length || cursors.result.length || bindings.result.length || owners.result.length || projects.result.length)
         || manifest && (i === undefined || !cursors.result.length || manifest.receive_cursor !== rows.length)) fail()
       const imported = bindings.result.map(raw => validateBrowserProjectBinding(raw, s)), heads = owners.result.map(raw => validateBrowserOwnerHead(raw, s))
@@ -404,7 +405,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       }
       bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history: future,author })).length + REPLAY_LIMITS.controlReserveBytes
       if (manifest && (ciphertextBytes !== manifest.ciphertext_bytes || bytes > REPLAY_LIMITS.inventoryBytes)) fail()
-      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: future,...(authorActive?{author}:{}) })
+      result({ manifest, rows, bindings: imported, owners: heads, sources, notes, noteHistory: future,...(manifest?{checkpoint}:{}),...(authorActive?{author}:{}) })
     } catch (error) { abort(error) }
   }
   for (const request of [identity, alias, binding, cursors, manifests, bindings, owners, projects, localNotes, noteHistory, ...counts]) request.onsuccess = finish
@@ -494,9 +495,11 @@ export function replayOrdinaryHistory(values: FutureNoteHistory[]): BrowserNoteH
 
 /** Local author lifecycle only; no receive/apply coverage or project-read grant. */
 export function assertReplayAuthorTransition(before:ReplaySnapshot,after:ReplaySnapshot):void {
-  if(!before.manifest||!replaySame({...after,manifest:before.manifest,author:before.author,sources:before.sources,notes:before.notes,noteHistory:before.noteHistory},{...before,author:before.author}))fail()
+  if(!before.manifest||!before.checkpoint||!after.checkpoint||!replaySame({...after,checkpoint:before.checkpoint,manifest:before.manifest,author:before.author,sources:before.sources,notes:before.notes,noteHistory:before.noteHistory},{...before,author:before.author}))fail()
   if(!replaySame(after.manifest,{...before.manifest,revision:before.manifest.revision+1}))fail()
   const a=before.author??{out:[],receipts:[],intents:[]},b=after.author??{out:[],receipts:[],intents:[]}
+  const ordinalDelta=b.out.length+b.intents.length-a.out.length-a.intents.length
+  if(!replaySame(after.checkpoint,{...before.checkpoint,next_local_ordinal:before.checkpoint.next_local_ordinal+ordinalDelta}))fail()
   const old=before.noteHistory??[],next=after.noteHistory??[]
   if(b.intents.length===a.intents.length+1){
     const i=b.intents.find(i=>!a.intents.some(v=>replaySame(v,i))) as import('./contentAuthorityRecords').BrowserContentIntent2|undefined

@@ -3,6 +3,8 @@ import {afterEach,it,expect,vi} from 'vitest'
 import {recoveryFixture} from './v10Recovery.testFixture'
 import {scope,amk} from './bootstrap.testFixture'
 import {BrowserV10Transport} from './v10Transport'
+import {BrowserV10Recovery} from './v10Recovery'
+import {BrowserPersistenceError} from './persistence'
 import {encryptObjectBytes} from '@/crypto'
 import {encodeBase64Url} from '@/api/base64url'
 import {frameContentNote} from '@/cloud/contentNoteCodec'
@@ -11,7 +13,6 @@ import {createNoteSyncPlaintext} from '@/cloud/encryptedSyncProtocol'
 import {encodeNoteSyncPlaintext} from '@/cloud/noteSyncCodec'
 import type {BrowserSyncTransaction} from './syncDurability'
 import {BrowserStageOrderRuntime} from './stageOrderApply'
-import {BrowserPersistenceError} from './persistence'
 afterEach(()=>vi.restoreAllMocks())
 for(const protocol of [2,3] as const)for(const strategy of ['choose_version','manual_merge','delete','keep_both'] as const)it(`real pending-to-F/H/G protocol${protocol}/${strategy}`,async()=>{
  const f=await recoveryFixture(strategy,protocol,protocol===3),before=f.before()
@@ -42,6 +43,14 @@ it('missing binding is explicit; a genuine import enables a fresh dependency ret
  expect(blocked).toMatchObject({blocker:{sequence:1,kind:'dependency_unavailable',retryable:true},applied:[],more:true});expect(f.before()).toEqual(before)
  await f.f.projects.importRemote(scope,{project_id:binding.project_id,bootstrap_id:binding.bootstrap_id,remote_state:'active',remote_high_water:0})
  expect((await f.runtime.run(scope,{maxEvents:32})).blocker).toBeNull()
+})
+it('replay prefix coverage validation rejects without writing a cursor',async()=>{
+ const f=await recoveryFixture('choose_version',3)
+ await f.runtime.run(scope,{maxEvents:32})
+ const before=f.before(), check=vi.fn(async()=>{throw new BrowserPersistenceError('corrupt_record')})
+ const runtime=new BrowserV10Recovery(f.transaction,f.f.localOwner,()=>true,undefined,check).bind(f.f.auth,f.f.bindings as never,f.f.keys as never,f.device)
+ await expect(runtime.run(scope)).rejects.toMatchObject({code:'corrupt_record'})
+ expect(check).toHaveBeenCalled();expect(f.before()).toEqual(before)
 })
 it('imports the actual binding before applying Stage and StageOrder after restart',async()=>{
  const f=await recoveryFixture('choose_version',3,false,true),binding=f.f.db.projectBindings[0] as any

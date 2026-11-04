@@ -49,7 +49,9 @@ function gap(v:ResolutionInventorySnapshot,s:BrowserSyncScope):number|null {
  * ACK or declaration surface. Each mutation belongs to an accepted atomic owner. */
 export class BrowserV10Recovery {
  constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthority,private readonly profileCurrent:()=>boolean,
-  private readonly ownerTransaction?:(sequence:number)=>Promise<BrowserSyncTransaction>){}
+  private readonly ownerTransaction?:(sequence:number)=>Promise<BrowserSyncTransaction>,
+  private readonly validateReplayPrefix?:(candidate:number)=>Promise<void>,
+  private readonly prefixTransaction?:()=>Promise<BrowserSyncTransaction>){}
  /** Separate dormant manual slice; the historical bind below is unchanged. */
  bindMixedSources(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindMixedV10Recovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  /** Explicit bounded .18 route; historical K/G/Q bindings keep their contracts. */
@@ -181,10 +183,13 @@ export class BrowserV10Recovery {
     }
     v=await load()
     if(hasResolution(v)){
+     if(this.prefixTransaction)operation=await step(this.prefixTransaction())
      const token=await step(prefix.prepare(s));result.prefix=await step(prefix.calculate(token))
+     if(this.validateReplayPrefix)await step(this.validateReplayPrefix(result.prefix.candidate_proven_prefix))
      // Replay storage owns applied coverage atomically with each event. Its
      // inspection transaction must not write the separate ordinary ACK prefix.
-     if(!this.ownerTransaction&&result.prefix.candidate_proven_prefix>result.prefix.current_proven_prefix)await step(prefix.commit(await step(prefix.prepareCommit(token))))
+     if((!this.ownerTransaction||this.prefixTransaction)&&result.prefix.candidate_proven_prefix>result.prefix.current_proven_prefix)await step(prefix.commit(await step(prefix.prepareCommit(token))))
+     operation=undefined
      result.readiness=await step(readiness.inspect(s)) // I remains negative-only.
      if(!result.blocker&&result.prefix.first_blocking_sequence!==null)result.blocker={sequence:result.prefix.first_blocking_sequence,kind:'unqualified_family',retryable:false}
     }else if(!result.blocker){
@@ -194,7 +199,7 @@ export class BrowserV10Recovery {
     result.more=(await step(transport.listReceived(s,1))).length>0
     if(replay)await step(transport.replayInboundPage(s,replay.since,replay.rawPage))
     return result
-   }finally{busy=false}
+   }finally{operation=undefined;busy=false}
   }})
  }
 }

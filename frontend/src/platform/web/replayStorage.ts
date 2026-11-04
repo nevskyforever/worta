@@ -279,7 +279,7 @@ class BrowserReplayStorage {
         schedule(tx,value=>{
           try{check();const bytes=Math.floor((JSON.parse(response.value).items[0].object.ciphertext as string).length*3/4)
             tx.objectStore('replayManifest').put({...previous,anchor,receive_cursor:page.next_cursor,ciphertext_bytes:previous.ciphertext_bytes+bytes,revision:previous.revision+1})
-            this.load(tx,after=>{try{if(!replaySame({...after,manifest:before.manifest,rows:before.rows},before)||after.rows.length!==before.rows.length+1||!replaySame(after.rows.slice(0,-1),before.rows))fail();result(value)}catch(e){abort(e)}},abort)
+            this.load(tx,after=>{try{if(!before.checkpoint||!after.checkpoint||!replaySame(after.checkpoint,{...before.checkpoint,pull_cursor:page.next_cursor})||!replaySame({...after,checkpoint:before.checkpoint,manifest:before.manifest,rows:before.rows},before)||after.rows.length!==before.rows.length+1||!replaySame(after.rows.slice(0,-1),before.rows))fail();result(value)}catch(e){abort(e)}},abort)
           }catch(e){abort(e)}
         },abort)
       }catch(e){abort(e)}
@@ -319,7 +319,7 @@ class BrowserReplayStorage {
       const device = await new BrowserDeviceRegistration(readonly, current).bind(auth, bindings).registerVerified(this.scope)
       const ownerTransaction = async (sequence: number) => {
         const expected = await this.read(), manifest = expected.manifest
-        if (!manifest || manifest.contract_version !== 6 || manifest.phase !== 'received' || sequence !== (manifest.applied_cursor ?? 0) + 1) throw new BrowserPersistenceError('stale_cursor')
+        if (!manifest || manifest.contract_version !== 6 || manifest.phase !== 'received' || sequence !== 0 && sequence !== (manifest.applied_cursor ?? 0) + 1) throw new BrowserPersistenceError('stale_cursor')
         const context = auth.requireContext(), lease = keys.leaseForAccount(this.scope.accountId)
         const server = async () => {
           this.check()
@@ -333,9 +333,34 @@ class BrowserReplayStorage {
           this.check()
           if (!auth.isCurrent(context) || !lease.isCurrent()) throw new BrowserPersistenceError('closed')
         }
-        return port.transaction(expected, sequence, server)
+        if (sequence !== 0) return port.transaction(expected, sequence, server)
+        const transaction: BrowserSyncTransaction = async (scope, _stores, mode, schedule) => {
+          if (!replaySame(scope, this.scope)) throw new BrowserPersistenceError('account_mismatch')
+          if (mode === 'readwrite') await server()
+          return this.run(mode, (tx, result, abort) => this.load(tx, before => {
+            try {
+              if (!replaySame(before, expected)) throw new BrowserPersistenceError('stale_authority')
+              schedule(tx, value => this.load(tx, after => {
+                try {
+                  const checkpoint = after.checkpoint, previous = before.checkpoint
+                  if (!checkpoint || !previous || checkpoint.proven_prefix < previous.proven_prefix
+                    || checkpoint.proven_prefix > (manifest.applied_cursor ?? 0)
+                    || !replaySame(checkpoint, { ...previous, proven_prefix: checkpoint.proven_prefix })
+                    || !replaySame({ ...after, checkpoint: previous }, before)) throw new BrowserPersistenceError('corrupt_record')
+                  result(value)
+                } catch (error) { abort(error) }
+              }, abort), abort)
+            } catch (error) { abort(error) }
+          }, abort))
+        }
+        return transaction
       }
-      return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction)
+      const validatePrefix = async (candidate: number) => {
+        const snapshot = await this.read(), manifest = snapshot.manifest
+        if (!manifest || manifest.contract_version !== 6 || manifest.phase !== 'received'
+          || candidate > (manifest.applied_cursor ?? 0)) throw new BrowserPersistenceError('corrupt_record')
+      }
+      return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction, validatePrefix, () => ownerTransaction(0))
         .bind(auth, bindings, keys, device).run(this.scope, { maxEvents: 1 })
     } finally { unAuth(); unKey() }
   }

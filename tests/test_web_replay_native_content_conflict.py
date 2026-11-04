@@ -163,7 +163,7 @@ def test_native_stage_prefix_writer(tmp_path):
     assert [item['event']['entity_type'] for item in transport.items] == ['project_metadata', 'stage', 'stage_order']
 
 
-def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False, resurrection=False, repeat_resurrection=False, stage_format=None):
+def native_content_resolution_history(tmp_path, canonical_user=None, successor=False, chain=False, repeated=False, generations=2, mixed=False, own_resolution=False, resurrection=False, repeat_resurrection=False, stage_format=None, prefix_cas=False):
     transport = LocalTransport()
     user, amk = canonical_user or str(uuid4()), list(range(32))
     a, ia = provision(tmp_path, 'content-a', user, True)
@@ -219,7 +219,7 @@ def native_content_resolution_history(tmp_path, canonical_user=None, successor=F
         'transport': {'supported_transport_version': 2, 'writer_transport_version': 3, 'cutover_epoch': 1}}
     fixture = {'scope': {'accountId': str(uuid4()), 'canonicalUserId': user, 'deviceId': str(uuid4())},
                'key': amk, 'anchor': anchor, 'items': transport.items,
-               'expectedContents': ['NATIVE_PRIVATE_A', 'NATIVE_PRIVATE_B'], 'stageRoute': bool(stage_format)}
+               'expectedContents': ['NATIVE_PRIVATE_A', 'NATIVE_PRIVATE_B'], 'stageRoute': bool(stage_format), 'prefixCas': prefix_cas}
     path = tmp_path / 'native-browser-fixture.json'
     path.write_text(json.dumps(fixture), encoding='utf-8'); path.chmod(0o600)
     root = Path(__file__).resolve().parents[1]
@@ -461,3 +461,7 @@ def test_native_stage_plain_resurrection_in_chromium(tmp_path):
 
 def test_native_stage_html_resurrection_in_chromium(tmp_path):
     native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True, stage_format='html')
+
+
+def test_native_prefix_cas_competing_replay_in_chromium(tmp_path):
+    native_content_resolution_history(tmp_path, repeated=True, mixed=True, resurrection=True, stage_format='plain', prefix_cas=True)
