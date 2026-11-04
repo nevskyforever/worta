@@ -17,6 +17,8 @@ from test_cloud_c18_authority_cross_runtime import provision, bootstrap, native,
 from test_cloud_c18_content_note_acceptance import NOW, content, emit, receive
 from test_cloud_c18_structural_cross_runtime import structural
 from test_cloud_c18_structural_integration import publish_pending, pull_structure
+from test_cloud_c18_catalog_integration import native as catalog_native
+from test_cloud_c15_headless_cross_runtime import _crypto_bridge
 
 
 class Response:
@@ -55,6 +57,33 @@ class LocalTransport:
         assert path == '/api/v3/sync/encrypted/pull'
         since = params['since']
         return Response({'items': self.items[since:], 'next_cursor': len(self.items), 'has_more': False})
+
+
+def test_native_two_project_bootstraps_share_account_transport(tmp_path):
+    """Create two independent project authorities with native sealed Metadata."""
+    transport, user, amk = LocalTransport(), str(uuid4()), list(range(32))
+    path, identity = provision(tmp_path, 'two-project-author', user, False)
+    with sqlite3.connect(path) as db:
+        for index, project in enumerate(('isolation-A', 'isolation-B')):
+            db.execute("INSERT INTO projects(id,name,infinite,unit,status,payload_json) VALUES(?,?,1,'symbols','active','{}')", (project, project))
+            db.execute('INSERT INTO project_order VALUES(?,?)', (project, index))
+    boots = {}
+    for project in ('isolation-A', 'isolation-B'):
+        boot = catalog_native(tmp_path, path, identity, user, action='bootstrap_prepare', project_id=project)['bootstrap_id']
+        boots[project] = boot
+        catalog_native(tmp_path, path, identity, user, action='bootstrap_prepare_capture', project_id=project, bootstrap_id=boot, remote_high_water=0)
+        catalog_native(tmp_path, path, identity, user, action='bootstrap_confirm_active', project_id=project, bootstrap_id=boot, remote_high_water=0)
+        catalog_native(tmp_path, path, identity, user, action='metadata_authority', project_id=project, step='begin')
+        event = catalog_native(tmp_path, path, identity, user, action='metadata_authority', project_id=project, step='read')['unsealed'][0]
+        sealed = _crypto_bridge(tmp_path, dict(action='metadata_seal', payload=event, amk=amk))
+        catalog_native(tmp_path, path, identity, user, action='metadata_authority', project_id=project, step='seal', event_id=event['header']['event_id'], nonce=sealed['nonce'], ciphertext=sealed['ciphertext'])
+        header = event['header']
+        wire = {key: header[key] for key in ('event_id', 'project_id', 'entity_id', 'revision', 'updated_at')}
+        wire.update(entity_type='project_metadata', operation='upsert', deleted_at=None)
+        response = transport.post('/api/v3/sync/encrypted/push', headers={}, json=dict(protocol_version=3, encrypted_sync_version=3, device_id=identity['device_id'], items=[dict(event=wire, object=sealed['object'])]))
+        assert response.status_code == 200
+    assert boots['isolation-A'] != boots['isolation-B']
+    assert [item['event']['project_id'] for item in transport.items] == ['isolation-A', 'isolation-B']
 
 
 def native_stage_prefix(tmp_path, transport, a, ia, b, ib, user, amk):

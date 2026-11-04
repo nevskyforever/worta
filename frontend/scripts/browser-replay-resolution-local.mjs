@@ -81,6 +81,18 @@ try {
       const bindings = { ensureForCurrentUser: async () => ({ context }) }, keys = { leaseForAccount: () => lease, onInvalidated: () => () => undefined }
       cloudProjectsApi.listBootstraps = async () => {
         if (window.logoutBeforeCommit) await window.readerAuth.auth.logout()
+        if (window.recoverySnapshotRace) {
+          window.recoverySnapshotRace = false
+          const request = indexedDB.open('worta-web-replay', 6)
+          await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+          const db = request.result
+          await new Promise((resolve, reject) => {
+            const tx = db.transaction('replayManifest', 'readwrite'), store = tx.objectStore('replayManifest')
+            const get = store.get([f.scope.accountId, f.scope.deviceId])
+            get.onsuccess = () => store.put({ ...get.result, revision: get.result.revision + 1 })
+            tx.oncomplete = resolve; tx.onabort = () => reject(tx.error)
+          }); db.close()
+        }
         return f.anchor.registry
       }
       encryptedSyncV2Api.capabilities = async () => f.anchor.transport
@@ -129,12 +141,85 @@ try {
     const recovery = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
     assert.equal(recovery.blocker?.kind, 'dependency_unavailable')
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
+    assert.equal(await page.evaluate(async f => {
+      const { prepareBrowserRemoteProjectImport } = await import('/src/platform/web/projectBindings.ts')
+      const foreign = prepareBrowserRemoteProjectImport(f.scope, { project_id: 'foreign-independent-project', bootstrap_id: crypto.randomUUID(), remote_state: 'active', remote_high_water: f.items.length })
+      const req = indexedDB.open('worta-web-replay', 6)
+      await new Promise((resolve, reject) => { req.onsuccess = resolve; req.onerror = () => reject(req.error) })
+      const db = req.result
+      const change = (op) => new Promise((resolve, reject) => { const tx = db.transaction('projectBindings', 'readwrite'); op(tx.objectStore('projectBindings')); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+      await change(store => store.add(foreign))
+      let refused = false
+      try { const result = await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); refused = result.applied.length === 0 && result.blocker?.kind === 'dependency_unavailable' } catch { refused = true }
+      await change(store => store.delete([f.scope.accountId, foreign.project_id])); db.close()
+      return refused
+    }, fixture), true)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
+    assert.equal(await page.evaluate(async () => {
+      try { await adapter.store.importRecoveryProject('foreign-project', readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+      catch { return true }
+    }), true)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
     await page.evaluate(() => adapter.store.close()); await context.close()
     page = await launch(); await attach(page)
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), beforeBinding)
     await page.evaluate(f => adapter.store.importRecoveryProject(f.items[0].event.project_id, readerAuth.auth, readerAuth.bindings, readerAuth.keys), fixture)
     for (let sequence = 1; sequence <= 3; sequence++) {
       const before = await page.evaluate(() => adapter.store.read())
+      if (sequence === 2) {
+        assert.equal(await page.evaluate(async () => {
+          const row = structuredClone((await adapter.store.read()).rows.find(value => value.server_sequence === 2))
+          const damaged = structuredClone(row), wire = JSON.parse(damaged.wire_item)
+          wire.event.server_sequence++; damaged.wire_item = JSON.stringify(wire)
+          const req = indexedDB.open('worta-web-replay', 6)
+          await new Promise((resolve, reject) => { req.onsuccess = resolve; req.onerror = () => reject(req.error) })
+          const db = req.result
+          const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+          await put(damaged)
+          let refused = false
+          try { const result = await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); refused = result.applied.length === 0 } catch { refused = true }
+          await put(row); db.close(); return refused
+        }), true)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+        await page.evaluate(() => adapter.store.close()); await context.close()
+        page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+      }
+      if (sequence === 2) {
+        const refused = await page.evaluate(async () => {
+          window.recoverySnapshotRace = true
+          try { const value = await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return value.blocker?.kind === 'dependency_unavailable' && value.applied.length === 0 }
+          catch { return true } finally { window.recoverySnapshotRace = false }
+        })
+        assert.equal(refused, true)
+        const raced = await page.evaluate(() => adapter.store.read())
+        assert.deepEqual(raced.rows, before.rows); assert.deepEqual(raced.owners, before.owners)
+        assert.equal(raced.manifest.applied_cursor, before.manifest.applied_cursor)
+        await page.evaluate(async manifest => {
+          const request = indexedDB.open('worta-web-replay', 6)
+          await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+          const db = request.result
+          await new Promise((resolve, reject) => { const tx = db.transaction('replayManifest', 'readwrite'); tx.objectStore('replayManifest').put(manifest); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) }); db.close()
+        }, before.manifest)
+        await page.evaluate(() => adapter.store.close()); await context.close()
+        page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+      }
+      if (sequence === 3) {
+        assert.equal(await page.evaluate(async () => {
+          const row = structuredClone((await adapter.store.read()).rows.find(value => value.state === 'stage_proven'))
+          const damaged = structuredClone(row); damaged.stage_proof.outcome_digest = '0'.repeat(64)
+          const request = indexedDB.open('worta-web-replay', 6)
+          await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
+          const db = request.result
+          const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
+          await put(damaged)
+          let rejected = false
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys) } catch { rejected = true }
+          await put(row); db.close(); return rejected
+        }), true)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+      }
       for (const fault of ['network', 'abort']) {
         const refused = await page.evaluate(async fault => {
           const put = IDBObjectStore.prototype.put

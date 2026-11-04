@@ -1,5 +1,49 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: Native two-project bootstrap fixture (partial)
+
+Starting SHA `66ef7228a29be27efa8ceeb9633faa314c21c90e`. A focused Native
+SQLite test creates two real local projects in one account, independently
+bootstraps each and publishes genuine encrypted Metadata through the existing
+local integration transport. The bootstrap IDs and event identities are
+independent; **1 passed**. This does not yet create Stage/StageOrder histories,
+the two-project replay anchor, seeds or imported browser bindings, and does not
+qualify cross-project recovery. The prior uncommitted recovery negative browser
+tests are preserved. Native Stage/plain Chromium regression **1 passed**, Rust
+**1 passed**, focused Legacy3/Content/recovery Vitest **227 passed**,
+typecheck/build and quick acceptance passed. Tests use local transport; no
+server-to-browser acceptance or capability PUT. All security flags remain false;
+orphan recovery remains open, 2/10 readiness blockers closed.
+
+Next: publish and authenticate Stage and StageOrder for both bootstraps with
+their actual Native owners, construct a two-project account anchor and source
+seeds, import both through replayStorage and exercise foreign binding during an
+actual pending A event. The current bounded replay admission assumes one Note
+cohort; retain account-wide sequencing and CAS when extending the fixture.
+
+## 2026-11-05 — Slice 4/5: recovery sequence/foreign binding (partial)
+
+Starting/Final HEAD `66ef7228a29be27efa8ceeb9633faa314c21c90e`; no new commit.
+Existing uncommitted Chromium recovery tests are preserved and extended. Native
+Stage/plain Chromium acceptance passes with a damaged embedded server sequence:
+recovery refuses, original ciphertext/inventory is restored, IndexedDB reopens,
+and the valid event is subsequently applied. Stage resurrection, Resolution,
+abort, repeated delivery and restart remain covered by the same run. Injected
+foreign project binding is rejected by replay inventory because no corresponding
+project/bootstrap exists in the anchor. This is NOT acceptance of two genuinely
+imported independent projects: that attempted stronger assertion failed with
+`web_persistence_corrupt_record` before recovery. Do not count it as foreign
+binding qualification. Next: construct a genuine two-project Native history,
+anchor, seeds and bindings, then verify cross-project isolation and restart.
+
+Rust **1 passed**; focused Vitest **241 passed** (Legacy3/Content/Resolution/
+recovery); Native Chromium **1 passed** after fixing the fixture; typecheck,
+build and quick acceptance passed. Local transport only; server-to-browser gate
+not qualified. Orphan blocker remains OPEN, **2/10** closed; ready=false,
+declarationAllowed=false, writerAuthorized=false. No capability PUT or CI run.
+Uncommitted changes: `frontend/scripts/browser-replay-resolution-local.mjs` and
+this checkpoint. No new commit or push until the independent-project acceptance.
+
 ## 2026-11-05 — Slice 4/5: Legacy3 resurrection isolation regression
 
 Starting SHA `422d994aab35e50c93f1e99ae87989493e698d9e`, branch 6.0.
