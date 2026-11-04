@@ -257,6 +257,37 @@ try {
     await page.evaluate(() => adapter.store.close()); await context.close()
     page = await launch(); await attach(page)
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), imported)
+    for (let sequence = 4; sequence <= 7; sequence++) {
+      if (sequence === 7) {
+        const pending = await page.evaluate(() => adapter.store.read())
+        assert.equal(pending.rows.find(row => row.server_sequence === 7).state, 'received')
+        assert.equal(await page.evaluate(async () => {
+          const put = IDBObjectStore.prototype.put
+          IDBObjectStore.prototype.put = function(value, ...args) {
+            const request = put.call(this, value, ...args)
+            if (this.name === 'inbox' && value.state === 'note_resolution_proven') request.addEventListener('success', () => this.transaction.abort(), { once: true })
+            return request
+          }
+          try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+          catch { return true } finally { IDBObjectStore.prototype.put = put }
+        }), true)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), pending)
+        await page.evaluate(() => adapter.store.close()); await context.close()
+        page = await launch(); await attach(page)
+        assert.deepEqual(await page.evaluate(() => adapter.store.read()), pending)
+      }
+      const result = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
+      assert.equal(result.applied[0]?.sequence, sequence, JSON.stringify(result))
+      if (sequence === 7) {
+        assert.equal(result.applied[0].route, 'resolution')
+        assert.ok(result.prefix)
+        assert.equal(result.ready, false)
+      }
+    }
+    const resolved = await page.evaluate(() => adapter.store.read())
+    await page.evaluate(() => adapter.store.close()); await context.close()
+    page = await launch(); await attach(page)
+    assert.deepEqual(await page.evaluate(() => adapter.store.read()), resolved)
   }
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put

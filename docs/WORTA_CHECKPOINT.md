@@ -1,5 +1,31 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: first Resolution through recovery adapter
+
+Starting SHA `2541c076295006521dea14ca76e3fd16dbba0b6f`. Native Stage/plain
+Content conflict history now applies its genesis, both peer branches and first
+choose-version Resolution through replayStorage.recoverV10, one owner operation
+per call. Parent proofs are established by the real earlier owners, not injected.
+The Resolution remains received before its turn. Native IndexedDB abort at the
+Resolution proof write leaves the full snapshot unchanged; close/reopen/retry
+applies and authenticates it, and final normal replay verifies the entire history.
+
+Replay adapter computes the existing ResolutionPrefix certificate read-only;
+it no longer attempts the ordinary prefix commit through its readonly inspection
+transaction. Replay ownerPort still atomically writes manifest applied coverage
+with the Resolution source/history/proof. Ordinary non-replay recovery keeps its
+existing prefix commit. No ACK/readiness/writer grant or new proof format.
+
+Native Chromium **1 passed**, Rust Resolution **56 passed**, focused Vitest
+**224 passed**, typecheck/build and quick acceptance passed. Orphan blocker stays
+OPEN, 2/10 closed, Slice 4 PARTIAL: repeated Resolution currently hits the existing
+unsupported_generation barrier in BrowserV10Recovery; own Resolution/self-echo
+recovery is also not routed. Separate persisted prefix reconciliation across
+these histories remains unaccepted. Next: dispatch accepted successor Resolution
+through prepareSuccessor under the same per-event adapter and qualify reopen,
+rollback and prefix authentication. All security flags false; no gate bypass,
+capability PUT, CI dispatch or polling. Tests use local transport only.
+
 ## 2026-11-05 — Slice 4/5: two-project browser recovery isolation
 
 Starting SHA `15970f9acac703eaa9d15c7fa29da7dae4451034`. One Native account

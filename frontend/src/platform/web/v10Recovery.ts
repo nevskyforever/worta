@@ -174,7 +174,9 @@ export class BrowserV10Recovery {
     v=await load()
     if(hasResolution(v)){
      const token=await step(prefix.prepare(s));result.prefix=await step(prefix.calculate(token))
-     if(result.prefix.candidate_proven_prefix>result.prefix.current_proven_prefix)await step(prefix.commit(await step(prefix.prepareCommit(token))))
+     // Replay storage owns applied coverage atomically with each event. Its
+     // inspection transaction must not write the separate ordinary ACK prefix.
+     if(!this.ownerTransaction&&result.prefix.candidate_proven_prefix>result.prefix.current_proven_prefix)await step(prefix.commit(await step(prefix.prepareCommit(token))))
      result.readiness=await step(readiness.inspect(s)) // I remains negative-only.
      if(!result.blocker&&result.prefix.first_blocking_sequence!==null)result.blocker={sequence:result.prefix.first_blocking_sequence,kind:'unqualified_family',retryable:false}
     }else if(!result.blocker){
