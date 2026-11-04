@@ -1,5 +1,29 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Slice 4/5: successor Resolution recovery (partial)
+
+Starting SHA `1a16775c82b0ed9295c636eb95183942106fb841`. Replay-bound
+BrowserV10Recovery routes subsequent Resolution through the existing
+`prepareSuccessor` and atomic apply. A preserved conflict can reach that owner
+only for an authenticated Resolution of the same project/Note; ordinary events
+still stop at the unresolved fork. The dormant non-replay contract is unchanged.
+
+Native Stage/plain SQLite writers and Chromium/IndexedDB **1 passed**: two
+Resolution generations via recoverV10, source/history/proof/manifest abort at
+the second Resolution, reopen and retry, another reopen and full continuation
+through normal replay. Ciphertext is preserved and both proofs reauthenticated.
+Rust Resolution **56 passed**, focused Vitest **224 passed** and final recovery
+**59 passed**; typecheck/build and quick acceptance passed. Local transport only.
+
+Persisted `proven_prefix` reconciliation is NOT accepted: the replay adapter
+calculates the existing prefix read-only, while atomic manifest coverage persists.
+Own Resolution/self-echo recovery and explicit successor-specific wrong-parent,
+logout and network failure acceptance remain open. Orphan blocker remains OPEN,
+2/10 blockers closed, Slice 4 PARTIAL. All security flags false; no capability
+PUT, reader gate bypass, CI dispatch or polling. Next: design and implement
+bounded prefix persistence under replayStorage CAS without authorizing ACK;
+then qualify own Resolution and negative successor scenarios in Chromium.
+
 ## 2026-11-05 — Slice 4/5: first Resolution through recovery adapter
 
 Starting SHA `2541c076295006521dea14ca76e3fd16dbba0b6f`. Native Stage/plain

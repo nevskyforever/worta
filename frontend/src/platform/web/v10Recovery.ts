@@ -95,10 +95,17 @@ export class BrowserV10Recovery {
      if(missing!==null&&missing<=v.cursor.proven_prefix)fail()
      if(missing!==null&&(!row||missing<row.server_sequence)){result.blocker={sequence:missing,kind:'missing_sequence',retryable:false};break}
      if(row&&!same(rows.find(r=>r.server_sequence===row.server_sequence),row))fail('stale_source')
+     let resolvingBarrier=false
      if(hasResolution(v)){
       const certified=await step(prefix.prepare(s)),calculated=await step(prefix.calculate(certified)),n=calculated.first_blocking_sequence
       const barrier=n===null?undefined:rows.find(r=>r.server_sequence===n)
-      if(barrier&&barrier.state!=='received'){
+      const pendingEvent=row&&JSON.parse(row.wire_item).event
+      const conflict=barrier&&['note_conflict_preserved','content_note_conflict_preserved'].includes(barrier.state)
+      const conflictEvent=barrier&&JSON.parse(barrier.wire_item).event
+      const mayResolve=!!this.ownerTransaction&&conflict&&pendingEvent?.entity_type==='note'&&pendingEvent.operation==='event'
+        &&pendingEvent.project_id===conflictEvent.project_id&&pendingEvent.entity_id===conflictEvent.entity_id
+      resolvingBarrier=!!mayResolve
+      if(barrier&&barrier.state!=='received'&&!mayResolve){
        result.blocker={sequence:n!,kind:['note_conflict_preserved','content_note_conflict_preserved'].includes(barrier.state)?'unresolved_fork':'unqualified_family',retryable:false};break
       }
      }
@@ -122,8 +129,9 @@ export class BrowserV10Recovery {
        }finally{nonce.fill(0);ciphertext.fill(0)}
       }))
       if(classified===null){block('unsupported_route');break}
+      if(resolvingBarrier&&classified!=='resolution'){block('unresolved_fork');break}
       if(classified==='resolution'){
-       if(hasResolution(v)){block('unsupported_generation');break} // Frozen F is pre-v10 only.
+       if(hasResolution(v)&&!this.ownerTransaction){block('unsupported_generation');break} // Dormant legacy contract stays frozen.
        route='resolution'
       }else{
        const h=(classified as NoteSyncPlaintext).header
@@ -150,7 +158,7 @@ export class BrowserV10Recovery {
       if(this.ownerTransaction)operation=await step(this.ownerTransaction(row.server_sequence))
       let status:'applied'|'conflict_preserved'='applied'
       if(route==='resolution'){
-       const p=await step(planner.prepare(s,row.server_sequence));await commit(resolution.prepare(p.token),t=>resolution.commit(t))
+       const p=await step(hasResolution(v)?planner.prepareSuccessor(s,row.server_sequence):planner.prepare(s,row.server_sequence));await commit(resolution.prepare(p.token),t=>resolution.commit(t))
       }else if(route==='continuation')status=await commit(continuation.prepare(s,row.server_sequence),t=>continuation.commit(t))
       else if(route==='legacy'||route==='content'){
        const reader=route==='legacy'?legacy:content,value=await commit(reader.prepare(s,row.server_sequence),t=>reader.commit(t))

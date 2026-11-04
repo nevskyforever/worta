@@ -288,6 +288,34 @@ try {
     await page.evaluate(() => adapter.store.close()); await context.close()
     page = await launch(); await attach(page)
     assert.deepEqual(await page.evaluate(() => adapter.store.read()), resolved)
+    if (fixture.repeated && fixture.interruptSequence > 7) {
+      const secondResolution = fixture.items.find(item => item.event.entity_type === 'note' && item.event.revision === 6 && item.event.server_sequence > 7)
+      if (!secondResolution) throw Error('missing_successor_resolution')
+      for (let sequence = 8; sequence <= secondResolution.event.server_sequence; sequence++) {
+        if (sequence === secondResolution.event.server_sequence) {
+          const before = await page.evaluate(() => adapter.store.read())
+          const refused = await page.evaluate(async () => {
+            const put = IDBObjectStore.prototype.put
+            IDBObjectStore.prototype.put = function(value, ...args) {
+              const request = put.call(this, value, ...args)
+              if (this.name === 'inbox' && value.state === 'note_resolution_proven') request.addEventListener('success', () => this.transaction.abort(), { once: true })
+              return request
+            }
+            try { await adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys); return false }
+            catch { return true } finally { IDBObjectStore.prototype.put = put }
+          })
+          assert.equal(refused, true); assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+          await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+          assert.deepEqual(await page.evaluate(() => adapter.store.read()), before)
+        }
+        const result = await page.evaluate(() => adapter.store.recoverV10(readerAuth.auth, readerAuth.bindings, readerAuth.keys))
+        assert.equal(result.applied[0]?.sequence, sequence, JSON.stringify(result))
+      }
+      const successor = await page.evaluate(() => adapter.store.read())
+      assert.equal(successor.rows.find(row => row.server_sequence === secondResolution.event.server_sequence)?.state, 'note_resolution_proven')
+      await page.evaluate(() => adapter.store.close()); await context.close(); page = await launch(); await attach(page)
+      assert.deepEqual(await page.evaluate(() => adapter.store.read()), successor)
+    }
   }
   const aborted = await page.evaluate(async () => {
     const put = IDBObjectStore.prototype.put
