@@ -1,5 +1,58 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Document ledger/projection transaction implementation (PARTIAL)
+
+Starting SHA `7ab37e01495b57dab63c237e2104c14c5d1a149b`, branch 6.0.
+All prior uncommitted Document token, Vue/session and test changes preserved.
+Added uncommitted `documentApply.ts` with a transaction-injected genesis ledger /
+encrypted projection write and a projection authenticator against freshly
+prepared original ciphertext. The transaction compares the exact prepared
+inventory, checks current session and rejects a pre-existing different ledger
+or occupied projection; writes are scheduled in one supplied transaction.
+This module is NOT production-connected: `documentLedger` and
+`documentProjection` stores do not yet exist in replay schema, ownerPort snapshot
+and transition validation do not include them, no Document inbox proof/version
+or manifest coverage is implemented, and recovery never calls this module.
+There is no accepted Native-equivalent Document owner proof. These are concrete
+unfinished changes, not an established fundamental contract impossibility.
+
+No IndexedDB, Native writer or restart/rollback/corrupt-proof apply acceptance
+ran; all remain NOT RUN. Existing Document preparation Vitest 2 passed;
+frontend typecheck/build and quick acceptance passed. This does not test the
+new transaction module. Rust NOT RUN. No ACK, browser capability PUT, VPS,
+CI run/poll or gate change. ready=false, declarationAllowed=false,
+writerAuthorized=false; readiness 2/10, product stage 2/6, Slice 4/5 PARTIAL.
+
+At owner request only this checkpoint is committed separately; final SHA is the
+documentation commit containing this entry. Unchecked production changes remain
+uncommitted: documentApply.ts, documentPrepare.ts/spec, cloudAccountSession and
+BrowserCloudProjectRead.vue/spec. No production commit/push. Next integrate
+Document ledger/projection and inbox outcome into versioned replay schema,
+Snapshot/CAS/transition validation and authenticated inventory, then run a real
+Native genesis through ownerPort and IndexedDB restart/abort/corruption tests.
+Full Web / unified sync / pragmatic development decisions remain recorded below.
+
+## 2026-11-05 — Document preparation snapshot pin (PARTIAL)
+
+Starting/final HEAD `7ab37e01495b57dab63c237e2104c14c5d1a149b`, branch 6.0.
+Previously uncommitted Vue/session changes preserved. Document genesis
+preparation now returns an opaque WeakMap token pinned to the complete scope,
+inventory and session, and rejects mutation during async preparation, forged
+tokens, stale inventory and revoked sessions. A future owner commit must invoke
+the inspector against its transaction snapshot; this is not yet connected to
+ownerPort and does not create a Document proof, ledger or projection. The
+Document apply, replay inventory and IndexedDB migration/reopen authentication
+are NOT implemented. No Document is displayed. No Native/IndexedDB acceptance,
+Chromium or Rust test was run for this change. Focused Vitest 2 passed;
+frontend build and typecheck passed. Production changes and checkpoint remain
+uncommitted; no push or CI run/poll. Next implement ledger/projection and proof
+in the existing replay transaction with schema migration and pinned inventory,
+then Native SQLite → IndexedDB rollback/reopen acceptance. Scope is incomplete,
+not a contract impossibility claim. No VPS, browser capability PUT, ACK or
+security gate changes. Readiness 2/10, ready=false, declarationAllowed=false,
+writerAuthorized=false; product stage 2/6, Slice 4/5 PARTIAL. Full Web and
+unified bidirectional sync owner decisions remain in the roadmap and below.
+
 ## 2026-11-05 — Document adapter preparation implemented (PARTIAL)
 
 Starting SHA `c97ec772804f14b8772be20a3e42d660309a590a`, branch 6.0.
