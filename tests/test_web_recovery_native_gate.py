@@ -150,9 +150,9 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
         # Leave the longer project/plain pagination regression unchanged.
         if stage_format:
             receive(client, tmp_path, token, db, identity, user, amk)
-            def check_stage_order(order):
+            def check_stage_order(order, names=None):
                 fixture_path.write_text(json.dumps({'projectId': PROJECT_ID, 'stages': order,
-                    'firstText': 'Native edit after browser recovery' if stage_format == 'plain' else 'Native HTML update after browser recovery', 'firstHtml': stage_format == 'html', 'secondText': second_text}), encoding='utf-8')
+                    'firstText': 'Native edit after browser recovery' if stage_format == 'plain' else 'Native HTML update after browser recovery', 'firstHtml': stage_format == 'html', 'secondText': second_text, 'names': names}), encoding='utf-8')
                 checked = subprocess.run(['node', 'scripts/browser-recovery-stage-order.mjs', str(fixture_path), f'http://127.0.0.1:{port}', str(profile_path), str(vite_port)],
                     cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
                 assert checked.returncode == 0, checked.stdout + checked.stderr
@@ -170,6 +170,10 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
             with sqlite3.connect(db) as connection:
                 stage_order = [row[0] for row in connection.execute('SELECT stage_id FROM stage_order WHERE project_id=? ORDER BY position', (PROJECT_ID,))]
             check_stage_order(stage_order)
+            structural(tmp_path, db, identity, user, 'edit', stage_id='S1', proposed=dict(stage, name='Renamed Stage S1'))
+            assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+            pull_structure(client, tmp_path, token, db, identity, user, amk)
+            check_stage_order(stage_order, {'S1': 'Renamed Stage S1'})
             return
         receive(client, tmp_path, token, db, identity, user, amk)
         content(tmp_path, db, identity, user, 'edit', note_id='native-note', stage_id=None, patch={'content': 'Second native edit after browser recovery'})

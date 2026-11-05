@@ -27,11 +27,12 @@ try {
   await button.click();await panel.locator('[data-testid="cloud-stage-list"], [role="alert"]').first().waitFor();if(await panel.locator('[role="alert"]').count())throw Error(`recovery refused: ${await panel.locator('[role="alert"]').getAttribute('data-read-code')}`)
   const stages=panel.locator('[data-stage-id]')
   assert.deepEqual(await stages.evaluateAll(nodes=>nodes.map(n=>n.getAttribute('data-stage-id'))),fixture.stages)
-  assert.deepEqual(await stages.allTextContents(),fixture.stages.map(id=>`Stage ${id}`))
+  assert.deepEqual(await stages.allTextContents(),fixture.stages.map(id=>fixture.names?.[id]??`Stage ${id}`))
   await panel.locator('[data-stage-id="S1"]').click()
   if(fixture.firstHtml)assert.ok((await panel.frameLocator('[data-testid="cloud-note-html"]').locator('body').innerText()).includes(fixture.firstText))
   else assert.ok((await panel.innerText()).includes(fixture.firstText))
   await panel.locator('[data-stage-id="S2"]').click();assert.ok((await panel.innerText()).includes(fixture.secondText))
+  if(fixture.names){await button.click();await panel.locator('[data-testid="cloud-stage-list"]').waitFor();assert.equal(await panel.locator('[data-stage-id="S2"]').getAttribute('aria-pressed'),'true');assert.ok((await panel.innerText()).includes(fixture.secondText))}
   if(!corruptionChecked){
    const row=await page.evaluate(async()=>{const q=indexedDB.open('worta-web-replay',6);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const result=await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),store=tx.objectStore('inbox'),all=store.getAll();let original;all.onsuccess=()=>{original=all.result.find(r=>r.state==='stage_proven');if(!original){tx.abort();return}const damaged=structuredClone(original);damaged.stage_proof.wire_digest='0'.repeat(64);store.put(damaged)};tx.oncomplete=()=>ok(original);tx.onabort=no});db.close();return result})
    await button.click();await panel.locator('[role="alert"]').waitFor();assert.equal(await panel.locator('[data-testid="cloud-stage-list"]').count(),0)

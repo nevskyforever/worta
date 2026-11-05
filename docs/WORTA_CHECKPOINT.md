@@ -1,5 +1,33 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Stage rename production recovery (LOCAL COMPLETE for this cohort)
+
+Starting SHA `f2111c24c57e59cad6907f2e86546993e3d59dc5`, clean branch 6.0.
+The existing Stage update receiver, production Stage owner and replay CAS already
+implement the required single peer update. Extended the genuine native writer /
+isolated PostgreSQL 16 / FastAPI / Recovery GET / Chromium fixture: after an
+initial project, two stages, notes, reorder and creation of S3, Desktop renames
+S1 and publishes its real encrypted Stage update. The same browser profile logs
+in, unlocks, displays the new name with unchanged IDs, ordering and notes, and
+reopens and reauthenticates. Refresh retains the selected stage. The existing
+fixture also corrupts a stored Stage proof and verifies safe refusal, and
+checks retained ciphertext, owner replay, rollback and no premature ACK.
+No browser capability PUT; only the previously owner-authorized synthetic
+Desktop declaration was used in the isolated fixture. Existing production
+implementation required no change for this qualified route.
+
+Results: focused PostgreSQL/FastAPI/Chromium 1 passed, Vitest 78 passed,
+frontend typecheck/build and quick acceptance passed. No full CI run or poll.
+No VPS access or production data. Local acceptance is bounded to one supported
+peer Stage update after a fully authenticated history; deletion, conflicts,
+Metadata changes and multi-event continuations are not newly qualified.
+Stage 2/6, Slice 4/5 PARTIAL; readiness 2/10; ready=false,
+declarationAllowed=false, writerAuthorized=false, public registration/release
+closed. Full Web and unified bidirectional sync owner decisions remain below
+and in the roadmap. Branch 6.0; final SHA is the commit containing this entry.
+Next implement and qualify the next supported project reading route through the
+existing owners before Web writing and unified bidirectional synchronization.
+
 ## 2026-11-05 — Stage create → StageOrder → Web (LOCAL COMPLETE for this cohort)
 
 Starting SHA `754914e3a1b39c9979dc075ad33b9993572b3284`, branch 6.0;
