@@ -916,6 +916,15 @@ class SyncService:
                 SyncEvent.user_id == user_id, SyncEvent.entity_type == 'progress').limit(1))
             if emitted is not None:
                 raise SyncProtocolError('progress_reader_required', 'This device must support progress readers.', 409)
+        visible, next_cursor, has_more = self._materialize_encrypted_page(session, user_id, since, limit)
+        return visible, next_cursor, has_more, state.current_sequence
+
+    def _materialize_encrypted_page(self, session: Session, user_id: object, since: int, limit: int):
+        """Materialize one opaque page after the caller has enforced its access policy.
+
+        This helper does not authorize reads or modify device capabilities. The
+        existing pull entry point performs all gates before invoking it.
+        """
         descriptors = self._sync.pull_encrypted_descriptors(session, user_id, since, limit)
         selected_descriptors: list[EncryptedPullDescriptor] = []
         ciphertext_total = 0
@@ -944,7 +953,7 @@ class SyncService:
         visible = [(row[0], row[1]) for row in materialized]
         has_more = stopped_for_size or len(descriptors) > len(selected_descriptors)
         next_cursor = visible[-1][0].server_sequence if visible else since
-        return visible, next_cursor, has_more, state.current_sequence
+        return visible, next_cursor, has_more
 
     def pull_encrypted_v2(self, session: Session, user_id: object, device_id: object, since: int, limit: int):
         rows, next_cursor, has_more, high_water = self.pull_encrypted(
@@ -966,6 +975,11 @@ class SyncService:
         rows, next_cursor, has_more, high_water = self.pull_encrypted(
             session, user_id, device_id, since, limit, transport_version=3,
         )
+        self._validate_v3_encrypted_rows(rows)
+        return rows, next_cursor, has_more, high_water
+
+    @staticmethod
+    def _validate_v3_encrypted_rows(rows) -> None:
         from .schemas import ACCOUNT_ENTITY_TYPES
         for event, encrypted in rows:
             if event.project_id is None:
@@ -985,8 +999,6 @@ class SyncService:
                     'encrypted_sync_event_incomplete',
                     'V3 encrypted pull encountered an event without a supported opaque object.', 409,
                 )
-        return rows, next_cursor, has_more, high_water
-
     def ack(self, session: Session, user_id: object, device_id: object, cursor: int, *, transport_version: int = 1) -> int:
         try:
             session.commit()

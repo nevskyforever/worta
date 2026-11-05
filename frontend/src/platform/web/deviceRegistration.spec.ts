@@ -4,7 +4,7 @@ import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
 import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
 import { NormalUserAuthRuntime } from '@/auth/userAuth'
 import { AuthoritativeAccountBinding } from '@/auth/accountBinding'
-import { BrowserDeviceRegistration, validateBrowserDeviceRegistration } from './deviceRegistration'
+import { BrowserDeviceRegistration, currentBrowserDevice, currentRegisteredBrowserDevice, validateBrowserDeviceRegistration } from './deviceRegistration'
 import { BrowserPersistenceError } from './persistence'
 import type { BrowserSyncTransaction } from './syncDurability'
 const scope = { canonicalUserId: '11111111-1111-4111-8111-111111111111', accountId: '22222222-2222-4222-8222-222222222222', deviceId: '33333333-3333-4333-8333-333333333333' }
@@ -32,6 +32,14 @@ async function fixture() {
   return { runtime, auth, reads, http, close: () => { closed = true }, corrupt: () => { corruptDevice = true }, switchUser: async () => { await auth.logout(); user = '44444444-4444-4444-8444-444444444444'; await auth.login('fixture', 'fixture') } }
 }
 describe('C21.1.19 identity-only browser registration', () => {
+  it('pins a recovery identity to the authenticated snapshot without registering or permitting declaration', async () => {
+    const f = await fixture(), recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockResolvedValue(JSON.stringify({ items: [], next_cursor: 4, has_more: false }))
+    const token = await f.runtime.verifyRecovery(scope, 4, 2, new AbortController().signal)
+    expect(recovery).toHaveBeenCalledOnce(); expect(f.http).not.toHaveBeenCalled()
+    expect(currentBrowserDevice(token, scope, f.auth)).toBe(true)
+    expect(currentRegisteredBrowserDevice(token, scope, f.auth)).toBe(false)
+    await f.auth.logout(); expect(currentBrowserDevice(token, scope, f.auth)).toBe(false)
+  })
   it('registers exact durable device and validates ownership twice without writes', async () => {
     const f = await fixture()
     expect(await f.runtime.registerOnce(scope)).toEqual({ deviceId: scope.deviceId, serverAckCursor: 19, ready: false })

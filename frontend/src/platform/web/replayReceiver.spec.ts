@@ -49,7 +49,7 @@ beforeEach(async () => {
   // Unit tests cover receiver orchestration only. Native IDB atomicity/schema
   // and restart are exercised by the real Chromium/PostgreSQL acceptance.
   store = {
-    recoverV10: vi.fn(), importRecoveryProject: vi.fn(),
+    recoverV10: vi.fn(), importRecoveryProject: vi.fn(), stageRecoveryExtension: vi.fn(),
     contentAuthorOwner:vi.fn(),receiveContentAuthorEcho:vi.fn(),inspectNoteReaderReadiness: vi.fn(), applyContentUpdate: vi.fn(), applyOrderedContentUpdate: vi.fn(), applyMetadata: vi.fn(), applyStructure: vi.fn(), applyInitialNotes: vi.fn(), seedNoteSource: vi.fn(),
     start: vi.fn(async () => {
       state.manifest ??= { record_version: 5, contract_version: 5, metadata_cursor: 0, applied_cursor: 0, source_seeds: [], account_id: scope.accountId, canonical_user_id: scope.canonicalUserId,
@@ -77,6 +77,49 @@ beforeEach(async () => {
 })
 
 describe('Online-Only ciphertext receiver, without apply proofs', () => {
+  it('uses the explicit recovery delivery with the pinned snapshot and no ordinary pull', async () => {
+    const recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since, limit, cursor, epoch) => {
+      expect(cursor).toBe(3); expect(epoch).toBe(2)
+      const next = Math.min(since + limit, rows.length)
+      return wirePage(rows.slice(since, next), next, next < rows.length)
+    })
+    expect(await receiveBrowserAccountHistory({ auth, lease, scope, signal: controller.signal, current: () => active, openStorage, delivery: 'recovery' }))
+      .toMatchObject({ events: 3, ready: false, projectOpened: false })
+    expect(recovery).toHaveBeenCalled(); expect(pull).not.toHaveBeenCalled()
+  })
+  it('rejects a changed retained wire before any anchor transition or write', async () => {
+    const recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since, limit, cursor) => {
+      const next = Math.min(since + limit, rows.length)
+      return wirePage(rows.slice(since, next), next, next < cursor)
+    })
+    const input = { auth, lease, scope, signal: controller.signal, current: () => active, openStorage, delivery: 'recovery' as const }
+    await receiveBrowserAccountHistory(input)
+    const before = structuredClone(state), starts = vi.mocked(store.start).mock.calls.length, commits = vi.mocked(store.commitPage).mock.calls.length
+    anchor = { ...anchor, registry: { ...anchor.registry, current_cursor: 4 } }
+    recovery.mockImplementationOnce(async () => {
+      const changed = structuredClone(rows[0]) as { object: { ciphertext: string } }
+      changed.object.ciphertext = (changed.object.ciphertext[0] === 'A' ? 'B' : 'A') + changed.object.ciphertext.slice(1)
+      return wirePage([changed, ...rows.slice(1)], 3, true)
+    })
+    await expect(receiveBrowserAccountHistory(input)).rejects.toMatchObject({ code: 'retained_wire_mismatch' })
+    expect(state).toEqual(before)
+    expect(store.start).toHaveBeenCalledTimes(starts)
+    expect(store.commitPage).toHaveBeenCalledTimes(commits)
+  })
+  it('rejects an out-of-order retained prefix before changing the cache', async () => {
+    const recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since, limit, cursor) => {
+      const next = Math.min(since + limit, rows.length)
+      return wirePage(rows.slice(since, next), next, next < cursor)
+    })
+    const input = { auth, lease, scope, signal: controller.signal, current: () => active, openStorage, delivery: 'recovery' as const }
+    await receiveBrowserAccountHistory(input)
+    const before = structuredClone(state), starts = vi.mocked(store.start).mock.calls.length
+    anchor = { ...anchor, registry: { ...anchor.registry, current_cursor: 4 } }
+    recovery.mockImplementationOnce(async () => wirePage([rows[1], rows[0], rows[2]], 3, true))
+    await expect(receiveBrowserAccountHistory(input)).rejects.toThrow()
+    expect(state).toEqual(before)
+    expect(store.start).toHaveBeenCalledTimes(starts)
+  })
   it('stages real shared-codec AEAD across projects/pages with no decrypt, ACK, push or declaration', async () => {
     const network = vi.spyOn(globalThis, 'fetch')
     expect(await run()).toMatchObject({ kind: 'received_ciphertext', cursor: 3, events: 3, ready: false,

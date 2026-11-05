@@ -121,7 +121,7 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
 /** Internal owner: full server reconciliation precedes this call; no caller supplies seed authority. */
 export async function seedReplayNoteSource(port: SeedPort, scope: BrowserSyncScope, projectId: string, signal: AbortSignal,
   current: () => boolean, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding,
-  keys: RuntimeKeyContext): Promise<ReplaySourceSeedResult> {
+  keys: RuntimeKeyContext, delivery: 'ordinary' | 'recovery' = 'ordinary'): Promise<ReplaySourceSeedResult> {
   const context = auth.requireContext(), lease = keys.leaseForAccount(scope.accountId)
   const check = () => {
     if (signal.aborted || !current() || !auth.isCurrent(context) || !lease?.isCurrent()
@@ -141,12 +141,14 @@ export async function seedReplayNoteSource(port: SeedPort, scope: BrowserSyncSco
     const registry = await auth.authorized(token => cloudProjectsApi.listBootstraps(token, signal)); check()
     const mode = await auth.authorized(token => encryptedSyncV2Api.capabilities(token, signal)); check()
     if (!replaySame(replayAnchor(registry.value, mode.value), anchor)) fail('server_changed')
-    const tail = await auth.authorized(token => encryptedSyncV3Api.pullRaw(token, scope.deviceId, anchor.registry.current_cursor, 1, signal)); check()
+    const tail = await auth.authorized(token => delivery === 'recovery'
+      ? encryptedSyncV3Api.recoveryRaw(token, anchor.registry.current_cursor, 1, anchor.registry.current_cursor, anchor.transport.cutover_epoch, signal)
+      : encryptedSyncV3Api.pullRaw(token, scope.deviceId, anchor.registry.current_cursor, 1, signal)); check()
     const { page } = prepareReplayPage(tail.value, anchor.registry.current_cursor, scope, anchor)
     if (page.items.length || page.has_more) fail('server_changed')
   }
   const prepared = await lease!.use(async amk => {
-    const noteSequences = snapshot.rows.some(row => row.state === 'note_proven')
+    const noteSequences = snapshot.rows.some(row => ['note_proven', 'content_note_proven', 'content_note_conflict_preserved', 'note_resolution_proven', 'content_note_self_echo_proven'].includes(row.state))
       ? await reauthenticateReplayNotes(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, id => port.readSource(snapshot, id))
       : new Set<number>()
     await reauthenticateReplayOwners(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, true, noteSequences)
@@ -168,7 +170,7 @@ export async function seedReplayNoteSource(port: SeedPort, scope: BrowserSyncSco
     snapshot = await port.read(); check()
   }
   await lease!.use(async amk => {
-    const noteSequences = snapshot.rows.some(row => row.state === 'note_proven')
+    const noteSequences = snapshot.rows.some(row => ['note_proven', 'content_note_proven', 'content_note_conflict_preserved', 'note_resolution_proven', 'content_note_self_echo_proven'].includes(row.state))
       ? await reauthenticateReplayNotes(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, id => port.readSource(snapshot, id))
       : new Set<number>()
     await reauthenticateReplayOwners(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, true, noteSequences)

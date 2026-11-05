@@ -253,6 +253,22 @@ export const encryptedSyncV3Api = {
     try { return JSON.stringify(value) }
     finally { for (const item of parsed.items) { item.object.nonce.fill(0); item.object.ciphertext.fill(0) } }
   },
+  /** Account-scoped ciphertext only; this is neither a device capability nor an ACK. */
+  async recoveryRaw(token: string, since: number, limit: number, cursor: number, epoch: number, signal?: AbortSignal): Promise<string> {
+    if (!safe(since, 0) || !safe(limit, 1) || limit > 100 || !safe(cursor, since) || !safe(epoch, 0)) fail()
+    const query = new URLSearchParams({ since: String(since), limit: String(limit), expected_cursor: String(cursor), expected_epoch: String(epoch) })
+    const value = await apiRequest<unknown>(`/api/v3/recovery/encrypted/history?${query}`, { headers: headers(token), signal, maxResponseBytes: MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES })
+    if (!exact(value, ['delivery_version', 'current_cursor', 'cutover_epoch', 'writer_transport_version', 'items', 'next_cursor', 'has_more'])) fail()
+    const outer = value as {delivery_version:number;current_cursor:number;cutover_epoch:number;writer_transport_version:number;items:unknown[];next_cursor:number;has_more:boolean}
+    if (outer.delivery_version !== 1 || outer.current_cursor !== cursor || outer.cutover_epoch !== epoch || outer.writer_transport_version !== 3) fail()
+    const wire = { protocol_version: 3, encrypted_sync_version: 3, items: outer.items, next_cursor: outer.next_cursor, has_more: outer.has_more }
+    const parsed = parseV3Pull(wire, since, limit)
+    try {
+      if (parsed.items.some((item, index) => item.event.server_sequence !== since + index + 1)
+        || parsed.next_cursor > cursor || parsed.has_more !== (parsed.next_cursor < cursor)) fail()
+      return JSON.stringify(wire)
+    } finally { for (const item of parsed.items) { item.object.nonce.fill(0); item.object.ciphertext.fill(0) } }
+  },
   ack: (token: string, deviceId: string, cursor: number): Promise<void> => {
     if (!UUID.test(deviceId) || !safe(cursor, 0)) fail()
     return apiRequest<void>('/api/v3/sync/encrypted/ack', { method: 'POST', headers: headers(token), body: { protocol_version: 3, encrypted_sync_version: 3, device_id: deviceId, cursor } })

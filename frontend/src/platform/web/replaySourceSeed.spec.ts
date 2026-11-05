@@ -106,6 +106,15 @@ it('authenticates true Note-before-Metadata history, seals one source and reopen
   expect(await run()).toMatchObject({ status: 'already_seeded', projectOpened: false })
   expect(commit).toHaveBeenCalledTimes(1)
 })
+it('rechecks the source anchor through explicitly selected recovery delivery', async () => {
+  const recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockResolvedValue(JSON.stringify({
+    protocol_version: 3, encrypted_sync_version: 3, items: [], next_cursor: 2, has_more: false,
+  }))
+  expect(await seedReplayNoteSource({ read: async () => structuredClone(state), readSource: vi.fn(), commit }, scope, project,
+    new AbortController().signal, () => active, auth, bindings, keys, 'recovery')).toMatchObject({ status: 'seeded' })
+  expect(recovery).toHaveBeenCalled()
+  expect(encryptedSyncV3Api.pullRaw).not.toHaveBeenCalled()
+})
 it.each(['count', 'max', 'origin', 'bootstrap', 'genesis', 'note', 'identity', 'family'] as const)('rejects %s with no source or proof', async kind => {
   const manifest = state.manifest!, remote = manifest.anchor.registry.projects[0]!
   if (kind === 'count') remote.initial_event_count = 0

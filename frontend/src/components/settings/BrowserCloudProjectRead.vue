@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
+import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
 const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string }>()
@@ -16,25 +17,34 @@ const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: 
   pt_BR: { open: 'Abrir projeto na nuvem', partial: 'Configurações verificadas do servidor. Textos, etapas, notas e outros dados ainda não foram abertos.', blocked: 'Leitura bloqueada', network: 'Não foi possível conectar ao servidor. Tente novamente.', register: 'Registrar este navegador para acessar a nuvem' },
 }
 const words = computed(() => copy[locale.language])
+const recoveryLabels: Record<SupportedLanguage, { open: string; heading: string }> = {
+  ru: { open: 'Открыть заметки для чтения', heading: 'Заметки' },
+  en: { open: 'Open notes for reading', heading: 'Notes' },
+  es: { open: 'Abrir notas para leer', heading: 'Notas' },
+  de: { open: 'Notizen zum Lesen öffnen', heading: 'Notizen' },
+  fr: { open: 'Ouvrir les notes en lecture', heading: 'Notes' },
+  pt_BR: { open: 'Abrir notas para leitura', heading: 'Notas' },
+}
 const result = ref<BrowserCloudProjectRead | null>(null), busy = ref(false), error = ref<string | null>(null)
+const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
-  controller?.abort(); result.value = null; error.value = null
+  controller?.abort(); result.value = null; recovery.value = null; error.value = null
   emit('invalidated')
 })
 async function open(): Promise<void> {
   if (disposed) return
   controller?.abort()
   const active = new AbortController(); controller = active
-  result.value = null; error.value = null; busy.value = true
+  result.value = null; recovery.value = null; error.value = null; busy.value = true
   try {
     const value = await props.session.readCloudProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') result.value = value
   } catch (cause) {
     if (active.signal.aborted) return
     if (props.session.status !== 'unlocked') { emit('invalidated'); return }
-    error.value = cause instanceof BrowserCloudReadError ? cause.code : 'connection_failed'
+    error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError ? cause.code : 'connection_failed'
   } finally { if (controller === active) busy.value = false }
 }
 async function register(): Promise<void> {
@@ -43,13 +53,27 @@ async function register(): Promise<void> {
   catch { if (props.session.status !== 'unlocked') emit('invalidated'); else error.value = 'connection_failed' }
   finally { busy.value = false }
 }
+async function openRecovery(): Promise<void> {
+  if (disposed) return
+  controller?.abort(); const active = new AbortController(); controller = active
+  recovery.value = null; error.value = null; busy.value = true
+  try {
+    const value = await props.session.readRecoveryProject(props.projectId, active.signal)
+    if (!active.signal.aborted && props.session.status === 'unlocked') recovery.value = value
+  } catch (cause) {
+    if (active.signal.aborted) return
+    if (props.session.status !== 'unlocked') { emit('invalidated'); return }
+    error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError ? cause.code : 'connection_failed'
+  } finally { if (controller === active) busy.value = false }
+}
 onMounted(() => { void open() })
-onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null })
+onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null })
 </script>
 
 <template>
   <section data-testid="cloud-project-read" :data-project-id="projectId">
     <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="open">{{ busy ? t('Загружаем с сервера…') : words.open }}</button>
+    <button data-testid="cloud-notes-open" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="openRecovery">{{ recoveryLabels[locale.language].open }}</button>
     <p v-if="error" role="alert" :data-read-code="error">{{ error === 'connection_failed' ? words.network : `${words.blocked}: ${error}` }}</p>
     <button v-if="error === 'sync_device_not_registered'" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="register">{{ words.register }}</button>
     <article v-if="result" data-testid="cloud-project-metadata">
@@ -60,6 +84,11 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         <dt>{{ t('Статус') }}</dt><dd>{{ result.metadata.status }}</dd>
         <dt>{{ t('Дедлайн') }}</dt><dd>{{ result.metadata.deadline ?? '—' }}</dd>
       </dl>
+    </article>
+    <article v-if="recovery" data-testid="cloud-project-notes">
+      <h3>{{ recovery.project.name }}</h3>
+      <h4>{{ recoveryLabels[locale.language].heading }}</h4>
+      <section v-for="note in recovery.notes" :key="note.id"><h5>{{ note.title }}</h5><p style="white-space: pre-wrap">{{ note.content }}</p></section>
     </article>
   </section>
 </template>

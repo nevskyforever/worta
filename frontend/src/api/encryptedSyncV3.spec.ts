@@ -10,6 +10,19 @@ const descriptor = { event_id: EVENT, device_id: DEVICE, server_sequence: 1, pro
   entity_type: 'project_metadata' as const, operation: 'upsert' as const, revision: 1, updated_at: NOW, deleted_at: null }
 
 describe('mode-3 metadata transport boundary', () => {
+  it('validates the account recovery snapshot and preserves the encrypted wire', async () => {
+    const item = { event: descriptor, object: { crypto_version: 1, aad_version: 1,
+      nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } }
+    const page = { delivery_version: 1, current_cursor: 1, cutover_epoch: 2, writer_transport_version: 3,
+      items: [item], next_cursor: 1, has_more: false }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(page)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...page, current_cursor: 2 })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...page, items: [{ ...item, event: { ...descriptor, server_sequence: 2 } }] })))
+    expect(JSON.parse(await encryptedSyncV3Api.recoveryRaw('token', 0, 1, 1, 2)).items).toEqual([item])
+    await expect(encryptedSyncV3Api.recoveryRaw('token', 0, 1, 1, 2)).rejects.toThrow()
+    await expect(encryptedSyncV3Api.recoveryRaw('token', 0, 1, 1, 2)).rejects.toThrow()
+    fetch.mockRestore()
+  })
   it('returns only validated original encrypted wire for replay and propagates cancellation', async () => {
     const page = { protocol_version: 3, encrypted_sync_version: 3, items: [{ event: descriptor, object: {
       crypto_version: 1, aad_version: 1, nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',

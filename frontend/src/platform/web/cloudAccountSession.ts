@@ -11,6 +11,7 @@ import { currentPlatform } from '@/platform/runtime'
 import type { SupportedLanguage } from '@/types/api'
 import { BrowserPersistenceError, openBrowserPersistence } from './persistence'
 import type { BrowserLocalAuthorityRuntime } from './localAuthority'
+import type { NativeLocalProject, NativeLegacyNote } from './localAuthorityRecords'
 import type { BrowserLocalStagesRuntime } from './localStages'
 import type { BrowserLocalDocumentsRuntime } from './localDocuments'
 import type { BrowserSyncScope } from './syncDurability'
@@ -127,6 +128,35 @@ export class BrowserCloudAccountSession {
       scope: { accountId: identity.local_account_id, deviceId: identity.device_id, canonicalUserId: context.userId },
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) })
+  }
+
+  /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[] }> {
+    this.assertWeb()
+    const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
+    const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
+    if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.controller) throw new BrowserCloudReadError('key_locked')
+    const scope = { accountId: identity.local_account_id, deviceId: identity.device_id, canonicalUserId: context.userId }
+    return withReceivedBrowserAccountHistory({ auth: this.auth, lease, scope, delivery: 'recovery',
+      signal: AbortSignal.any([signal, this.controller.signal]),
+      current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context),
+    }, async storage => {
+      await storage.importRecoveryProject(projectId, this.auth, bindings, keys, 'recovery')
+      for (let i = 0; i <= 200; i++) {
+        const result = await storage.recoverV10(this.auth, bindings, keys, 'recovery')
+        if (result.blocker && result.blocker.kind !== 'budget_exhausted') throw new BrowserCloudReadError('unsupported_history')
+        if (!result.more) break
+        if (i === 200) throw new BrowserCloudReadError('history_limit')
+      }
+      const snapshot = await storage.read()
+      if (!snapshot.manifest || snapshot.manifest.applied_cursor !== snapshot.manifest.receive_cursor)
+        throw new BrowserCloudReadError('unsupported_history')
+      const local = storage.contentAuthorOwner(this.auth, bindings, keys).local
+      const source = await local.readSnapshot(scope, projectId)
+      return await local.withDecryptedSnapshot(scope, source.token, async value => ({
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)),
+      }))
+    })
   }
 
   /** Bounded peer Metadata only. Fresh server reconciliation is mandatory on every call. */

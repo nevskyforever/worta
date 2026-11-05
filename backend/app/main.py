@@ -34,7 +34,7 @@ from .cloud.admin_router import router as cloud_admin_router
 from .cloud.projects_router import router as cloud_projects_router
 from .cloud.sync_router import router as cloud_sync_router
 from .cloud.sync_v2_router import router as cloud_sync_v2_router
-from .cloud.sync_v3_router import router as cloud_sync_v3_router
+from .cloud.sync_v3_router import router as cloud_sync_v3_router, recovery_router as cloud_recovery_router
 from .cloud.encrypted_blobs_router import router as cloud_encrypted_blobs_router
 from .cloud.email import email_sender_from_config
 from .cloud.passwords import PasswordCapacityError
@@ -296,6 +296,7 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     app.include_router(cloud_sync_router)
     app.include_router(cloud_sync_v2_router)
     app.include_router(cloud_sync_v3_router)
+    app.include_router(cloud_recovery_router)
     app.include_router(cloud_encrypted_blobs_router)
     app.include_router(cloud_admin_router)
     return app

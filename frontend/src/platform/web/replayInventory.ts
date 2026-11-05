@@ -388,7 +388,19 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       if (metadata !== (metadataPrefix < 0 ? rows.length : metadataPrefix)) fail()
       for (const record of imported) {
         const remote = manifest?.anchor.registry.projects.find(project => project.project_id === record.project_id)
-        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&(!authorActive||record.remote_high_water===null||record.remote_high_water<(resolutionsOut.length?((closed?.server_sequence??rows.find(r=>resolutionsOut.some(o=>o.event_id===r.event_id))?.server_sequence??manifest!.anchor.registry.current_cursor)-1):(closed?.server_sequence??manifest!.anchor.registry.current_cursor))||record.remote_high_water>manifest!.anchor.registry.current_cursor)
+        const seed = manifest?.source_seeds?.find(value => value.project_id === record.project_id && value.bootstrap_id === record.bootstrap_id)
+        const genesis = seed && rows.find(value => value.event_id === seed.genesis_event_id)
+        // This narrow continuation preserves the original import boundary by
+        // joining it to the authenticated Content genesis outcome. Other
+        // histories remain closed until they have an equivalent witness.
+        const contentGenesis = rows.find(value => value.state === 'content_note_proven'
+          && value.content_note_proof.mutation === 'create' && value.content_note_proof.header.project_id === record.project_id
+          && value.content_note_proof.header.revision === 1 && value.content_note_proof.header.parent_event_id === null)
+        const retainedImport = manifest?.contract_version === 6 && seed && genesis && contentGenesis && record.remote_high_water !== null
+          && contentGenesis.server_sequence === record.remote_high_water
+          && genesis.server_sequence <= record.remote_high_water && seed.initial_max_server_sequence <= record.remote_high_water
+          && record.remote_high_water <= (manifest.applied_cursor ?? 0) && record.remote_high_water < manifest.anchor.registry.current_cursor
+        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&!retainedImport&&(!authorActive||record.remote_high_water===null||record.remote_high_water<(resolutionsOut.length?((closed?.server_sequence??rows.find(r=>resolutionsOut.some(o=>o.event_id===r.event_id))?.server_sequence??manifest!.anchor.registry.current_cursor)-1):(closed?.server_sequence??manifest!.anchor.registry.current_cursor))||record.remote_high_water>manifest!.anchor.registry.current_cursor)
           || !(heads.some(head => head.owner_kind === 'project_metadata' && head.owner_id === record.project_id)
             || manifest?.source_seeds?.some(seed => seed.project_id === record.project_id))) fail()
       }

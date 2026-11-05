@@ -4,7 +4,7 @@ import { encryptedSyncV2Api, parseV2Capabilities } from '@/api/encryptedSyncV2'
 import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
 import { BrowserPersistenceError } from './persistence'
 import { snapshotBrowserSyncScope, immutableWireIdentity, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
-import { currentBrowserDevice, type VerifiedBrowserDevice } from './deviceRegistration'
+import { currentRegisteredBrowserDevice, type VerifiedBrowserDevice } from './deviceRegistration'
 import { BROWSER_CANONICAL_READERS } from './canonicalReaders'
 export interface VerifiedBrowserReader { readonly verifiedBrowserReader: unique symbol }
 const readers = new WeakMap<object, { scope: BrowserSyncScope; auth: NormalUserAuthRuntime; current: () => boolean }>()
@@ -21,7 +21,7 @@ export class BrowserReaderCapabilityRuntime {
     private readonly auth: NormalUserAuthRuntime, private readonly bindings: AuthoritativeAccountBinding) {}
   async declare(input: BrowserSyncScope, device: VerifiedBrowserDevice): Promise<VerifiedBrowserReader> {
     const scope = snapshotBrowserSyncScope(input), { context } = await this.bindings.ensureForCurrentUser(scope.accountId)
-    const current = () => this.sessionCurrent() && this.auth.isCurrent(context) && currentBrowserDevice(device, scope, this.auth)
+    const current = () => this.sessionCurrent() && this.auth.isCurrent(context) && currentRegisteredBrowserDevice(device, scope, this.auth)
     const check = () => { if (!current() || context.userId !== scope.canonicalUserId) throw new BrowserPersistenceError('closed') }
     const ownership = () => this.transaction<void>(scope, [], 'readonly', (_tx, result, abort) => { try { check(); result(undefined) } catch(e) { abort(e) } })
     if (BROWSER_CANONICAL_READERS.length !== 13) throw new TypeError('browser_readers_incomplete')

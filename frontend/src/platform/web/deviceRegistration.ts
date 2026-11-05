@@ -1,14 +1,18 @@
 import { syncApi, type SyncDeviceResponse } from '@/api/sync'
+import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { AuthoritativeAccountBinding } from '@/auth/accountBinding'
 import { BrowserPersistenceError } from './persistence'
 import { immutableWireIdentity, snapshotBrowserSyncScope, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
 export interface VerifiedBrowserDevice { readonly verifiedBrowserDevice: unique symbol }
-const devices = new WeakMap<object, { scope: BrowserSyncScope; auth: NormalUserAuthRuntime; current: () => boolean }>()
+const devices = new WeakMap<object, { scope: BrowserSyncScope; auth: NormalUserAuthRuntime; current: () => boolean; registered: boolean }>()
 export function currentBrowserDevice(token: VerifiedBrowserDevice, scope: BrowserSyncScope, auth: NormalUserAuthRuntime): boolean {
   const proof = devices.get(token)
   return !!proof && proof.auth === auth && proof.current() && immutableWireIdentity(proof.scope) === immutableWireIdentity(scope)
+}
+export function currentRegisteredBrowserDevice(token: VerifiedBrowserDevice, scope: BrowserSyncScope, auth: NormalUserAuthRuntime): boolean {
+  return devices.get(token)?.registered === true && currentBrowserDevice(token, scope, auth)
 }
 
 /** Registration envelope version is independent of the account writer transport. */
@@ -38,7 +42,26 @@ export class BrowserDeviceRegistrationRuntime {
     const current = () => this.sessionCurrent() && this.auth.isCurrent(context)
     if (!current()) throw new BrowserPersistenceError('closed')
     const token = Object.freeze({}) as VerifiedBrowserDevice
-    devices.set(token, { scope, auth: this.auth, current })
+    devices.set(token, { scope, auth: this.auth, current, registered: true })
+    return token
+  }
+
+  /** Recovery authority is local and session-bound; it does not enroll a sync device. */
+  async verifyRecovery(input: BrowserSyncScope, cursor: number, epoch: number, signal: AbortSignal): Promise<VerifiedBrowserDevice> {
+    const scope = snapshotBrowserSyncScope(input), initial = this.auth.requireContext()
+    const { context } = await this.bindings.ensureForCurrentUser(scope.accountId)
+    const current = () => this.sessionCurrent() && !signal.aborted && this.auth.isCurrent(initial)
+      && this.auth.isCurrent(context) && context.userId === scope.canonicalUserId
+    if (!current()) throw new BrowserPersistenceError('closed')
+    await this.transaction<void>(scope, [], 'readonly', (_tx, result, abort) => {
+      if (!current()) abort(new BrowserPersistenceError('closed')); else result(undefined)
+    })
+    const response = await this.auth.authorized(token => encryptedSyncV3Api.recoveryRaw(token, cursor, 1, cursor, epoch, signal))
+    const page = JSON.parse(response.value)
+    if (!current() || response.context.userId !== context.userId || page.items.length || page.has_more || page.next_cursor !== cursor)
+      throw new BrowserPersistenceError('closed')
+    const token = Object.freeze({}) as VerifiedBrowserDevice
+    devices.set(token, { scope, auth: this.auth, current, registered: false })
     return token
   }
 

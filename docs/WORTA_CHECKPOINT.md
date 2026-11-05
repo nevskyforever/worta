@@ -1,5 +1,371 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — authenticated same-profile Content extension (local acceptance)
+
+Starting HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch 6.0; all
+previous uncommitted Recovery GET, browser, UI, tests and checkpoint entries
+were preserved and included. `replayReceiver.ts` now reconciles the complete
+retained wire against the new pinned server snapshot, authenticates a bounded
+page of peer codec8 Content updates using the existing AEAD/canonical decoder,
+checks exact parent/revision/device/time, and rechecks registry, mode, original
+page and empty tail. `stageRecoveryExtension` uses full replay snapshot CAS and
+one IndexedDB transaction to stage ciphertext, cursor and new manifest anchor.
+The old binding, source seeds and existing proofs are not rewritten: its original
+import high-water remains bound to the authenticated Content genesis outcome.
+The new row is only `received`; applied coverage and proven prefix stay at the
+old value until the existing Content owner atomically commits its real proof and
+source. UI refuses partial history. Interrupted staging leaves the complete old
+snapshot unchanged. This is deliberately limited to a single bounded page of
+linear peer Content updates after a genesis whose server sequence is the original
+import high-water; unsupported histories fail closed. No claim of general
+Resolution/mixed-family continuation or complete reader readiness is made.
+
+Actual isolated Native Rust/SQLite → production FastAPI push → PostgreSQL 16 →
+authenticated Recovery GET → real Chromium login/unlock/Vue acceptance passed:
+initial project/plain Note, Desktop update, same-origin same-profile reread with
+new text, IndexedDB reopen and reauthentication. Browser did not register as a
+sync device or declare capability, and Desktop's later push succeeded. Test setup
+uses owner-authorized synthetic Desktop-only capability PUT after native reader
+support checks. Chromium verifies original ciphertext and genuine proofs, rejects
+modified old wire and missing/out-of-order sequence without changing the snapshot,
+aborts the actual IndexedDB manifest write and retries, and runs two actual CAS
+transactions where a stale transaction is rejected after the winner commits.
+Original import binding remains byte-for-byte unchanged; ACK remains zero. The
+synthetic test account's real Desktop AMK was provisioned as a wrapped key via
+the normal account crypto API before real Web unlock; no key or fake binding is
+injected into the production read. This is local, scoped server-to-browser
+acceptance, not public release or broad Web sync readiness.
+
+Focused PostgreSQL/FastAPI/Chromium plus existing descriptor regressions: 8 passed
+(14 unrelated deselected); focused Vitest 150 passed; Rust native conflict and
+Resolution 1 passed using existing compiled binary; frontend typecheck/build and
+quick acceptance passed. No CI was launched or polled, no VPS or production data
+was used. `ready=false`, `declarationAllowed=false`, `writerAuthorized=false`;
+2/10 readiness blockers closed, stage 2/6 and Slice 4/5 remain PARTIAL. Per-worker
+GET rate/concurrency limits are not distributed/global limits. Accepted changes
+are committed on 6.0; final SHA is the commit containing this checkpoint (use
+`git rev-parse HEAD`). Next: extend the authenticated transition beyond the
+single supported peer Content cohort only as needed for the two-user pilot, and
+verify the deployed environment separately under its existing approval gates.
+
+
+## 2026-11-05 — recovery anchor preflight (PARTIAL)
+
+Starting / current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch 6.0.
+All prior uncommitted Recovery GET, UI, tests and checkpoint changes were
+preserved. The exact stale condition remains: `BrowserReplayStorage.start`
+rejects a different anchor once owner-applied data or source seeds exist, and
+`replayInventory.ts` requires imported `remote_high_water` to match that anchor
+(except existing narrow author cases). `BrowserAccountRegistry.reconcile`
+updates high-water for a different contract, but using it alone would overwrite
+the saved imported value and cannot atomically commit anchor plus a new Content
+owner outcome. Blindly relaxing that validation or rewriting the binding would
+not preserve the requested original import evidence.
+
+Implemented a production read-only preflight in `replayReceiver.ts`: when a
+recovery cache sees a newer head it checks equal transport and project registry,
+re-fetches every retained ciphertext from zero under the new pinned server
+cursor/epoch, requires exact stored wire and sequence, rechecks the registry,
+mode and complete local snapshot, and performs no write. Added focused negative
+tests for modified retained ciphertext and out-of-order pages; both refuse before
+`start` or `commitPage`, keeping the old state. This is not the requested
+anchor/binding transition and does not make a changed server head readable.
+
+Actual disposable PostgreSQL/FastAPI/Chromium real Native Desktop test: 3
+passed including first UI open and the test's *expected* fail-closed same-profile
+`stale_authority` after Desktop update. Thus first open PASS, Desktop second
+push PASS, but repeated same-profile reading and updated-content reopen FAIL;
+the passing test asserts refusal, not successful refresh. No new proof, ACK,
+reader declaration or capability was fabricated. Synthetic Desktop-only Note
+capability PUT was done within the existing owner-approved isolated test; no
+browser PUT, production, VPS or real user data. Existing initial profile/key and
+server limitations in previous checkpoint entries still apply.
+
+Focused Vitest 150 passed; Rust native conflict/Resolution 1 passed via existing
+compiled binary; frontend typecheck/build and quick acceptance passed. No CI
+launch/poll. Security flags ready=false, declarationAllowed=false,
+writerAuthorized=false; 2/10 readiness blockers closed; product 2/6, Slice 4/5
+PARTIAL. No commit/push, because requested complete local acceptance did not
+pass; all previous and new changes are uncommitted, exact files in git status.
+Final SHA remains starting HEAD.
+
+Next: implement an authenticated, CAS-protected atomic transition that retains
+an immutable witness of the original binding/import high-water while reconciling
+the new anchor and verified source/proofs, and ensures a failing new Content
+owner apply cannot leave a partial anchor/binding/page transition. Then run the
+same-profile test expecting the updated text and restart, not stale refusal.
+Existing multi-transaction owner application is the precise unresolved atomicity
+boundary; no incompatible reader, cursor or proof checks were weakened here.
+
+
+## 2026-11-05 — recovery-only browser and real Web unlock (PARTIAL)
+
+Starting / current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch 6.0.
+All pre-existing uncommitted recovery work is preserved. Recovery now mints a
+session- and local-binding-scoped identity only after an authenticated empty-tail
+Recovery GET; it does not register a sync device. Its token is explicitly
+rejected by the existing browser capability declaration path. The ordinary
+registered-device route and every server reader/writer gate remain unchanged.
+On a disposable PostgreSQL account the qualified synthetic Native Desktop
+published a codec8 Content genesis, real browser recovery read it, and the same
+Desktop successfully published a subsequent native edit; SQL confirmed there
+was still only the Desktop sync device. No browser capability PUT, no ACK.
+
+Recovery GET now has a bounded per-worker budget: 120 requests/minute with a
+120-request burst per account and session, at most one concurrent request per
+account and four per worker, bounded identity cache, plus the existing page and
+ciphertext/response bounds, PostgreSQL READ ONLY and 10-second SQL timeout.
+Rate/concurrency are per process, not a distributed/global guarantee; production
+worker/ingress limits require separate operational review. The normal Web
+`BrowserCloudAccountSession` now exposes bounded read-only recovery using its
+actual authenticated binding and unlock lease. A Vue project panel renders notes
+only after all received events are owner-applied; unsupported histories fail
+closed. The test provisions the isolated account with a real wrapped version of
+the test Desktop AMK using the normal account crypto API, then uses actual Web
+login and passphrase unlock, without injecting a key or fake binding into the
+production read. It mounts the actual Vue panel in Chromium and verifies the
+note text from SQLite after real HTTP replay. A separate owner-level profile
+was restarted and reauthenticated before the UI check.
+
+The full requested update loop remains incomplete: after Desktop's second event,
+the SAME browser profile and SAME origin safely reject reopening with
+`stale_authority`. `BrowserReplayStorage.start` rejects any newer anchor once
+applied data/source seeds exist, and `replayInventory.ts` also requires the
+import binding's `remote_high_water` to equal the manifest anchor cursor. The
+UI displays no partially checked notes. A fresh profile can replay the newer
+history, but it is not evidence of same-profile incremental recovery. Next:
+implement authenticated zero-origin prefix reconciliation and a safe atomic
+anchor/binding transition preserving the original import evidence, then replay
+the new event and repeat the same-profile Desktop → Web → Desktop → Web test.
+Do not simply rewrite the binding or weaken its validation.
+
+Final focused isolated PostgreSQL/FastAPI/Chromium acceptance: 3 passed,
+including real first note, real unlock/UI, no browser enrollment, Desktop second
+push, rate/concurrency and safe stale refusal. Vitest focused 148 passed; Rust
+native conflict/Resolution test 1 passed with existing built binary; frontend
+build/typecheck and quick acceptance passed. Earlier UI selector/origin test
+failures were corrected; final same-origin test explicitly verifies refusal,
+not successful refresh. Security flags remain ready=false,
+declarationAllowed=false, writerAuthorized=false; 2/10 readiness blockers
+closed, stage 2/6 and Slice 4/5 PARTIAL. No VPS, production deployment, real
+user data, CI launch or polling. Synthetic Desktop-only Note capability PUT was
+previously owner-authorized and only applied in isolated test setup.
+
+No commit or push: full requested local acceptance failed on the same-profile
+refresh. All existing and new changes, including endpoint, UI, test harness and
+checkpoint, remain uncommitted. Final SHA is the starting HEAD; inspect
+`git status --short` for exact files.
+
+
+## 2026-11-05 — first Native Content over recovery HTTP (PARTIAL)
+
+Starting and current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch
+6.0; existing uncommitted changes preserved. Owner explicitly authorized Note
+capability PUT for an isolated synthetic Desktop only after real support checks.
+The server requires mode3, frame1, codec8 v1, compression-zero, ordinary1 and
+Resolution2. Desktop production `ContentNoteRuntime.NOTE_READER_SUPPORT` declares
+that exact tuple; focused codec/reader Vitest and Rust native conflict/Resolution
+passed. In disposable PostgreSQL only, one PUT declared that Desktop; no browser
+Note capability was declared, and no VPS/production/user data was used.
+
+Real Rust/SQLite Content create and encrypted production push: before the PUT
+HTTP 409 `content_note_readers_not_ready`, after it HTTP 200. Authenticated
+FastAPI recovery GET returned the original wire ciphertext. A real Chromium
+profile used the actual receiver, source bootstrap, `recoverV10` and Content
+owner against real loopback HTTP/PostgreSQL; a project/plain Content genesis
+applied, emitted its real `content_note_proof`, and its decrypted note matched
+SQLite. Inbox proof-write abort rolled back; exact ciphertext and proof survived
+repeat delivery and IndexedDB close/reopen; altered retained ciphertext and
+proof failed; ACK stayed zero. A second test covers GET account isolation,
+snapshot mismatch, session logout, real read-only SQL and statement timeout.
+This is a narrow local HTTP Content acceptance, not complete Web reader readiness.
+
+Two genuine integration defects were fixed: source seed reauthentication now
+invokes the existing Note proof verifier for applied Content/Resolution rows,
+and already-imported recovery project bindings are no longer re-admitted on
+restart. The first integration attempt exposed inactive fixture metadata; fixed
+by using an active native project. The next exposed the missing Content proof
+reauthentication; then existing binding caused stale authority; both were fixed.
+
+Material limitations: the Chromium harness logs in through real FastAPI but
+injects the synthetic account AMK and local binding directly, not the real Web
+unlock/account-binding lifecycle or user-facing project screen. Recovery owner
+calls the existing browser device registration; that unqualified device joins
+the all-device writer gate and can block further Desktop Content publication.
+This lifecycle impact is not solved. No end-to-end Stage Content, full account
+families, actual user workflow or production deployment is accepted. Endpoint
+rate/concurrency controls remain absent under the historical resource contract;
+other existing replay paths still use ordinary gated pull. Do not deploy or
+claim the entire endpoint/reader ready on this evidence.
+
+Final checks: isolated PostgreSQL/FastAPI Native Content + Chromium and GET
+acceptance 2 passed (plus descriptor checks 5 passed in an earlier run); Vitest
+132 passed, Rust native conflict/Resolution test 1 passed using existing built
+binary, frontend typecheck/build and quick acceptance passed. No CI was launched
+or polled. Gates remain ready=false, declarationAllowed=false,
+writerAuthorized=false; 2/10 readiness blockers closed; stage 2/6, Slice 4/5
+PARTIAL. No commit/push: remaining device-lifecycle and endpoint security work
+precludes full local acceptance of all changed production paths. All modifications
+and previous checkpoint entries remain uncommitted; `git status --short` shows
+the exact list. Final SHA remains starting HEAD.
+
+Next: make the recovery-only browser identity not enroll as a sync device, while
+retaining owner authorization and proving Desktop writer gate is unchanged, then
+complete bounded endpoint resource controls and actual Web unlock/UI acceptance.
+
+
+## 2026-11-05 — Native Content HTTP recovery remains blocked (PARTIAL)
+
+Starting / current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch 6.0.
+All existing uncommitted GET/receiver/replay/checkpoint changes were preserved.
+Explicit opt-in recovery delivery now also reaches source seeding and project
+binding admission through existing replayStorage methods. Ordinary delivery is
+still the default. The recovery GET now begins its PostgreSQL session with
+`SET TRANSACTION READ ONLY` before authentication and applies a 10-second SQL
+statement timeout; an isolated test checks the actual app engine statements.
+No PUT to any capability endpoint was executed. Test setup did register a
+synthetic device and use the existing v3 *transport* reader-ready POST/cutover;
+it did not declare codec8 Note reader capability or grant a writer permission.
+
+A real Native Rust SQLite writer produced a codec8 Content event after genuine
+bootstrap/metadata through the production API. Its push to isolated PostgreSQL
+FastAPI was rejected with HTTP 409 `content_note_readers_not_ready`: the server
+requires every registered device, including the publishing Desktop, to declare
+Note reader capability (`backend/app/cloud/services.py`, `push_encrypted`).
+The event remained pending locally. With this task's prohibition of capability
+PUT even in isolated tests and prohibition on spoofing capability or bypassing
+the gate, a freshly provisioned producer cannot publish this event. Thus the
+requested Native Content → HTTP → Chromium acceptance is NOT RUN; do not
+present the synthetic Legacy Chromium GET test as that acceptance.
+
+The isolated PostgreSQL/FastAPI tests passed 2 cases: this real native writer
+rejection, and a synthetic Legacy GET with Chromium HTTP fetch, account/logout,
+snapshot, preserved ciphertext/ACK and SQL read-only check. Focused Vitest:
+59 passed, including the source-seed recovery option; typecheck and frontend
+build passed; quick acceptance passed. Earlier iterations of these tests failed
+on fixture setup and instrumentation; those were corrected and the final run
+passed. No Rust source changed; no standalone Rust test in this pass, but the
+actual Native writer binary was exercised. No capability PUT, deployment, VPS,
+production user data, CI triggering or CI polling. Endpoint remains incomplete
+for deployment: rate/concurrency controls, complete owner transport wiring and
+Native Content integrity/restart acceptance remain open. `replayMetadata.ts`
+and other ordinary paths still use protected pull. Existing recipient security
+gates and ready=false, declarationAllowed=false, writerAuthorized=false remain.
+
+Readiness blockers 2/10 closed; product stage 2/6, Slice 4/5 PARTIAL. No
+commit/push because the required end-to-end acceptance did not pass. Working
+tree contains the previous uncommitted recovery changes plus source-seed,
+read-only transaction and `tests/test_web_recovery_native_gate.py`; see
+`git status --short` for the exact list. Final SHA remains starting HEAD.
+Next concrete task: resolve the test-fixture contradiction with the owner:
+provide an isolated, previously legitimately qualified Desktop/account history
+that can publish Content without performing a capability PUT in this task,
+then finish wiring the existing recovery delivery and run the requested native
+end-to-end acceptance. Do not alter or bypass the gate to manufacture a PASS.
+
+
+## 2026-11-05 — encrypted recovery GET implementation (PARTIAL)
+
+Starting and current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, 6.0.
+The prior uncommitted `services.py` extraction and checkpoint were preserved.
+The owner explicitly requested the separate GET, superseding the earlier
+rejection of that direction; ordinary pull and all its gates remain unchanged.
+No capability PUT was executed in this task, including test setup.
+
+Uncommitted implementation adds `GET /api/v3/recovery/encrypted/history`,
+requiring the normal authenticated, legally accepted account, an exact expected
+cursor and cutover epoch, mode 3 and bounded page size. Queries are scoped to
+that authenticated account, shared descriptor/object materialization checks
+original ciphertext, v3 representation and consecutive server sequences;
+snapshot state and session revocation are rechecked before publication. The
+response is no-store and carries no device declaration or ACK. `recoveryRaw`
+validates the versioned outer snapshot and original v3 wire, and the existing
+receiver and `recoverV10` tail check have explicit opt-in recovery delivery;
+ordinary delivery remains their default. No new sync engine was added.
+
+Isolated PostgreSQL/FastAPI tests plus actual Chromium loopback fetch: 6 passed,
+including paged ciphertext, account/session checks, logout and unchanged ACK;
+five of these tests are existing descriptor materialization regressions. The
+Chromium page uses a synthetic encrypted legacy object, NOT a Native Content
+history and NOT owner replay. Focused Vitest 100 passed; typecheck/frontend build,
+quick acceptance and Python syntax passed. Existing compiled Rust self-echo
+regression 1 passed, not a fresh build. No production server, capability PUT,
+CI dispatch/poll, VPS, or user data. ACK remains zero in the local fixture.
+
+Native Rust/SQLite → HTTP → Chromium Content recovery and restart remain NOT
+RUN: opt-in delivery is not wired through source bootstrap and other server
+revalidation calls (`replaySourceSeed.ts`, `replayMetadata.ts` and applicable
+owner paths), which still invoke ordinary gated `pullRaw`; it is not exposed as
+a complete user-facing opening path. Real ciphertext authentication, owner
+proofs, gap/tamper and full account replay need end-to-end acceptance. The new
+GET also lacks the historical design's resource rate/concurrency/deadline
+controls and an explicitly enforced read-only DB transaction; its isolation,
+revocation races and unmodified database state need further acceptance. Treat
+all changes as unfinished and do not deploy this endpoint. Next: complete these
+security/transport seams without claiming capability, then exercise a genuine
+Native Content history over HTTP and verify owners, restart and negatives.
+
+Readiness 2/10; product stage 2/6, Slice 4/5 PARTIAL. `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`; no public release or
+registration. Server-to-browser Content acceptance NOT RUN. No commit/push,
+because requested end-to-end local acceptance did not pass. Uncommitted files:
+`backend/app/cloud/services.py`, `backend/app/cloud/sync_v3_router.py`,
+`backend/app/main.py`, `frontend/src/api/encryptedSyncV3.ts`, its spec,
+`frontend/src/platform/web/replayReceiver.ts`, its spec, `replayStorage.ts`,
+`tests/test_web_encrypted_recovery_http.py`, and this checkpoint. Final SHA is
+still the starting HEAD.
+
+
+## 2026-11-05 — first Web MVP server path (PARTIAL)
+
+Starting and current HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch
+6.0, tree initially clean. The owner now requests the earliest safe real
+Desktop → PostgreSQL/FastAPI → authenticated Chromium opening, explicitly
+requesting a separate encrypted recovery GET if the reader gate blocks normal
+pull, while keeping the gate/capabilities/security unchanged. Historical 03G
+contract labels that endpoint rejected and its implementation absent; the
+latest request supplies new direction but the historical contract and required
+security conditions still need an explicit, consistent implementation. No new
+endpoint or fake declaration was added in this pass.
+
+A small uncommitted production change in `backend/app/cloud/services.py` extracts
+existing opaque page materialization to a private helper. Normal pull retains
+its exact device, transport and reader checks before the helper; descriptor/object
+consistency and byte limits are unchanged. This is preparation only, not a
+recovery endpoint or a proof that reading a gated Content stream is safe. A real
+isolated PostgreSQL 16/FastAPI/Chromium existing Legacy initial Notes owner test
+passed, including decrypting notes, proofs and restart; it is not a Native Desktop
+Content → server → visible Web project acceptance. Five PostgreSQL descriptor
+materialization and tampering tests passed after the change (six total, 14
+deselected); Python syntax and quick acceptance passed. An earlier isolated run
+passed that Chromium test and four content gate regressions. Those gate tests
+performed capability PUTs for synthetic devices in the disposable local test
+database, contrary to the task's broad no-PUT instruction; no request reached a
+production server or real account, and the disposable container was removed.
+No further capability PUT was run. No UI, typecheck, build or Rust changes/tests
+in this pass. Server-to-browser Content/project opening is NOT RUN, not PASS.
+
+Concrete remaining blocker: ordinary v3 pull returns
+`content_note_reader_required` for an unqualified browser when any codec8 Note
+exists. No production alternative delivery endpoint is implemented. Next:
+implement the specifically requested authenticated read-only recovery delivery
+with account-derived scope, full snapshot/sequence and byte-bound checks,
+revocation and no sync-device/capability/ACK mutation; use the shared page
+materializer only after establishing that endpoint's policy, then adapt existing
+replay receiver/owner port and prove Native SQLite → real HTTP/PG16 → Chromium
+with tampering, restart and no partial display. Preserve the ordinary pull gate.
+Account-wide unsupported histories must fail closed. The old 03G design's
+additional snapshot, auth/session, rate/resource and no-write requirements need
+technical resolution; no claim is made that the extracted helper supplies them.
+
+Readiness remains 2/10, Slice 4/5 PARTIAL, product stage 2/6. `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`; public registration and
+release stay closed. No VPS, production deployment, CI dispatch or polling.
+No commit/push: requested end-to-end local acceptance has not passed. Current
+uncommitted changes: this checkpoint and `backend/app/cloud/services.py`.
+The final SHA remains the starting HEAD until a later commit.
+
+
 ## 2026-11-05 — own Content self-echo recovery (partial)
 
 Starting HEAD `dd3299406f4432b7dd9ca18f9d5b1bb0824819c2`, branch 6.0,
