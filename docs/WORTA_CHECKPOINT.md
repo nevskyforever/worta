@@ -1,5 +1,78 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Document adapter preparation implemented (PARTIAL)
+
+Starting SHA `c97ec772804f14b8772be20a3e42d660309a590a`, branch 6.0.
+Existing uncommitted cloudAccountSession / Vue / test / checkpoint changes
+preserved. Added production `documentPrepare.ts`: the project-scoped peer
+Document genesis preparation decrypts codec10 through the existing canonical
+reader, checks descriptor/server sequence and identity joins, create/parent /
+revision/generation rules, import binding/bootstrap, and a genuine forced
+Metadata certificate. The projected portable document and original encrypted
+wire are returned without writing anything. It rejects Stage documents,
+updates/deletes/resolutions and self echo in this bounded initial scope.
+
+This is preparation only, NOT a Document apply owner or proof. It is not yet
+called by BrowserV10Recovery. The outstanding implementation is the atomic
+ledger/event/tip/encrypted-projection commit matching document_sync.rs apply,
+its replay inventory schema/coverage/reopen authentication and ownerPort route,
+then Vue display. The current replay inventory has no Document owner outcome;
+introducing a fabricated applied flag would not satisfy the Native ledger joins.
+The returned plan is data, not a transaction-bound apply token; the future commit
+must pin and revalidate the exact inventory/auth state. There is no fundamental
+contract impossibility established, only unfinished implementation. No Document
+is opened and no HTTP/Chromium Document acceptance is claimed.
+
+Tests: new preparation Vitest 2 passed, covering real AEAD + codec10 / certified
+Metadata and unchanged in-memory source, corrupt ciphertext, wrong sequence,
+missing Metadata and revoked session. This is a generated codec fixture test,
+not a production Rust writer history. Prebuilt Rust codec golden/negative test
+1 passed; frontend typecheck/build and quick acceptance passed. PostgreSQL /
+FastAPI / Chromium Document scenario NOT RUN; update/restart NOT RUN. No VPS,
+browser capability PUT, ACK, CI run/poll or security-gate changes. Readiness
+2/10; ready=false, declarationAllowed=false, writerAuthorized=false; stage 2/6,
+Slice 4/5 PARTIAL. Owner full-Web / unified sync decisions are retained below.
+
+Commit is limited to the tested preparation module/spec and checkpoint; final
+SHA is the commit containing this entry. Earlier UI/session changes remain
+uncommitted and must be preserved. Next finish the Document genesis ledger and
+projection transaction plus exact replay snapshot/inventory joins, before wiring
+recovery/UI and the actual Native → isolated PostgreSQL/FastAPI → Chromium test.
+
+## 2026-11-05 — Web document recovery (PARTIAL)
+
+Starting/final HEAD `c97ec772804f14b8772be20a3e42d660309a590a`, branch 6.0,
+initial worktree clean. Document reading, update and restart are NOT accepted.
+The exact missing component is a browser transaction/projection adapter for the
+production document owner in Rust `document_sync.rs`: `documentSyncRuntime.ts`
+invokes native Tauri apply, while BrowserV10Recovery routes only Metadata, Stage,
+StageOrder and Note/Resolution and has no document owner proof or inventory
+record. Codec10/decryption alone cannot establish the owner outcome, dependency
+and atomic replay proof. Existing roadmap identifies Maps, Documents, Progress
+and Game as sharing this browser-owner limitation; no substitute event proof,
+reader declaration or partial-project success was introduced.
+
+Implemented a bounded user-facing improvement: when V10 recovery returns a
+blocker for a document row, Web reports that documents are not yet available
+and clears previous project output. The message covers all six UI languages.
+A component test checks refusal and absence of partial output; this test does
+not establish that every unsupported document history reaches this diagnostic.
+Document owner bridge and actual HTTP path remain unimplemented. Focused Vitest
+38 passed; typecheck and frontend build passed. Native SQLite → PostgreSQL /
+FastAPI → Chromium document scenario, Rust and Chromium were NOT RUN. No claim
+of ciphertext/proof/atomic document acceptance. The next supported family was
+not implemented in this pass; complete the browser Document owner bridge and
+its replay proof/storage/owner transaction contract, then exercise a native
+writer through isolated HTTP and Chromium before exposing document contents.
+
+Stage 2/6, Slice 4/5 PARTIAL; readiness 2/10, flags ready=false,
+declarationAllowed=false, writerAuthorized=false; registration/release remain
+closed. No VPS, browser capability PUT, CI run or poll. Changes in
+cloudAccountSession, BrowserCloudProjectRead, its spec and this checkpoint are
+uncommitted; no commit or push because requested acceptance is incomplete. Owner
+decisions on full Web, unified bidirectional sync and pragmatic development
+remain intact below and in the roadmap.
+
 ## 2026-11-05 — Stage rename production recovery (LOCAL COMPLETE for this cohort)
 
 Starting SHA `f2111c24c57e59cad6907f2e86546993e3d59dc5`, clean branch 6.0.
