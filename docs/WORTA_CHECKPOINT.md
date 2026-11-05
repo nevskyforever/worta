@@ -1,5 +1,73 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Document replay schema migration implemented (PARTIAL)
+
+Starting HEAD `516e6ae7cd7936b7a72be1537051286454cda123`, branch 6.0.
+Preserved all pre-existing uncommitted Document/Vue/session work. Added an
+uncommitted replay IndexedDB v7 extension with documentLedger and
+ documentProjection stores, existing v6 schema validation before creation and
+atomic historical migration through the existing replay inventory validator.
+The v6 manifest and existing records are not rewritten for a v6→v7 upgrade;
+older v1–v5 migrations retain their existing conversion. Snapshot now reads the
+Document stores and includes empty Document inventory in CAS. Nonempty Document
+stores intentionally fail closed until the proof/inbox joins are integrated.
+No Document outcome is accepted, no manifest Document coverage is produced and
+no Document content is displayed. ownerPort/recovery remain unconnected to
+Document apply. This is unfinished implementation, not a proven contract block.
+
+Real Chromium `browser-document-schema.mjs` passed: v6→v7 layout migration,
+identity preservation, injected versionchange abort leaves version6, successful
+retry, empty snapshot reopen equivalence and old v6 reader refusal. This test
+has no encrypted project history, native producer, applied Document or Document
+proof; it cannot establish ciphertext-preserving populated migration or owner
+acceptance. Focused Vitest 47 passed; typecheck/build and quick acceptance passed.
+Native Rust, PostgreSQL/FastAPI and Document UI/restart acceptance NOT RUN.
+Existing browser scripts that explicitly open replay version6 must be updated
+when adopting v7; full compatibility acceptance is still outstanding. Therefore
+schema changes remain uncommitted with other production work. New script is
+also uncommitted. Only this checkpoint is committed as a documentation recovery
+point; final SHA is the commit containing this entry. No new push, CI run/poll,
+VPS, browser capability PUT or ACK. Previous documentation commit is already
+on origin/6.0.
+
+Readiness 2/10, ready=false, declarationAllowed=false, writerAuthorized=false;
+registration/release closed; stage 2/6, Slice 4/5 PARTIAL. Next implement the
+Document inbox proof plus ledger/projection joins in inventory and ownerPort
+transition validation, then actual Native genesis apply/reopen/abort proof and
+HTTP UI acceptance before committing production. Owner decisions for full Web,
+unified bidirectional sync and pragmatic delivery remain recorded below.
+
+## 2026-11-05 — Document ownerPort integration (PARTIAL)
+
+Starting/final HEAD `516e6ae7cd7936b7a72be1537051286454cda123`, branch 6.0.
+Pushed the previously local documentation commit to origin/6.0 without force.
+All pre-existing uncommitted Document, Vue and session changes are preserved.
+In the uncommitted `documentApply.ts`, the supplied transaction inventory is now
+required to contain the exact received protocol-3 inbox row matching the prepared
+sequence, event and unchanged wire before ledger/projection writes. A pre-existing
+ledger no longer reports already-applied based only on the projection head ID;
+it fails closed until real replay projection authentication is integrated.
+
+This is NOT ownerPort integration: replay database version remains 6, no
+Document stores or migration were added, Snapshot/CAS and manifest coverage do
+not yet include Document, and no Document owner proof/inbox outcome exists.
+The transaction adapter cannot execute against the current replay schema; its
+write path was not tested. No Native/IndexedDB restart, abort, corrupt-proof or
+idempotence acceptance was run. Document recovery remains unavailable. No
+fundamental impossibility is established; the necessary work is unfinished.
+
+Focused preparation Vitest 2 passed; typecheck, frontend build and quick
+acceptance passed. Rust and Chromium NOT RUN. No production commit: modified
+Document apply/prepare/spec plus pre-existing Vue/session files remain
+uncommitted. This checkpoint also remains uncommitted. CI was not run/polled;
+no VPS, browser capability PUT, ACK or security-gate changes. Readiness 2/10,
+ready=false, declarationAllowed=false, writerAuthorized=false, public
+registration/release closed. Stage 2/6, Slice 4/5 PARTIAL. Next implement
+versioned Document stores plus historical migration, authenticated Document
+inbox proof, Snapshot/transition/CAS and ownerPort routing together, then run
+Native SQLite → IndexedDB restart/abort/corruption acceptance. Owner decisions
+for full Web and unified bidirectional sync remain below and in the roadmap.
+
 ## 2026-11-05 — Document ledger/projection transaction implementation (PARTIAL)
 
 Starting SHA `7ab37e01495b57dab63c237e2104c14c5d1a149b`, branch 6.0.
