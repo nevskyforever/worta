@@ -1,5 +1,86 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — closed Web pilot VPS read-only preflight (PARTIAL)
+
+Starting HEAD `25007d551197d0aa2291e56c697243474cd9563c`, branch `6.0`,
+initial worktree clean. This entry is committed with the final SHA shown by
+`git rev-parse HEAD`; it does not claim server deployment or pilot readiness.
+Connected to the designated VPS as `worta-admin` using the previously approved
+identity and strict host-key checking. The SSH agent had no identities and the
+default identity was rejected; the previously approved RSA identity succeeded.
+Commands were read-only; no service, server configuration, database rows,
+firewall, accounts, invitations or user data were changed. No secrets were
+printed. This is a point-in-time inspection, not ongoing monitoring.
+
+VPS **NOT READY** for a pilot now: Ubuntu 24.04.5 LTS, 2 vCPU, load averages
+0.00/0.00/0.00, RAM 988 MiB total / 634 MiB available, no swap, root filesystem
+9.8 GiB total / 6.1 GiB available. These resources are plausible for a very
+small single-worker pilot, not a measured two-user capacity guarantee: verify
+peak backend/PostgreSQL memory, OOM behavior, disk growth and connection use in
+an owner-approved rehearsal. PostgreSQL 16.15 cluster active, max_connections
+20, six current activity rows including the inspection connection; staging
+runtime role has connection limit 2. Backend `worta-staging.service` installed
+but inactive and disabled, loopback-bound, MemoryHigh 320 MiB, MemoryMax 384 MiB
+and TasksMax 32. Local code uses a pool of two without overflow. Caddy 2.6.2 is
+active but its listener is loopback 8080. UFW permits only SSH/22; PostgreSQL
+5432 is loopback. No listener on 443 and no Caddy certificate files were found
+in the checked standard location: no working public/private HTTPS endpoint or
+valid certificate was demonstrated. DNS, certificate issuance and a restricted
+access method require verification before inviting anyone.
+
+`registration_settings` currently says `closed`, max_users unset; zero admin
+invitations exist. Invitation schema exists; historical local tests show the
+private invitation workflow, but a working current server onboarding flow is not
+verified. The staging environment has none of the required SMTP settings;
+SMTP delivery is not configured or tested. No user or invitation was created.
+The historical pre-MVP609 database dump still exists on VPS, and prior checkpoint
+VPS.05B records an independently restored off-host DB/blob backup for the then
+empty server; neither establishes a current recoverable, consistent backup.
+Documented DB/blob backup and restore exists in `docs/infra/PRIVATE_MVP_VPS01_BACKEND.md`,
+with the earlier empty-store proof explicitly bounded: coordinated backup and
+restore for populated encrypted data and client recovery still need rehearsal.
+
+Current database Alembic revision `game_loss_v2` matches the local migration
+head at starting SHA; no schema migration is presently indicated by that exact
+comparison. Recheck artifact, revision, runtime grants and migration plan before
+any future deployment; never assume that old staged code contains the new
+Recovery GET. The previously built artifact predates current Web recovery.
+Per-process Recovery GET budgets (120/minute per account/session, one concurrent
+per account, four per worker, 10-second SQL timeout) are coherent for one
+actual worker and do not by themselves require Redis; they reset on process
+restart and do not provide a global limit across multiple workers. Worker count,
+public ingress limits and real two-user load remain deployment acceptance items.
+
+Before deployment, separately obtain owner authorization for every write, then:
+(1) establish tested restricted HTTPS/DNS/certificate and two-person access,
+keeping public registration closed; (2) verify private invitation/SMTP and
+account policy, without granting Web sync-device capability; (3) create a fresh
+coordinated DB and encrypted-blob backup, independently restore and verify it;
+(4) build and verify the current backend and frontend artifacts and exact
+runtime dependencies; reconcile schema head, least-privilege grants and a
+forward migration plan only if a discrepancy is found; (5) approve the
+single-worker service configuration and resource/connection budget, then test
+login/unlock, supported project/plain Content, repeated Desktop updates, both
+accounts' isolation and safe rejection of unsupported histories. Deployment
+and rollback require explicit approval: preserve current app and configuration,
+stop writers, retain current matched DB/blob state and independently verified
+backups, restore a previously verified app and compatible data only using a
+reviewed recovery procedure; never blindly downgrade a populated database.
+No deployment steps were executed in this inspection.
+
+Full Web 6.0 remains distinct: eight reader readiness blockers remain open,
+broader event families and the authorized capability lifecycle remain pending;
+public release needs its own security/release/registration approvals. Stage 2/6,
+Slice 4/5 PARTIAL, 2/10 blockers closed; `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`; no browser capability PUT
+or premature ACK. Server-to-browser acceptance is limited to the previously
+verified local test environment, not the VPS. CI was neither triggered nor
+polled. Initial worktree was clean; this checkpoint is the only intended change.
+Commit/push, if made, are documentation-only and do not authorize deployment.
+Next: prepare an owner-reviewable, scoped plan for restricted HTTPS and SMTP,
+matched backup/restore rehearsal and a verified current artifact; obtain
+separate approval before changing VPS. Overall WORTA remains stage 2/6.
+
 ## 2026-11-05 — closed Web read-only pilot preparation (PARTIAL)
 
 Starting HEAD `8ee6d22c326dcf0b08cb495c0d03e7bde8c0fdcd`, clean branch 6.0.
