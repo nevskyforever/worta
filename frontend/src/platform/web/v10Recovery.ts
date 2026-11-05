@@ -26,7 +26,7 @@ import {openBrowserCanonicalObject} from './canonicalReaders'
 import {openNoteTransport} from './noteTransport'
 import {bindMixedV10Recovery,bindPostFMetadataRecovery} from './v10MixedRecovery'
 
-type Route='metadata'|'stage'|'stage_order'|'legacy'|'content'|'content_self_echo'|'resolution'|'continuation'
+type Route='document'|'metadata'|'stage'|'stage_order'|'legacy'|'content'|'content_self_echo'|'resolution'|'continuation'
 export interface RecoveryBlocker {
  sequence:number;kind:'missing_sequence'|'dependency_unavailable'|'unsupported_route'|'unsupported_generation'|'unresolved_fork'|'unqualified_family'|'budget_exhausted'
  retryable:boolean
@@ -52,7 +52,8 @@ export class BrowserV10Recovery {
  constructor(private readonly transaction:BrowserSyncTransaction,private readonly local:BrowserLocalAuthority,private readonly profileCurrent:()=>boolean,
   private readonly ownerTransaction?:(sequence:number)=>Promise<BrowserSyncTransaction>,
   private readonly validateReplayPrefix?:(candidate:number)=>Promise<void>,
-  private readonly prefixTransaction?:()=>Promise<BrowserSyncTransaction>){}
+  private readonly prefixTransaction?:()=>Promise<BrowserSyncTransaction>,
+  private readonly documentOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>}){}
  /** Separate dormant manual slice; the historical bind below is unchanged. */
  bindMixedSources(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindMixedV10Recovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  /** Explicit bounded .18 route; historical K/G/Q bindings keep their contracts. */
@@ -85,6 +86,7 @@ export class BrowserV10Recovery {
     check()
     const step=async<T>(p:Promise<T>)=>{const result=await p;check();return result}
     const load=()=>step(tx<ResolutionInventorySnapshot>(s,resolutionInventoryStores,'readonly',(tx,result,abort)=>scheduleResolutionInventory(tx,s,live,result,abort)))
+    if(this.documentOwner)await step(this.documentOwner.authenticate())
     const result:V10RecoveryResult={ready:false,declarationAllowed:false,ackAuthorized:false,applied:[],blocker:null,more:false,replayed_events:0,prefix:null,readiness:null}
     if(replay)result.replayed_events=(await step(transport.replayInboundPage(s,replay.since,replay.rawPage))).replayed_events
     let v:ResolutionInventorySnapshot
@@ -93,6 +95,7 @@ export class BrowserV10Recovery {
      // inbox keys/index ownership. Always restart at zero; no caller offset can
      // hide an earlier pending event or persisted gap after a crash.
      const pending=await step(transport.listReceived(s,200)),loaded=await load();v=loaded
+     if(!this.documentOwner&&v.rows.some(r=>(r as {state:string}).state==='document_proven'))fail('unsupported_local_source')
      rejectLegacy3ResolutionRoots(v.history)
      inspectResolutionDag(s,v.history) // Unknown/dangling future history never becomes an idle success.
      const rows=v.rows.map(r=>readFutureInboxRecord(r,s)),missing=gap(v,s),row=pending[0]
@@ -118,6 +121,13 @@ export class BrowserV10Recovery {
      const block=(kind:RecoveryBlocker['kind'],retryable=false)=>{result.blocker={sequence:row.server_sequence,kind,retryable}}
      const wire=JSON.parse(row.wire_item),e=wire.event
      const own=e.device_id===s.deviceId
+     if(e.entity_type==='document'){
+      if(!this.documentOwner||own||hasResolution(v)){block('unsupported_route');break}
+      const outcome=await step(this.documentOwner.apply(row.server_sequence))
+      if(outcome!=='applied')fail('stale_source')
+      result.applied.push({sequence:row.server_sequence,route:'document',status:'applied'})
+      continue
+     }
      if(own&&!this.ownerTransaction){block('unsupported_route');break} // Dormant recovery keeps its frozen peer-only contract.
      let route:Route
      if(e.entity_type==='note'){

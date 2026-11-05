@@ -385,7 +385,10 @@ class BrowserReplayStorage {
         if (!manifest || manifest.contract_version !== 6 || manifest.phase !== 'received'
           || candidate > (manifest.applied_cursor ?? 0)) throw new BrowserPersistenceError('corrupt_record')
       }
-      return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction, validatePrefix, () => ownerTransaction(0))
+      return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction, validatePrefix, () => ownerTransaction(0), {
+        authenticate: () => this.authenticateDocuments(auth, bindings, keys),
+        apply: sequence => this.applyDocumentGenesis(sequence, auth, bindings, keys),
+      })
         .bind(auth, bindings, keys, device).run(this.scope, { maxEvents: 1 })
     } finally { unAuth(); unKey() }
   }

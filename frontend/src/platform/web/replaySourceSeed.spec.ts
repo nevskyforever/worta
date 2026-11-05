@@ -200,3 +200,15 @@ it('rejects additional Note source material outside the initial bootstrap cohort
   expect(commit).not.toHaveBeenCalled()
   expect(state.sources).toEqual([])
 })
+
+it('seeds Metadata while keeping a later peer Document genesis unapplied', async () => {
+  const document = structuredClone(state.rows[0]!)
+  document.server_sequence = 3; document.event_id = crypto.randomUUID()
+  const wire = JSON.parse(document.wire_item)
+  Object.assign(wire.event, { event_id: document.event_id, server_sequence: 3, entity_type: 'document', entity_id: 'document', operation: 'event', revision: 1, deleted_at: null })
+  document.wire_item = JSON.stringify(wire); state.rows.push(document)
+  state.manifest!.receive_cursor = 3; state.manifest!.anchor.registry.current_cursor = 3
+  vi.mocked(encryptedSyncV3Api.pullRaw).mockResolvedValue(JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items: [], next_cursor: 3, has_more: false }))
+  expect(await run()).toMatchObject({ status: 'seeded', projectOpened: false })
+  expect(state.rows[2]!.state).toBe('received')
+})

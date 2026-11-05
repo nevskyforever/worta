@@ -46,6 +46,14 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
   for (const row of snapshot.rows) {
     if (!current()) fail('session_closed')
     const event = JSON.parse(row.wire_item).event as V3Descriptor
+    if (event.entity_type === 'document') {
+      // Seeding imports Metadata only. A later peer Document genesis remains
+      // received until the Document owner authenticates and applies it.
+      if (event.project_id !== projectId || row.server_sequence <= remote.initial_max_server_sequence
+        || row.state !== 'received' || event.operation !== 'event' || event.revision !== 1
+        || event.deleted_at !== null || event.device_id === scope.deviceId) fail('source_seed_unsupported_family')
+      continue
+    }
     if (!['note', 'project_metadata', 'stage', 'stage_order'].includes(event.entity_type)) fail('source_seed_unsupported_family')
     if (event.entity_type === 'note') {
       const owner = noteOwners.get(event.entity_id)

@@ -1119,3 +1119,28 @@ prefix authority is added; readiness/capability gates remain false. Local
 Native/SQLite → Chromium/IndexedDB checks cover apply, portable projection
 parity, duplicate delivery, transaction abort/retry, populated v6 migration,
 reopen and corrupted proof refusal. This is not server-to-browser acceptance.
+
+### Automatic recoverV10 dispatch — 2026-11-05
+
+The production replayStorage composition now supplies its existing Document
+authentication/apply methods to BrowserV10Recovery. A complete initial source
+seed may retain a later project-scoped peer Document genesis as received;
+Metadata seeding grants it no proof. Ordered recovery first applies Metadata,
+then dispatches the next received Document to applyDocumentGenesis with the
+existing ownerPort, server-wire verification and full snapshot CAS. A successful
+operation reports route `document`; its durable outcome is `document_proven`.
+No new owner, proof format, database version or parallel recovery engine is added.
+
+Before each recovery pass, persisted Document outcomes are freshly authenticated
+through authenticateDocuments. A composition without this Document adapter
+refuses document_proven inventory. Own events, non-genesis mutations and mixed
+Resolution histories remain outside this bounded Document route. Repeated
+recovery and repeated encrypted-page delivery preserve the accepted snapshot
+without rewriting the ledger. Real Native SQLite → isolated local transport →
+Chromium tests exercise full initial seeding and automatic Metadata/Document
+dispatch, interrupted Document apply, reopen/retry, repeated page delivery,
+projection parity and corrupted-proof refusal through recoverV10 itself.
+
+This supersedes only the automatic-dispatch limitation above. HTTP/UI opening,
+source reimport with an already proven Document, updates and full reader
+qualification remain unqualified. No Document ACK/prefix authority is introduced.

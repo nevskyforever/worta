@@ -1,5 +1,91 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Automatic Document recoverV10 dispatch (LOCAL COMPLETE)
+
+Starting SHA `350a5eefe5579d90390e09ee758ac162808ea4e9`, branch `6.0`.
+Final SHA is the commit containing this entry (reported exactly in the task
+result). Product stage 2/6, Slice 4/5 remains PARTIAL. This completes the bounded
+automatic Document genesis dispatch task, superseding the dispatch limitation
+in the historical source-admission entry below. Owner decisions of 05.11.2026
+remain unchanged: full Web, bidirectional synchronization, one sync engine and
+priority for working functions.
+
+Production replayStorage.recoverV10 supplies its existing authenticateDocuments
+and applyDocumentGenesis to BrowserV10Recovery. Each pass authenticates existing
+Document outcomes; ordered replay dispatches received peer Document genesis only
+after Metadata has applied. The accepted ownerPort performs all existing
+dependency/source checks, server verification and fresh full snapshot CAS.
+Ledger, encrypted projection, Inbox11 document_proven and manifest coverage
+commit atomically. Source admission seeds Metadata only; it cannot create a
+Document proof. A recovery composition without the Document adapter refuses
+persisted document_proven. No extra engine, token, proof format or schema change.
+
+Actual Native Rust/SQLite → isolated local encrypted transport → real Chromium/
+IndexedDB integration: 1 passed. Full initial history imported through the
+existing source/bootstrap path, automatic routes Metadata then Document,
+document_proven, complete Native portable projection/text parity, exact source
+wire preservation and manifest.applied_cursor=2 confirmed. Transaction aborted
+at documentProjection.add through recoverV10: full snapshot unchanged; reopen
+and recoverV10 retry succeeded. Repeated recoverV10 AND redelivery of the full
+encrypted page left the full snapshot/ledger/proofs unchanged. After real profile
+close/reopen recoverV10 reauthenticated without reapplying; corrupted persisted
+owner proof caused recoverV10 refusal. Populated encrypted v6 history upgraded
+to v7 with full pre/post snapshot equality. No ordinal or ACK cursor advance.
+
+Focused Vitest: 115 passed in v10Recovery, replaySourceSeed, documentPrepare and
+replayReceiver (4 files). Existing prebuilt Native Rust Document atomic apply/
+replay fail-closed guard: 1 passed (no Rust source change/rebuild). Frontend
+typecheck/build and maintained quick acceptance passed. Build retains existing
+chunk/dynamic-import warnings. No HTTP/UI acceptance was run or claimed; this
+task expressly excludes them. No PostgreSQL, VPS or real user data used.
+
+Accepted cohort remains project-scoped peer create, codec10 revision/generation1,
+no parents/Stage, one document slot, complete bounded server page <=100 events,
+no mixed Resolution history. Document update/delete/conflict/self-echo, Stage
+scope, Document prefix/ACK authority and full reader readiness remain unsupported.
+In particular importRecoveryProject source reimport with already document_proven
+is not qualified: its source seed still fails closed there. Do not ignore a
+proven row to activate UI. Next task: connect authenticated Document source
+reimport and projection to the existing Recovery GET/Vue opening flow, then run
+one Native SQLite → isolated PostgreSQL/FastAPI → Chromium login/unlock/open/
+reopen acceptance. Do not claim Document HTTP/UI success from this local test.
+
+Readiness remains 2/10 closed, eight blockers open; ready=false,
+declarationAllowed=false, writerAuthorized=false. No capability PUT, early ACK,
+registration/release change, CI run/poll or deployment. Commit includes checked
+replay/source-seed/test/contract/checkpoint changes and is pushed to origin/6.0
+without force after local checks. Pre-existing BrowserCloudProjectRead.vue,
+BrowserCloudProjectRead.spec.ts and cloudAccountSession.ts diagnostic changes
+are preserved UNCOMMITTED and excluded from this independent recovery commit.
+
+## 2026-11-05 — Document recovery source admission (PARTIAL)
+
+Starting/final HEAD `350a5eefe5579d90390e09ee758ac162808ea4e9`, branch 6.0.
+Prior uncommitted Vue/session diagnostic changes preserved. In
+`replaySourceSeed.ts`, a later project-scoped peer Document descriptor may now
+remain received while the existing Metadata/source seed is authenticated. This
+is not Document application or proof: it admits only revision1 peer event after
+the initial bootstrap boundary and refuses other projects, self echo and already
+applied Document; the owner still must verify ciphertext and all dependencies.
+An isolated test uses a synthetic received wire to verify only seed behaviour
+and no proof/application; it is not a Native Document acceptance.
+
+The automatic BrowserV10Recovery Document route and authenticated UI projection
+are NOT connected. In particular existing source reauthentication and recovery
+prefix/admission logic must handle document_proven using authenticateDocuments;
+simply ignoring that state would be unsafe. PostgreSQL/FastAPI/Chromium Document
+scenario, reopen, Rust and Document update NOT RUN. No supported Document events
+are claimed for user-facing recovery. Existing local bounded explicit Document
+ownerPort acceptance remains as documented below. Focused Vitest 55 passed;
+typecheck, build and quick acceptance passed. No production commit/push; source
+seed changes, test, checkpoint and earlier Vue/session files remain uncommitted.
+No CI run/poll, VPS, browser capability PUT or ACK. Stage 2/6, Slice 4/5 PARTIAL,
+readiness 2/10; ready=false, declarationAllowed=false, writerAuthorized=false,
+registration and public release remain closed. Next wire Document genesis to
+recoverV10 with ownerPort and source reauthentication, then authenticate before
+rendering and run the actual native SQLite → PostgreSQL/FastAPI → Chromium
+login/unlock/reopen test. Owner full Web/unified sync decisions remain below.
+
 ## 2026-11-05 — Document genesis atomic owner apply (LOCAL COMPLETE, bounded storage cohort)
 
 Starting SHA `24920c2a90011169adb5eb96567adaacaad3b273`, branch 6.0.
