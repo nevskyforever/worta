@@ -1,5 +1,50 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — sequential Content updates (local acceptance)
+
+Starting HEAD `af5271899eddc526641c7835580d70d390135c60`, clean 6.0.
+The replay v6 inventory previously permitted a Content update only when its
+immediate Content predecessor was a create. It now also accepts an authenticated
+Content update as predecessor, while retaining exact parent, revision, source,
+projection and owner proof checks; tombstones and unsupported families remain
+closed. No new proof format, server gate, ACK, device or capability is introduced.
+
+Actual Native Rust/SQLite Desktop → production push API → isolated PostgreSQL 16
+and FastAPI → Recovery GET → real Chromium login/unlock and Vue: initial
+project/plain Note and two sequential Desktop updates were each read in the
+same browser profile and origin. After each update the profile was closed and
+reopened, and all owner proofs and the final plaintext were reauthenticated.
+The original import binding was unchanged, applied manifest coverage matched the
+server sequence, ciphertext remained byte-for-byte identical and ACK stayed zero.
+The existing acceptance also checked abort/rollback, stale CAS and corrupted
+wire/proof. Desktop Note reader capability PUT was limited to the owner-approved
+synthetic Desktop test device; no browser capability PUT or browser sync device.
+
+Real PostgreSQL Recovery GET pagination passed at limit=1 for all four account
+sequences, including exact repeated delivery and comparison to the full page.
+For the Chromium pagination run the Playwright local proxy clamps the GET limit
+parameter to one; the response events and sequence numbers are genuine server
+output, not mock events. Chromium exercised every page and re-fetch. This tests
+short server pages rather than a production account containing over 100 events;
+the existing 100-event replay/page limits are unchanged.
+
+Final checks: isolated PostgreSQL/FastAPI/Chromium 3 passed; focused Vitest
+135 passed and 2 existing conflict Chromium variants skipped because
+`WORTA_CONFLICT_CHROMIUM` was not set (they are not counted as passes); Rust
+native conflict/Resolution 1 passed from the existing compiled binary; frontend
+typecheck/build and quick acceptance passed. No CI launch/poll, VPS, production
+deployment or real user data. Security gates remain ready=false,
+declarationAllowed=false, writerAuthorized=false; 2/10 readiness blockers
+closed, product stage 2/6 and Slice 4/5 PARTIAL. The transition remains bounded
+to supported linear peer Content, and per-worker rate limits are not a global
+multi-worker guarantee. Full pilot still requires approved deployment/operations,
+server key/session lifecycle and product-level acceptance beyond this local
+synthetic cohort. Changes and checkpoint are committed together; final SHA is
+that commit's `git rev-parse HEAD`. Next: perform focused private-pilot readiness
+for actual supported project histories and approved server operation, without
+claiming full Web sync or public release.
+
+
 ## 2026-11-05 — authenticated same-profile Content extension (local acceptance)
 
 Starting HEAD `66102689d64c825b842d3f1c487c8a53e1fe27de`, branch 6.0; all

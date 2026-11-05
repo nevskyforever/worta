@@ -6,13 +6,17 @@ import {createServer} from 'vite'
 import {chromium} from '@playwright/test'
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8')),backend=process.argv[3],profile=await mkdtemp(join(tmpdir(),'worta-http-native-')),realProfile=process.argv[4]??await mkdtemp(join(tmpdir(),'worta-http-real-'))
 let vite,context,fault=null
+const recoveryRequests=[]
 try{
  vite=await createServer({logLevel:'error',server:{host:'127.0.0.1',port:Number(process.argv[5]??0),strictPort:true}});await vite.listen()
  const origin=`http://127.0.0.1:${vite.httpServer.address().port}`
  const launch=async(directory=profile)=>{
   context=await chromium.launchPersistentContext(directory,{headless:true})
   await context.route(url=>url.pathname.startsWith('/api/'),async route=>{
-   const url=new URL(route.request().url()),target=backend+url.pathname+url.search
+   const url=new URL(route.request().url())
+   if(fixture.pagination&&url.pathname==='/api/v3/recovery/encrypted/history')url.searchParams.set('limit','1')
+   const target=backend+url.pathname+url.search
+   if(url.pathname==='/api/v3/recovery/encrypted/history')recoveryRequests.push(Number(url.searchParams.get('since')))
    if(fault&&url.pathname==='/api/v3/recovery/encrypted/history'&&url.searchParams.get('since')==='0'){
     const response=await route.fetch({url:target}),body=await response.json()
     if(fault==='old'&&body.items.length){const s=body.items[0].object.ciphertext;body.items[0].object.ciphertext=(s[0]==='A'?'B':'A')+s.slice(1)}
@@ -55,6 +59,11 @@ try{
  assert.equal(first.notes[0]?.id,'native-note')
  assert.equal(first.notes[0]?.content,fixture.expectedContent)
  assert.equal(first.state.checkpoint.ack_cursor,0)
+ if(fixture.items){
+  assert.deepEqual(first.state.rows.map(row=>JSON.parse(row.wire_item)),fixture.items)
+  assert.equal(first.state.rows.filter(row=>row.state==='content_note_proven').length,3)
+  assert.equal(new Set(first.state.rows.map(row=>row.event_id)).size,fixture.sequence)
+ }
  await context.close();page=await launch();const reopened=await execute(page);assert.deepEqual(reopened.state,first.state);assert.deepEqual(reopened.notes,first.notes)
  const original=first.state.rows.at(-1)
  await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay',6);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const damaged=structuredClone(row),wire=JSON.parse(damaged.wire_item);wire.object.ciphertext=(wire.object.ciphertext[0]==='A'?'B':'A')+wire.object.ciphertext.slice(1);damaged.wire_item=JSON.stringify(wire);await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(damaged);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
@@ -118,6 +127,7 @@ try{
   assert.equal(race.after.manifest.applied_cursor,race.expected.manifest.applied_cursor)
   assert.equal(race.after.rows.at(-1).state,'received')
  }
+ if(fixture.pagination){for(let since=0;since<fixture.sequence;since++)assert.ok(recoveryRequests.includes(since),`missing real recovery page ${since}`);assert.ok(recoveryRequests.filter(since=>since===0).length>=2)}
  await panel.locator('[data-testid="cloud-notes-open"]').click()
  if(fixture.expectStale){
   await panel.locator('[role="alert"]').waitFor()

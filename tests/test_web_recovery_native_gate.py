@@ -117,6 +117,31 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
             cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+        receive(client, tmp_path, token, db, identity, user, amk)
+        content(tmp_path, db, identity, user, 'edit', note_id='native-note', patch={'content': 'Second native edit after browser recovery'})
+        assert len(emit(client, tmp_path, token, db, identity, user, amk)) == 1
+        last_cursor = sequence + 2
+        items = []
+        for since in range(last_cursor):
+            params = {'since': since, 'limit': 1, 'expected_cursor': last_cursor, 'expected_epoch': 2}
+            paged = client.get('/api/v3/recovery/encrypted/history', headers=headers, params=params)
+            assert paged.status_code == 200, paged.text
+            page_body = paged.json()
+            assert [entry['event']['server_sequence'] for entry in page_body['items']] == [since + 1]
+            assert page_body['next_cursor'] == since + 1 and page_body['has_more'] == (since + 1 < last_cursor)
+            assert client.get('/api/v3/recovery/encrypted/history', headers=headers, params=params).json() == page_body
+            items.extend(page_body['items'])
+        complete = client.get('/api/v3/recovery/encrypted/history', headers=headers,
+            params={'since': 0, 'limit': 100, 'expected_cursor': last_cursor, 'expected_epoch': 2})
+        assert complete.status_code == 200 and complete.json()['items'] == items
+        assert items[sequence - 1]['object'] == sealed['object']
+        fixture_path.write_text(json.dumps({'amk': amk, 'accountId': str(uuid4()), 'deviceId': str(uuid4()),
+            'projectId': PROJECT_ID, 'sequence': last_cursor, 'item': items[-1], 'items': items,
+            'expectedContent': 'Second native edit after browser recovery', 'provisioned': True, 'pagination': True}), encoding='utf-8')
+        result = subprocess.run(['node', 'scripts/browser-recovery-native-http.mjs', str(fixture_path), f'http://127.0.0.1:{port}', str(profile_path), str(vite_port)],
+            cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
     finally:
         server.should_exit = True
         thread.join(timeout=15)

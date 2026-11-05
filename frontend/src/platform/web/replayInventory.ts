@@ -345,10 +345,10 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
             || candidate.source_device_id !== sourceDevice || sourceSequence !== row.server_sequence
             || !replaySame(JSON.parse(candidate.wire_item), row.state === 'content_note_proven' ? retained : { event, object: retained.object })
             || !replaySame(candidate.header, p.header) || candidate.projection === null || candidate.projection_digest !== p.local_note_digest
-            || row.state === 'content_note_proven' && !contentGenesis && (p.mutation !== 'update' || !previous || !(previous.state === 'note_proven' && previous.note_proof.mutation !== 'delete' || version >= 6 && previous.state === 'content_note_proven' && previous.content_note_proof.mutation === 'create'))
+            || row.state === 'content_note_proven' && !contentGenesis && (p.mutation !== 'update' || !previous || !(previous.state === 'note_proven' && previous.note_proof.mutation !== 'delete' || version >= 6 && previous.state === 'content_note_proven' && ['create', 'update'].includes(previous.content_note_proof.mutation)))
             || candidate.projection.source_revision !== p.source_revision || candidate.projection.deleted !== (p.mutation === 'delete')
             || !replaySame(p.reference, retained.event)) fail()
-          if (previous?.state === 'content_note_proven' && !(version >= 6 && previous.content_note_proof.mutation === 'create')) fail()
+          if (previous?.state === 'content_note_proven' && !(version >= 6 && ['create', 'update'].includes(previous.content_note_proof.mutation))) fail()
           if (isLatest && !closed && !replaySame(candidate.projection, note)) fail()
         }
         if (proof) {
