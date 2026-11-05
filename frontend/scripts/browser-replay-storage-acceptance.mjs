@@ -136,7 +136,7 @@ try {
     for (const [name, anchor] of [['rollback', rollback], ['lineage', drift]]) {
       try { await rt.store.start(anchor); codes[name] = null } catch (e) { codes[name] = e.code }
     }
-    const open = indexedDB.open('worta-web-replay', 6)
+    const open = indexedDB.open('worta-web-replay', 7)
     await new Promise(resolve => { open.onsuccess = resolve })
     const db = open.result
     const replace = row => new Promise((resolve, reject) => {

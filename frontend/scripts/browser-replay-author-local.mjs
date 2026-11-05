@@ -75,7 +75,7 @@ export async function acceptReplayAuthor({page,fixture,reopen,recovery=false}){
  page=await reopen(page,fixture);if(recovery)await page.evaluate(()=>adapter.store.recoverV10(readerAuth.auth,readerAuth.bindings,readerAuth.keys));else await page.evaluate(()=>adapter.run());assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  for(const kind of ['receipt','receipt_sequence','authorship','author_device','dependency','parent','proof','ciphertext']){
    assert.equal(await page.evaluate(async ({kind,recovery})=>{
-     const q=indexedDB.open('worta-web-replay',6);await new Promise((resolve,reject)=>{q.onsuccess=resolve;q.onerror=()=>reject(q.error)});const db=q.result
+     const q=indexedDB.open('worta-web-replay', 7);await new Promise((resolve,reject)=>{q.onsuccess=resolve;q.onerror=()=>reject(q.error)});const db=q.result
      const snapshot=()=>new Promise((resolve,reject)=>{const tx=db.transaction([...db.objectStoreNames]),v={};let count=0;for(const name of db.objectStoreNames){const r=tx.objectStore(name).getAll();r.onsuccess=()=>{v[name]=r.result;if(++count===db.objectStoreNames.length)resolve(v)}};tx.onabort=()=>reject(tx.error)})
      const before=await snapshot(),name=kind.startsWith('receipt')?'receipts':['proof','ciphertext'].includes(kind)?'inbox':'legacyNoteHistory'
      const row=structuredClone(before[name].find(r=>kind.startsWith('receipt')?r.record_version===2:kind==='proof'||kind==='ciphertext'?r.server_sequence===6:r.record_version===3))

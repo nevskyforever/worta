@@ -1,3 +1,4 @@
+import { validateDocumentInbox, type DocumentInbox } from './documentRecords'
 import type { NoteSyncResolutionV2Header, NoteSyncResolutionV2 } from '@/cloud/noteSyncResolutionV2Codec'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
 import { decodeBase64Url } from '@/api/base64url'
@@ -53,7 +54,7 @@ export interface BrowserResolutionInbox10 {
   server_sequence: number; protocol_version: 2 | 3; wire_item: string; resolution_proof: BrowserResolutionProof1
 }
 export type FutureNoteHistory = BrowserNoteHistoryRecord | BrowserResolution4 | BrowserResolutionHead2 | BrowserGroupTransition2
-export type FutureInbox = BrowserInboxRecord | BrowserResolutionInbox10
+export type FutureInbox = BrowserInboxRecord | BrowserResolutionInbox10 | DocumentInbox
 const H = ['record_version','account_id','device_id','project_id','note_id','bootstrap_id','record_kind','record_id']
 export const resolutionIdentity = (r: BrowserResolution4) => { const { evidence_envelope: _e, record_digest: _d, ...identity } = r; return identity }
 function exact(value: unknown, fields: string[]): void { if (!localExact(value, fields)) resolutionBad() }
@@ -163,5 +164,6 @@ export function readFutureHistoryRecord(value:unknown,s:BrowserSyncScope):Future
   return validateNoteHistoryRecord(value,s)
 }
 export function readFutureInboxRecord(value:unknown,s:BrowserSyncScope):FutureInbox {
+  if ((value as {record_version?:number})?.record_version===11) return validateDocumentInbox(value,s)
   return (value as {record_version?:number})?.record_version===10?validateResolutionInbox10(value,s):validateBrowserInboxRecord(value,s)
 }

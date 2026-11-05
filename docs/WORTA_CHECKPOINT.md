@@ -1,5 +1,67 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Document genesis atomic owner apply (LOCAL COMPLETE, bounded storage cohort)
+
+Starting SHA `24920c2a90011169adb5eb96567adaacaad3b273`, branch 6.0.
+Preserved the existing preparer, transaction code and unrelated uncommitted
+Vue/session changes. Document genesis now applies through
+replayStorage.applyDocumentGenesis and the existing ownerPort: current snapshot
+CAS, auth/key lifetime and mandatory complete encrypted server-wire check
+precede the single IndexedDB transaction. Original inbox ciphertext, Native
+ledger identity, encrypted portable projection, Inbox11 proof and manifest
+applied coverage commit together. Other owner transitions cannot alter Document
+inventory. Browser proof digests bind ledger/source and projection; digests are
+not trusted as authority. authenticateDocuments after reopening freshly opens
+the canonical original event, certifies Metadata/bootstrap, checks the complete
+ledger/source/proof joins and decrypts/compares the portable projection. This
+implements the bounded Native genesis source/ledger/projection invariants; see
+the added source/proof contract section. Occupied project Document scope rejects;
+only project-scoped ordinary peer create, revision/generation1, no parents or
+Stage references is admitted. No Document ACK/prefix authority is added.
+
+Replay database v7 adds Document ledger/projection stores and validates previous
+schema/inventory atomically. Snapshot/CAS includes both stores and validates
+strict inbox/ledger/projection joins and coverage. Existing v6 records/manifests
+are preserved byte-for-byte; old DB-v6 readers refuse v7. Test harnesses that
+inspect the current replay use DB v7; intentional historical version tests remain.
+Manifest contract remains 6. Native writer source capture requires a normal
+active project with work_method=app; the fixture uses production save/begin,
+sealing and receipt APIs, independent native process invocations and SQLite.
+No event or owner proof is hand-injected to make application succeed.
+
+Actual Native SQLite → isolated encrypted local transport → Chromium/IndexedDB
+passed: complete native portable Document parity, ownerPort apply, manifest
+coverage, original wire/ciphertext preservation, no ACK/ordinal change, duplicate
+idempotence, transaction abort after projection add with no partial records,
+reopen/retry, fresh proof authentication and corrupted proof refusal. The same
+integration recreates a populated v6 DB with genuine Native encrypted Metadata,
+owner proof, source seed and binding, upgrades to v7 and compares the entire
+snapshot before Document apply. Final test 1 passed. Separate two-Resolution
+Native/Chromium regression passed (combined run 2 passed). Separate Chromium
+schema abort/retry/identity preservation/old reader rejection passed. Focused
+Vitest 130 passed (9 files); prebuilt Rust document atomic apply/replay guard
+1 passed; frontend typecheck/build and quick acceptance passed. These are local
+storage/owner results, not PostgreSQL/FastAPI or UI/server-to-browser acceptance.
+No full HTTP/UI test was run, as requested.
+
+Automatic recoverV10 Document dispatch, HTTP source receipt for Document,
+Document UI, updates/deletes/conflicts/self-echo and Stage-scoped documents
+remain unsupported/unqualified. Current explicit apply method is bounded to a
+complete server page of at most100 events and one project Document slot; larger
+snapshots fail closed. Next connect this accepted owner to recoverV10 and the
+real Recovery GET/UI, and test Native → isolated PostgreSQL/FastAPI → Chromium
+opening/reopen before qualifying one Desktop update.
+
+Product stage 2/6, Slice 4/5 PARTIAL; this bounded Document storage task is LOCAL
+COMPLETE. Readiness remains 2/10, eight blockers open; ready=false,
+declarationAllowed=false, writerAuthorized=false; registration/release closed.
+No browser capability PUT, VPS access, CI run or poll. Owner decisions for full
+Web/unified sync/pragmatic implementation remain below and in the roadmap.
+The checked storage/owner/test/contract changes and this entry are committed
+and pushed; final SHA is the commit containing this entry. Earlier changes to
+BrowserCloudProjectRead.vue/spec and cloudAccountSession.ts remain uncommitted
+and preserved for the next UI task. No unrelated workspace was changed.
+
 ## 2026-11-05 — Document replay schema migration implemented (PARTIAL)
 
 Starting HEAD `516e6ae7cd7936b7a72be1537051286454cda123`, branch 6.0.

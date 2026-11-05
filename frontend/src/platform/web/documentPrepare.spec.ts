@@ -7,7 +7,7 @@ import golden from '@/cloud/__fixtures__/documentCodecV1.json'
 import { frameDocumentEvent, type DocumentEvent } from '@/cloud/documentCodec'
 import { encryptObjectBytes } from '@/crypto'
 import { encodeBase64Url } from '@/api/base64url'
-import { prepareDocumentGenesis } from './documentPrepare'
+import { inspectPreparedDocumentGenesis, prepareDocumentGenesis } from './documentPrepare'
 
 async function fixture() {
   const f = await stageSetup(), event = structuredClone(golden.examples[0]!.event) as DocumentEvent
@@ -24,7 +24,11 @@ async function fixture() {
 it('prepares genuine encrypted codec10 genesis against authenticated Metadata without writing proofs', async () => {
   const { f, event, input } = await fixture(), before = structuredClone(f.db)
   const plan = await prepareDocumentGenesis(scope, input, inventory(f), amk, () => true)
-  expect(plan.projection).toEqual(event.document); expect(plan.wireItem).toBe(input.wire_item); expect(f.db).toEqual(before)
+  const data = inspectPreparedDocumentGenesis(plan, scope, inventory(f))
+  expect(data.projection).toEqual(event.document); expect(data.wireItem).toBe(input.wire_item); expect(f.db).toEqual(before)
+  const changed = inventory(f); changed.cursor.pull_cursor++
+  expect(() => inspectPreparedDocumentGenesis(plan, scope, changed)).toThrow('stale_source')
+  expect(() => inspectPreparedDocumentGenesis({} as typeof plan, scope, inventory(f))).toThrow()
 })
 it('rejects damaged ciphertext, wrong sequence, missing Metadata and revoked sessions', async () => {
   const { f, input } = await fixture(), wire = JSON.parse(input.wire_item), original = wire.object.ciphertext

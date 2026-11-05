@@ -38,7 +38,7 @@ try {
    const replay=await openBrowserReplayStorage(f.scope,new AbortController().signal,()=>true)
    let state=await replay.start(anchor);state=await replay.commitPage(state,0,JSON.stringify({protocol_version:3,encrypted_sync_version:3,items,next_cursor:1,has_more:false}));await replay.finish(state)
    await replay.applyMetadata(auth,bindings,keys);await replay.seedNoteSource(f.items[1].event.project_id,auth,bindings,keys);await replay.close()
-   const original=await new Promise((resolve,reject)=>{const r=indexedDB.open('worta-web-replay',6);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})
+   const original=await new Promise((resolve,reject)=>{const r=indexedDB.open('worta-web-replay', 7);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})
    const names=[...original.objectStoreNames].filter(n=>n!=='replayManifest'),rows={},schema=[]
    await runBrowserTransaction(original,names,'readonly',(tx,result,abort)=>{let count=0;for(const name of names){const s=tx.objectStore(name);schema.push({name,keyPath:s.keyPath,indexes:[...s.indexNames].map(name=>{const i=s.index(name);return{name,keyPath:i.keyPath,unique:i.unique}})});const r=s.getAll();r.onsuccess=()=>{rows[name]=r.result;if(++count===names.length)result()}}});original.close()
    const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('isolated-content-author-owner',1);r.onupgradeneeded=()=>{for(const s of schema){const store=r.result.createObjectStore(s.name,{keyPath:s.keyPath});for(const i of s.indexes)store.createIndex(i.name,i.keyPath,{unique:i.unique})}};r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})

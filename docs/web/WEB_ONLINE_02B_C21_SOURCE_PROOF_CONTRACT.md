@@ -1086,3 +1086,36 @@ PostgreSQL and migrations were NOT RUN at that design baseline. Subsequent
 slice-1 runtime checks are recorded separately above/in checkpoint, without
 claiming full-project implementation or remote acceptance. Official Web progress
 remains **89.36%**.
+
+
+## 2026-11-05 — bounded Document genesis owner in replay storage v7
+
+Project-scoped ordinary codec10 peer genesis now has an explicit browser
+transaction/projection adapter. It preserves the Native apply ledger identity
+(account, event, server sequence, applied outcome and exact original
+nonce/ciphertext in wire_item), requires certified import/Metadata authority,
+and accepts only create revision/generation 1 with no parents or Stage scope.
+The occupied project document slot rejects. Source is retained in immutable
+inbox wire and ledger; projection is separately encrypted with existing E2EE.
+Inbox11 Document proof binds the complete ledger and encrypted projection with
+digests. These digests alone grant no authority: reopen freshly opens and checks
+the canonical source event, authenticates Metadata and bootstrap, recomputes the
+proof joins and decrypts/compares the complete portable projection. It is not a
+server-signed or producer-issued proof; it is a durable browser owner outcome
+with the same bounded Native source/ledger/projection invariants.
+
+Document ledger, projection and inbox proof commit through the existing
+replayStorage ownerPort and manifest coverage in one CAS transaction. Other
+owners cannot mutate Document records. Replay DB v7 adds the two stores and
+validates historical inventory before upgrade; v6 ciphertext, proofs, source
+seeds and import evidence are retained. A reader pinned to DB v6 refuses v7.
+Manifest contract remains v6; Inbox11 admission requires the v7 stores.
+
+The public storage methods are applyDocumentGenesis and authenticateDocuments.
+Automatic recoverV10 dispatch, ordinary full reader qualification, Document
+updates/deletes/conflicts/self-echo, Stage documents, UI opening and HTTP
+acceptance are not activated by this bounded adapter. No Document ACK or proven
+prefix authority is added; readiness/capability gates remain false. Local
+Native/SQLite → Chromium/IndexedDB checks cover apply, portable projection
+parity, duplicate delivery, transaction abort/retry, populated v6 migration,
+reopen and corrupted proof refusal. This is not server-to-browser acceptance.
