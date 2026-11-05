@@ -1,5 +1,33 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — owner decisions: full Web and unified sync
+
+Starting SHA `b0f1de364096cf6f67058175ac21d1ac464da820`, clean branch 6.0.
+The owner confirms full Web with Desktop's core project structure, documents,
+editor, notes, mind maps, progress and other supported features as the goal;
+read-only is an interim milestone. The two-tester limit is a user-count limit,
+not a permanent functional restriction. Desktop ↔ Server ↔ Web and multiple
+Desktop devices must use the existing unified synchronization engine, covering
+create/edit/delete/restore, conflicts, reconnect and restart. Web remains
+online-only/server-authoritative; Desktop remains offline-first.
+
+Develop pragmatically: implement each user feature, verify the main workflow and
+necessary data-safety conditions, commit and proceed; fix further defects as
+found. E2EE, authentication, integrity, atomicity and data-loss protection are
+mandatory. Update this checkpoint after every task including PARTIAL/STOP. Full
+reading comes first, then Web writing and bidirectional sync, all supported data
+types, conflict/recovery, closed testing and approved public release. These are
+product goals of the existing roadmap, not independent new architectures.
+
+Current evidence: project/plain Content and sequential Desktop updates work
+through isolated PostgreSQL/FastAPI → authenticated Web login/unlock and Vue;
+Stage/plain and Stage/html HTTP-to-user-interface acceptance is not established.
+Readiness 2/10; `ready=false`, `declarationAllowed=false`,
+`writerAuthorized=false`, public registration closed. Stage 2/6, Slice 4/5
+PARTIAL. No VPS deployment or CI polling authorized. This is the separately
+requested documentation commit; implementation follows independently. See
+`docs/web/MVP6_0_FASTTRACK_ROADMAP.md` for the recorded decisions.
+
 ## 2026-11-05 — closed Web pilot VPS read-only preflight (PARTIAL)
 
 Starting HEAD `25007d551197d0aa2291e56c697243474cd9563c`, branch `6.0`,

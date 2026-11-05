@@ -1,5 +1,27 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## Owner decisions — 2026-11-05: full Web and unified sync
+
+The product goal is full WORTA Web with the core Desktop capabilities: projects
+and structure, documents and editor, notes, mind maps, progress and other
+supported features. A limited read-only pilot is a temporary milestone, not the
+finished product. At most two initial testers limits user count, not functionality.
+
+Use the existing unified WORTA synchronization engine for Desktop → Server →
+Web, Web → Server → Desktop and Desktop → Server → Desktop, including creation,
+editing, deletion, restoration, conflicts, reconnection and restart. Do not build
+independent sync engines per content type. Web remains online-only and
+server-authoritative; Desktop remains offline-first. E2EE, authorization,
+integrity, atomicity and protection against data loss remain mandatory.
+
+Work pragmatically: implement a user feature, check its main workflow and
+necessary data-safety conditions, commit, then continue; fix further defects as
+found without adding speculative gates. Update the checkpoint after each task,
+including partial work. Continue product stage 2/6, full Web reading, before Web
+writing and bidirectional sync; then broader types, conflict recovery, closed
+two-user testing and public release after mandatory acceptance. Existing
+security gates and release approvals are unchanged.
+
 ## 2026-11-01 — Content genesis and Conflict owner bridge
 
 Technical slice 2 is **LOCAL COMPLETE**, pending independent CI acceptance.
