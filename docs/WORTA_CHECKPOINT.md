@@ -1,5 +1,53 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Stage Content through HTTP and safe HTML reading
+
+Task starting SHA `b0f1de364096cf6f67058175ac21d1ac464da820`; worktree was
+clean. Owner decisions for full Web, unified bidirectional sync, two testers as
+user-count limit, pragmatic implementation and mandatory checkpoint were
+recorded separately in roadmap and checkpoint, committed and pushed as
+`92d5ef38`. Product remains stage 2/6, full Web reading, Slice 4/5 PARTIAL.
+
+The existing production recovery route already accepted Stage/plain and
+Stage/html. Extended the Native SQLite → production API → isolated PostgreSQL
+16/FastAPI → Recovery GET → actual Chromium login/unlock and Vue acceptance to
+cover genuine Stage, StageOrder and Content for both formats, with an actual
+Desktop update and the same persistent browser profile reopened. The fixture
+uses the existing production Rust writers and authentic encrypted events. The
+browser checks applied coverage, event wire/ciphertext, owner state, stage_id and
+format, restart, retry, CAS/rollback and no ACK or browser capability PUT. The
+isolated synthetic Desktop alone declares its previously qualified Note reader
+capability as allowed by the earlier owner decision. The account is synthetic;
+no VPS, production data or browser capability declaration was used.
+
+The existing Vue view displayed HTML notes as literal markup. It now displays a
+safe subset of basic HTML formatting in an opaque-origin sandboxed iframe. An
+inert template copies only allowlisted text/formatting tags without attributes;
+scripts, active elements, links, images and styles are excluded, and an iframe
+CSP blocks network access. Stored ciphertext, source and proofs are unchanged.
+This is limited read-only HTML rendering: links, images, styles and full rich
+format fidelity are not yet supported, and Stage hierarchy/names are not shown.
+Full projects, Web writing and bidirectional sync are not claimed complete.
+
+Final checks: isolated PostgreSQL 16/FastAPI + real Chromium, 3 passed
+(project/plain, Stage/plain, Stage/html), including Stage HTML bold rendering,
+Desktop update, persistent-profile reopen and repeat authentication; focused
+Vitest 87 passed; prebuilt production Rust test 1 passed; frontend typecheck,
+build and quick acceptance passed. A prior test run hit the recovery request
+budget when extending the Stage test with an unnecessary second update; the
+Stage cohort now checks the requested single update, while the existing
+project/plain two-update pagination regression remains intact. No security gate
+was weakened to pass. CI was not run or polled.
+
+Readiness remains 2/10, eight blockers open; `ready=false`,
+`declarationAllowed=false`, `writerAuthorized=false`, public registration and
+release closed. This is bounded local server-to-browser acceptance, not VPS
+acceptance or full Web qualification. Branch 6.0; no unrelated initial changes.
+Final SHA is the commit containing this entry. Next implement the authenticated
+Stage hierarchy in the user-facing project view using existing Stage/StageOrder
+owners, with real HTTP login/unlock, update and reopen; then continue remaining
+project content toward full Web reading before Web writing and unified sync.
+
 ## 2026-11-05 — owner decisions: full Web and unified sync
 
 Starting SHA `b0f1de364096cf6f67058175ac21d1ac464da820`, clean branch 6.0.

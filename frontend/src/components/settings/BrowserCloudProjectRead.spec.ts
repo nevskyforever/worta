@@ -33,3 +33,20 @@ it('does not offer to register a recovery browser as a sync device', async () =>
   expect(wrapper.findAll('button')).toHaveLength(2)
   expect(session.registerCloudReadDevice).not.toHaveBeenCalled()
 })
+
+it('renders HTML notes in an isolated frame with active content and links removed', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const session = { status: 'unlocked', onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockResolvedValue({ metadata: { name: 'Project', goal: null, status: 'active', deadline: null } }),
+    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, notes: [{ id: 'n', title: 'Note', content_format: 'html',
+      content: '<p onclick="alert(1)">Hello <strong>world</strong><img src="https://example.invalid/x"><script>alert(2)</script><a href="https://example.invalid">link</a><meta http-equiv="refresh" content="0;url=https://example.invalid"></p>' }] }),
+  } as unknown as BrowserCloudAccountSession
+  const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project' }, global: { plugins: [pinia] } })
+  await flushPromises(); await wrapper.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
+  const frame = wrapper.get('[data-testid="cloud-note-html"]')
+  const srcdoc = frame.attributes('srcdoc')
+  expect(frame.attributes('sandbox')).toBe('')
+  expect(srcdoc).toContain('<strong>world</strong>')
+  expect(srcdoc).toContain('link')
+  expect(srcdoc).not.toMatch(/onclick|<script|<img|<a |http-equiv="refresh"|example\.invalid/)
+})

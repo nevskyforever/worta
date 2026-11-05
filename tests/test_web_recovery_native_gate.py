@@ -8,17 +8,21 @@ import threading
 from uuid import uuid4
 
 import uvicorn
+import pytest
 
 from test_cloud_auth import cloud_client, create_user, login, migrated_database
 from test_cloud_c15_headless_cross_runtime import PROJECT_ID, _crypto_bridge, _headers
 from test_cloud_c18_authority_cross_runtime import provision, bootstrap, native, publish, sync
 from test_cloud_c18_content_note_acceptance import content, emit, receive
 from test_cloud_c18_content_note_gate import capabilities
+from test_cloud_c18_structural_cross_runtime import structural
+from test_cloud_c18_structural_integration import publish_pending, pull_structure
 from test_cloud_auth import ROOT
 from nfprogress.core.sqlite.connection import register_remote_apply_authorization_guard
 
 
-def test_native_content_publication_fails_closed_without_reader_capability(cloud_client, tmp_path):
+@pytest.mark.parametrize("stage_format", [None, "plain", "html"], ids=["project-plain", "stage-plain", "stage-html"])
+def test_native_content_publication_fails_closed_without_reader_capability(cloud_client, tmp_path, stage_format):
     client, engine = cloud_client
     user = str(create_user(engine))
     token = login(client).json()['access_token']
@@ -43,7 +47,18 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
     native(tmp_path, db, identity, user, 'begin')
     publish(client, tmp_path, token, db, identity, user, amk)
     assert sync(client, tmp_path, token, db, identity, user, amk)['view']['state'] == 'active'
-    content(tmp_path, db, identity, user, 'create', note_id='native-note', content_format='plain')
+    if stage_format:
+        stage = json.loads((ROOT / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
+        with sqlite3.connect(db) as connection:
+            connection.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                ('S1', PROJECT_ID, stage['name'], stage['goal'], int(stage['infinite']), stage['unit'], stage['status'], stage['created_at'], json.dumps(stage)))
+            connection.execute('INSERT INTO stage_order VALUES(?,?,0)', ('S1', PROJECT_ID))
+        structural(tmp_path, db, identity, user, 'begin')
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+        pull_structure(client, tmp_path, token, db, identity, user, amk)
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+        pull_structure(client, tmp_path, token, db, identity, user, amk)
+    content(tmp_path, db, identity, user, 'create', note_id='native-note', stage_id='S1' if stage_format else None, content_format=stage_format or 'plain')
     content(tmp_path, db, identity, user, 'begin')
     pending = content(tmp_path, db, identity, user, 'pending')
     assert len(pending) == 1
@@ -82,7 +97,7 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
         expected_content = json.loads(connection.execute("SELECT payload_json FROM notes WHERE id='native-note'").fetchone()[0])['content']
     fixture_path = tmp_path / 'native-recovery-browser.json'
     fixture_path.write_text(json.dumps({'amk': amk, 'accountId': str(uuid4()), 'deviceId': str(uuid4()),
-        'projectId': PROJECT_ID, 'sequence': sequence, 'item': page.json()['items'][-1], 'expectedContent': expected_content}), encoding='utf-8')
+        'projectId': PROJECT_ID, 'sequence': sequence, 'item': page.json()['items'][-1], 'expectedContent': expected_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None}), encoding='utf-8')
     fixture_path.chmod(0o600)
     api_socket = socket.socket()
     api_socket.bind(('127.0.0.1', 0))
@@ -105,20 +120,25 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
         with Session(engine) as session:
             registered = session.scalars(select(SyncDevice).where(SyncDevice.user_id == user)).all()
             assert [str(device.device_id) for device in registered] == [identity['device_id']]
-        content(tmp_path, db, identity, user, 'edit', note_id='native-note', patch={'content': 'Native edit after browser recovery'})
+        updated_content = '<p>Native <strong>HTML update</strong> after browser recovery</p>' if stage_format == 'html' else 'Native edit after browser recovery'
+        content(tmp_path, db, identity, user, 'edit', note_id='native-note', stage_id='S1' if stage_format else None, patch={'content': updated_content})
         assert len(emit(client, tmp_path, token, db, identity, user, amk)) == 1
         latest = client.get('/api/v3/recovery/encrypted/history', headers=headers,
             params={'since': 0, 'limit': 100, 'expected_cursor': sequence + 1, 'expected_epoch': 2})
         assert latest.status_code == 200, latest.text
         fixture_path.write_text(json.dumps({'amk': amk, 'accountId': str(uuid4()), 'deviceId': str(uuid4()),
             'projectId': PROJECT_ID, 'sequence': sequence + 1, 'item': latest.json()['items'][-1],
-            'expectedContent': 'Native edit after browser recovery', 'provisioned': True}), encoding='utf-8')
+            'expectedContent': updated_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None, 'provisioned': True}), encoding='utf-8')
         result = subprocess.run(['node', 'scripts/browser-recovery-native-http.mjs', str(fixture_path), f'http://127.0.0.1:{port}', str(profile_path), str(vite_port)],
             cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout.strip().splitlines()[-1])['pass']
+        # The Stage cohort needs one real update and same-profile reopen.
+        # Leave the longer project/plain pagination regression unchanged.
+        if stage_format:
+            return
         receive(client, tmp_path, token, db, identity, user, amk)
-        content(tmp_path, db, identity, user, 'edit', note_id='native-note', patch={'content': 'Second native edit after browser recovery'})
+        content(tmp_path, db, identity, user, 'edit', note_id='native-note', stage_id=None, patch={'content': 'Second native edit after browser recovery'})
         assert len(emit(client, tmp_path, token, db, identity, user, amk)) == 1
         last_cursor = sequence + 2
         items = []

@@ -50,7 +50,7 @@ try{
    }
    const state=await store.read()
    const local=store.contentAuthorOwner(auth,bindings,keys).local,source=await local.readSnapshot(scope,f.projectId)
-   const notes=await local.withDecryptedSnapshot(scope,source.token,async value=>value.notes.map(n=>({id:n.note.id,content:n.note.content})))
+   const notes=await local.withDecryptedSnapshot(scope,source.token,async value=>value.notes.map(n=>({id:n.note.id,content:n.note.content,stageId:n.note.stage_id,format:n.note.content_format})))
    return {outcomes,state,notes}
   })
  },fixture)
@@ -60,6 +60,7 @@ try{
  assert.equal(first.state.rows.at(-1).wire_item,JSON.stringify(fixture.item))
  assert.equal(first.notes[0]?.id,'native-note')
  assert.equal(first.notes[0]?.content,fixture.expectedContent)
+ if(fixture.contentFormat){assert.equal(first.notes[0]?.format,fixture.contentFormat);assert.equal(first.notes[0]?.stageId,fixture.stageId)}
  assert.equal(first.state.checkpoint.ack_cursor,0)
  if(fixture.items){
   assert.deepEqual(first.state.rows.map(row=>JSON.parse(row.wire_item)),fixture.items)
@@ -137,7 +138,13 @@ try{
   assert.equal(await panel.locator('[data-testid="cloud-project-notes"]').count(),0)
  }else{
   await page.locator('[data-testid="cloud-project-notes"]').waitFor()
-  assert.ok((await page.locator('[data-testid="cloud-project-notes"]').innerText()).includes(fixture.expectedContent))
+  if(fixture.contentFormat==='html'){
+   const frame=page.locator('[data-testid="cloud-note-html"]')
+   assert.equal(await frame.getAttribute('sandbox'),'')
+   const rendered=await page.frameLocator('[data-testid="cloud-note-html"]').locator('body').innerText()
+   assert.ok(rendered.includes(fixture.expectedContent.replace(/<[^>]*>/g,'')))
+   if(fixture.expectedContent.includes('<strong>'))assert.equal(await page.frameLocator('[data-testid="cloud-note-html"]').locator('strong').count(),1)
+  }else assert.ok((await page.locator('[data-testid="cloud-project-notes"]').innerText()).includes(fixture.expectedContent))
  }
  await page.evaluate(async()=>{testApp.unmount();await userSession.dispose()})
  if(fixture.provisioned && !fixture.expectStale){

@@ -18,6 +18,25 @@ const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: 
   pt_BR: { open: 'Abrir projeto na nuvem', partial: 'Configurações verificadas do servidor. Textos, etapas, notas e outros dados ainda não foram abertos.', blocked: 'Leitura bloqueada', network: 'Não foi possível conectar ao servidor. Tente novamente.', register: 'Registrar este navegador para acessar a nuvem' },
 }
 const words = computed(() => copy[locale.language])
+// Keep only text and basic formatting; the opaque-origin sandbox is a second barrier
+// against scripts, network access and access to the authenticated parent page.
+function noteHtmlDocument(content: string): string {
+  const input = document.createElement('template'), output = document.createElement('template')
+  input.innerHTML = content
+  const allowed = new Set(['p', 'br', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr'])
+  const discarded = new Set(['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'template'])
+  function copy(node: Node, parent: Node): void {
+    if (node.nodeType === Node.TEXT_NODE) { parent.appendChild(document.createTextNode(node.textContent ?? '')); return }
+    if (node.nodeType !== Node.ELEMENT_NODE) return
+    const tag = (node as Element).localName
+    if (discarded.has(tag)) return
+    const target = allowed.has(tag) ? document.createElement(tag) : parent
+    if (target !== parent) parent.appendChild(target)
+    for (const child of node.childNodes) copy(child, target)
+  }
+  for (const child of input.content.childNodes) copy(child, output.content)
+  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"></head><body>${output.innerHTML}</body></html>`
+}
 const recoveryLabels: Record<SupportedLanguage, { open: string; heading: string; unavailable: string }> = {
   ru: { open: 'Открыть заметки для чтения', heading: 'Заметки', unavailable: 'Не удалось безопасно проверить историю проекта. Она может содержать пока не поддерживаемые данные.' },
   en: { open: 'Open notes for reading', heading: 'Notes', unavailable: 'The project history could not be verified safely. It may contain data that is not supported yet.' },
@@ -83,7 +102,11 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     <article v-if="recovery" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
       <h4>{{ recoveryLabels[locale.language].heading }}</h4>
-      <section v-for="note in recovery.notes" :key="note.id"><h5>{{ note.title }}</h5><p style="white-space: pre-wrap">{{ note.content }}</p></section>
+      <section v-for="note in recovery.notes" :key="note.id">
+        <h5>{{ note.title }}</h5>
+        <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" style="width: 100%; min-height: 12rem; border: 0" />
+        <p v-else style="white-space: pre-wrap">{{ note.content }}</p>
+      </section>
     </article>
   </section>
 </template>
