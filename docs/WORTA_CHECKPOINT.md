@@ -1,5 +1,57 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — authenticated Stage and StageOrder Web view
+
+Starting SHA `397b0b6ac912463cb61b0c0631c165b0ba22339a`, branch 6.0,
+initial worktree clean. The Vue recovery view now displays authenticated Stage
+names in StageOrder, selects and switches stages, filters notes by stage and
+still allows project-level notes. Labels cover all six UI languages. The new
+view derives data from the existing replay snapshot and real Stage/StageOrder
+owners, forces cryptographic owner proof reauthentication and opens the
+certified encrypted tip events. It refuses missing or inconsistent membership,
+unknown note stages, an incomplete applied history, a stale snapshot or a
+revoked session; it does not add a structure store or sync engine.
+
+The existing recovery snapshot extension accepted only peer Content updates.
+It now also admits one authenticated peer StageOrder update with exact project,
+bootstrap, writer, version/parent/revision/generation, metadata and current
+Stage tip dependencies; replay owner application, original server reconciliation
+and replay CAS remain required. The original captured import boundary may now
+be witnessed by the existing Content owner outcome at that exact cursor, not
+only by a create: source seed, immutable import proof, original boundary and
+complete owner authentication are retained. No client cursor was manually
+advanced, no browser capability declared and no ACK issued. This is a bounded
+continuation: multiple new events in the same extension, Stage membership
+changes, structural conflict/resolution and broader account histories are not
+newly qualified. HTML remains the previously documented safe subset.
+
+Actual Native Rust/SQLite → production API → isolated PostgreSQL 16/FastAPI →
+Recovery GET → Chromium: Stage/plain and Stage/html each exercised two named
+Stages, StageOrder and notes, login/unlock, switching, real Desktop Content
+update, real Desktop reorder, and repeated persistent-profile reopen. The HTML
+cohort also includes a plain note on the other Stage. The latest HTML run
+explicitly corrupts a saved StageOrder proof, confirms the Vue view refuses the
+history, restores the original test record and confirms reopen; prior acceptance
+also verifies ciphertext, owner proof and transaction rollback. Separate
+project/plain HTTP/Chromium regression passed. Final integration results:
+Stage/plain 1 passed, Stage/html and project/plain 2 passed, HTML corruption
+rerun 1 passed; focused Vitest 121 passed, Rust prebuilt focused 1 passed,
+frontend typecheck, build and quick acceptance passed. The isolated synthetic
+Desktop-only Note capability declaration was previously approved by the owner;
+no browser capability PUT or VPS access occurred. Disposable PostgreSQL 16
+container was used; no production accounts or data.
+
+Stage 2/6, Slice 4/5 PARTIAL; readiness 2/10, eight blockers remain open;
+`ready=false`, `declarationAllowed=false`, `writerAuthorized=false`, public
+registration/release closed. This is bounded local acceptance, not universal
+reader qualification, a VPS deployment or full Web + bidirectional sync.
+Owner decisions for full Web and unified sync remain in the following checkpoint
+entry and roadmap. GitHub CI was neither run nor polled. Final SHA is the commit
+containing this entry; commit/push are limited to the checked changes. Next:
+implement supported Stage membership creation/update across a later recovery
+snapshot through existing structural owners, then continue other project data
+for complete Web reading before Web writing and unified bidirectional sync.
+
 ## 2026-11-05 — Stage Content through HTTP and safe HTML reading
 
 Task starting SHA `b0f1de364096cf6f67058175ac21d1ac464da820`; worktree was

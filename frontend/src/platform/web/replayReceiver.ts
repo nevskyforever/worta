@@ -1,3 +1,7 @@
+import { readReplayStages } from './replayStageView'
+import { validateStageHead } from './stageRecords'
+import { validateStageOrderHead } from './stageOrderRecords'
+import type { StructuralEvent } from '@/cloud/stageCodec'
 import { cloudProjectsApi } from '@/api/cloudProjects'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
 import { encryptedSyncV3Api, type V3Descriptor } from '@/api/encryptedSyncV3'
@@ -77,8 +81,8 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
         const afterRegistry = await request(token => cloudProjectsApi.listBootstraps(token, signal))
         const afterMode = await request(token => encryptedSyncV2Api.capabilities(token, signal))
         if (!replaySame(replayAnchor(afterRegistry, afterMode), anchor) || !replaySame(await storage.read(), previous)) fail('server_changed')
-        // Limit this transition to one bounded page of authenticated peer Content
-        // updates. Owner application still produces the authoritative proofs.
+        // Admit bounded peer Content continuations or one verified StageOrder update.
+        // Owner application still produces the authoritative proofs.
         if (anchor.registry.current_cursor - prior.receive_cursor > REPLAY_LIMITS.page) fail('history_limit')
         const raw = await request(token => encryptedSyncV3Api.recoveryRaw(token, prior.receive_cursor, REPLAY_LIMITS.page,
           anchor.registry.current_cursor, anchor.transport.cutover_epoch, signal))
@@ -92,7 +96,28 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           }
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
-            if ('scope' in event || event.entity_type !== 'note' || event.operation !== 'event' || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'stage_order' && event.operation === 'upsert' && page.items.length === 1) {
+              await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
+              const rawHead = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
+              if (!rawHead) fail('unsupported_history_family')
+              const head = validateStageOrderHead(rawHead, scope), priorProof = head.history.find(proof => proof.event_id === head.tip_event_ids[0])
+              const nonce = decodeBase64Url((item.object as { nonce: string }).nonce), ciphertext = decodeBase64Url((item.object as { ciphertext: string }).ciphertext)
+              try {
+                const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
+                  entityId: event.entity_id, entityType: 'stage_order', eventId: event.event_id }, { ...(item.object as { crypto_version: 1; aad_version: 1 }), nonce, ciphertext }) as StructuralEvent
+                const h = decoded.header, stageHeads = previous.owners.filter(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id).map(owner => validateStageHead(owner, scope))
+                if (!priorProof || h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.device_id !== event.device_id
+                  || h.entity_id !== 'stage_order' || h.entity_type !== 'stage_order' || h.operation !== 'update' || h.event_id !== event.event_id
+                  || h.bootstrap_id !== head.bootstrap_id || h.metadata_event_id !== priorProof.metadata_event_id || h.revision !== event.revision
+                  || h.revision !== priorProof.revision + 1 || h.generation !== priorProof.generation + 1 || !replaySame(h.parent_event_ids, head.tip_event_ids)
+                  || canonicalizeSyncTimestamp(h.updated_at) !== canonicalizeSyncTimestamp(event.updated_at)
+                  || !decoded.stage_ids || !decoded.stage_heads || decoded.stage_ids.length !== stageHeads.length
+                  || stageHeads.some(stage => !decoded.stage_ids!.includes(stage.stage_id) || !replaySame(decoded.stage_heads![stage.stage_id], stage.tip_event_ids))) fail('invalid_history')
+              } finally { nonce.fill(0); ciphertext.fill(0) }
+              continue
+            }
+            if (event.entity_type !== 'note' || event.operation !== 'event') fail('unsupported_history_family')
             const key = JSON.stringify([event.project_id, event.entity_id]), head = heads.get(key)
             const nonce = decodeBase64Url((item.object as { nonce: string }).nonce), ciphertext = decodeBase64Url((item.object as { ciphertext: string }).ciphertext)
             try {

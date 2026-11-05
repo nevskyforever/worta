@@ -138,6 +138,7 @@ try{
   assert.equal(await panel.locator('[data-testid="cloud-project-notes"]').count(),0)
  }else{
   await page.locator('[data-testid="cloud-project-notes"]').waitFor()
+  if(fixture.stages?.length){const stages=panel.locator('[data-stage-id]');assert.deepEqual(await stages.evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-stage-id'))),fixture.stages);assert.deepEqual(await stages.allTextContents(),fixture.stages.map(id=>`Stage ${id}`));await panel.locator('[data-stage-id="S2"]').click();assert.equal(await panel.locator('[data-testid="cloud-note-html"]').count(),0);await panel.locator('[data-stage-id="S1"]').click()}
   if(fixture.contentFormat==='html'){
    const frame=page.locator('[data-testid="cloud-note-html"]')
    assert.equal(await frame.getAttribute('sandbox'),'')

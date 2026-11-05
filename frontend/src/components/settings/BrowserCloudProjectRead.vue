@@ -46,6 +46,12 @@ const recoveryLabels: Record<SupportedLanguage, { open: string; heading: string;
   pt_BR: { open: 'Abrir notas para leitura', heading: 'Notas', unavailable: 'Não foi possível verificar o histórico do projeto com segurança. Ele pode conter dados ainda não compatíveis.' },
 }
 const result = ref<BrowserCloudProjectRead | null>(null), busy = ref(false), error = ref<string | null>(null)
+const stageLabels: Record<SupportedLanguage, { stages: string; project: string }> = {
+  ru: { stages: 'Этапы', project: 'Заметки проекта' }, en: { stages: 'Stages', project: 'Project notes' },
+  es: { stages: 'Etapas', project: 'Notas del proyecto' }, de: { stages: 'Etappen', project: 'Projektnotizen' },
+  fr: { stages: 'Étapes', project: 'Notes du projet' }, pt_BR: { stages: 'Etapas', project: 'Notas do projeto' },
+}
+const selectedStage = ref<string | null>(null)
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
 let controller: AbortController | null = null
@@ -74,7 +80,10 @@ async function openRecovery(): Promise<void> {
   result.value = null; recovery.value = null; error.value = null; recoveryError.value = true; busy.value = true
   try {
     const value = await props.session.readRecoveryProject(props.projectId, active.signal)
-    if (!active.signal.aborted && props.session.status === 'unlocked') recovery.value = value
+    if (!active.signal.aborted && props.session.status === 'unlocked') {
+      recovery.value = value
+      selectedStage.value = value.notes.some(note => note.stage_id === null) ? null : value.stages[0]?.id ?? null
+    }
   } catch (cause) {
     if (active.signal.aborted) return
     if (props.session.status !== 'unlocked') { emit('invalidated'); return }
@@ -101,8 +110,12 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     </article>
     <article v-if="recovery" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
+      <nav v-if="recovery.stages.length" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
+        <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectedStage = null">{{ stageLabels[locale.language].project }}</button>
+        <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectedStage = stage.id">{{ stage.name }}</button>
+      </nav>
       <h4>{{ recoveryLabels[locale.language].heading }}</h4>
-      <section v-for="note in recovery.notes" :key="note.id">
+      <section v-for="note in recovery.notes.filter(note => note.stage_id === selectedStage)" :key="note.id">
         <h5>{{ note.title }}</h5>
         <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" style="width: 100%; min-height: 12rem; border: 0" />
         <p v-else style="white-space: pre-wrap">{{ note.content }}</p>

@@ -38,7 +38,7 @@ it('renders HTML notes in an isolated frame with active content and links remove
   const pinia = createPinia(); setActivePinia(pinia)
   const session = { status: 'unlocked', onRevoked: () => () => {},
     readCloudProject: vi.fn().mockResolvedValue({ metadata: { name: 'Project', goal: null, status: 'active', deadline: null } }),
-    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, notes: [{ id: 'n', title: 'Note', content_format: 'html',
+    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [], notes: [{ id: 'n', title: 'Note', stage_id: null, content_format: 'html',
       content: '<p onclick="alert(1)">Hello <strong>world</strong><img src="https://example.invalid/x"><script>alert(2)</script><a href="https://example.invalid">link</a><meta http-equiv="refresh" content="0;url=https://example.invalid"></p>' }] }),
   } as unknown as BrowserCloudAccountSession
   const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project' }, global: { plugins: [pinia] } })
@@ -49,4 +49,21 @@ it('renders HTML notes in an isolated frame with active content and links remove
   expect(srcdoc).toContain('<strong>world</strong>')
   expect(srcdoc).toContain('link')
   expect(srcdoc).not.toMatch(/onclick|<script|<img|<a |http-equiv="refresh"|example\.invalid/)
+})
+
+it('shows ordered stages and switches between their notes', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const session = { status: 'unlocked', onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockResolvedValue({ metadata: { name: 'Project', goal: null, status: 'active', deadline: null } }),
+    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [{ id: 'b', name: 'Second' }, { id: 'a', name: 'First' }], notes: [
+      { id: 'n1', title: 'A', stage_id: 'a', content_format: 'plain', content: 'Text A' },
+      { id: 'n2', title: 'B', stage_id: 'b', content_format: 'plain', content: 'Text B' },
+    ] }),
+  } as unknown as BrowserCloudAccountSession
+  const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project' }, global: { plugins: [pinia] } })
+  await flushPromises(); await wrapper.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
+  expect(wrapper.findAll('[data-stage-id]').map(button => button.text())).toEqual(['Second', 'First'])
+  expect(wrapper.text()).toContain('Text B'); expect(wrapper.text()).not.toContain('Text A')
+  await wrapper.get('[data-stage-id="a"]').trigger('click')
+  expect(wrapper.text()).toContain('Text A'); expect(wrapper.text()).not.toContain('Text B')
 })

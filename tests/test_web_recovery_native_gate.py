@@ -50,11 +50,13 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
     if stage_format:
         stage = json.loads((ROOT / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
         with sqlite3.connect(db) as connection:
-            connection.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
-                ('S1', PROJECT_ID, stage['name'], stage['goal'], int(stage['infinite']), stage['unit'], stage['status'], stage['created_at'], json.dumps(stage)))
-            connection.execute('INSERT INTO stage_order VALUES(?,?,0)', ('S1', PROJECT_ID))
+            for position, stage_id in enumerate(('S1', 'S2')):
+                details = dict(stage, name=f'Stage {stage_id}')
+                connection.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (stage_id, PROJECT_ID, details['name'], details['goal'], int(details['infinite']), details['unit'], details['status'], details['created_at'], json.dumps(details)))
+                connection.execute('INSERT INTO stage_order VALUES(?,?,?)', (stage_id, PROJECT_ID, position))
         structural(tmp_path, db, identity, user, 'begin')
-        assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 2
         pull_structure(client, tmp_path, token, db, identity, user, amk)
         assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
         pull_structure(client, tmp_path, token, db, identity, user, amk)
@@ -88,16 +90,25 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
     content(tmp_path, db, identity, user, 'seal', event_id=item['event_id'], frame=item['frame'], envelope=sealed['object'])
     content(tmp_path, db, identity, user, 'receipt', event_id=item['event_id'], server_sequence=sequence, duplicate=False)
     receive(client, tmp_path, token, db, identity, user, amk)
+    if stage_format:
+        content(tmp_path, db, identity, user, 'create', note_id='stage-two-note', stage_id='S2', content_format='plain')
+        assert len(emit(client, tmp_path, token, db, identity, user, amk)) == 1
+        receive(client, tmp_path, token, db, identity, user, amk)
+        second_text = 'Text belonging to Stage S2'
+        content(tmp_path, db, identity, user, 'edit', note_id='stage-two-note', stage_id='S2', patch={'content': second_text})
+        assert len(emit(client, tmp_path, token, db, identity, user, amk)) == 1
+        receive(client, tmp_path, token, db, identity, user, amk)
+        sequence += 2
     page = client.get('/api/v3/recovery/encrypted/history', headers=headers,
         params={'since': 0, 'limit': 100, 'expected_cursor': sequence, 'expected_epoch': 2})
     assert page.status_code == 200, page.text
-    assert page.json()['items'][-1]['object'] == sealed['object']
-    assert page.json()['items'][-1]['event']['event_id'] == item['event_id']
+    assert next(row for row in page.json()['items'] if row['event']['event_id'] == item['event_id'])['object'] == sealed['object']
+    assert any(row['event']['event_id'] == item['event_id'] for row in page.json()['items'])
     with sqlite3.connect(db) as connection:
         expected_content = json.loads(connection.execute("SELECT payload_json FROM notes WHERE id='native-note'").fetchone()[0])['content']
     fixture_path = tmp_path / 'native-recovery-browser.json'
     fixture_path.write_text(json.dumps({'amk': amk, 'accountId': str(uuid4()), 'deviceId': str(uuid4()),
-        'projectId': PROJECT_ID, 'sequence': sequence, 'item': page.json()['items'][-1], 'expectedContent': expected_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None}), encoding='utf-8')
+        'projectId': PROJECT_ID, 'sequence': sequence, 'item': page.json()['items'][-1], 'expectedContent': expected_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None, 'stages': ['S1', 'S2'] if stage_format else []}), encoding='utf-8')
     fixture_path.chmod(0o600)
     api_socket = socket.socket()
     api_socket.bind(('127.0.0.1', 0))
@@ -128,7 +139,7 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
         assert latest.status_code == 200, latest.text
         fixture_path.write_text(json.dumps({'amk': amk, 'accountId': str(uuid4()), 'deviceId': str(uuid4()),
             'projectId': PROJECT_ID, 'sequence': sequence + 1, 'item': latest.json()['items'][-1],
-            'expectedContent': updated_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None, 'provisioned': True}), encoding='utf-8')
+            'expectedContent': updated_content, 'contentFormat': stage_format or 'plain', 'stageId': 'S1' if stage_format else None, 'stages': ['S1', 'S2'] if stage_format else [], 'provisioned': True}), encoding='utf-8')
         result = subprocess.run(['node', 'scripts/browser-recovery-native-http.mjs', str(fixture_path), f'http://127.0.0.1:{port}', str(profile_path), str(vite_port)],
             cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
         assert result.returncode == 0, result.stdout + result.stderr
@@ -136,6 +147,19 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
         # The Stage cohort needs one real update and same-profile reopen.
         # Leave the longer project/plain pagination regression unchanged.
         if stage_format:
+            receive(client, tmp_path, token, db, identity, user, amk)
+            def check_stage_order(order):
+                fixture_path.write_text(json.dumps({'projectId': PROJECT_ID, 'stages': order,
+                    'firstText': 'Native edit after browser recovery' if stage_format == 'plain' else 'Native HTML update after browser recovery', 'firstHtml': stage_format == 'html', 'secondText': second_text}), encoding='utf-8')
+                checked = subprocess.run(['node', 'scripts/browser-recovery-stage-order.mjs', str(fixture_path), f'http://127.0.0.1:{port}', str(profile_path), str(vite_port)],
+                    cwd=ROOT / 'frontend', capture_output=True, text=True, timeout=120)
+                assert checked.returncode == 0, checked.stdout + checked.stderr
+                assert json.loads(checked.stdout.strip().splitlines()[-1])['pass']
+            check_stage_order(['S1', 'S2'])
+            structural(tmp_path, db, identity, user, 'order', stage_ids=['S2', 'S1'])
+            assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+            pull_structure(client, tmp_path, token, db, identity, user, amk)
+            check_stage_order(['S2', 'S1'])
             return
         receive(client, tmp_path, token, db, identity, user, amk)
         content(tmp_path, db, identity, user, 'edit', note_id='native-note', stage_id=None, patch={'content': 'Second native edit after browser recovery'})
