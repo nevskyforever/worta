@@ -7,6 +7,7 @@ import {chromium} from '@playwright/test'
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8')),backend=process.argv[3],profile=await mkdtemp(join(tmpdir(),'worta-http-native-')),realProfile=process.argv[4]??await mkdtemp(join(tmpdir(),'worta-http-real-'))
 let vite,context,fault=null
 const recoveryRequests=[]
+const forbiddenRequests=[]
 try{
  vite=await createServer({logLevel:'error',server:{host:'127.0.0.1',port:Number(process.argv[5]??0),strictPort:true}});await vite.listen()
  const origin=`http://127.0.0.1:${vite.httpServer.address().port}`
@@ -14,6 +15,7 @@ try{
   context=await chromium.launchPersistentContext(directory,{headless:true})
   await context.route(url=>url.pathname.startsWith('/api/'),async route=>{
    const url=new URL(route.request().url())
+   if((route.request().method()==='PUT' && url.pathname.endsWith('/note-reader-capabilities')) || url.pathname==='/api/v3/sync/encrypted/ack')forbiddenRequests.push(`${route.request().method()} ${url.pathname}`)
    if(fixture.pagination&&url.pathname==='/api/v3/recovery/encrypted/history')url.searchParams.set('limit','1')
    const target=backend+url.pathname+url.search
    if(url.pathname==='/api/v3/recovery/encrypted/history')recoveryRequests.push(Number(url.searchParams.get('since')))
@@ -143,5 +145,6 @@ try{
   const reopened=await page.evaluate(async projectId=>{const {BrowserCloudAccountSession}=await import('/src/platform/web/cloudAccountSession.ts');const reader=new BrowserCloudAccountSession();try{await reader.login('Arthur','correct horse battery staple');await reader.unlock('test-encryption-password');return await reader.readRecoveryProject(projectId,new AbortController().signal)}finally{await reader.dispose()}},fixture.projectId)
   assert.equal(reopened.notes[0]?.content,fixture.expectedContent)
  }
+ assert.deepEqual(forbiddenRequests,[])
  console.log(JSON.stringify({pass:true,applied:fixture.sequence}))
 }finally{await context?.close();await vite?.close();await rm(profile,{recursive:true,force:true});if(!process.argv[4])await rm(realProfile,{recursive:true,force:true})}

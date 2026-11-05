@@ -1,5 +1,63 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — closed Web read-only pilot preparation (PARTIAL)
+
+Starting HEAD `8ee6d22c326dcf0b08cb495c0d03e7bde8c0fdcd`, clean branch 6.0.
+Locally demonstrated cohort: one active imported project/plain Content Note,
+initial authenticated Desktop creation and two linear peer Content updates;
+real Web account login/unlock, Recovery GET, Vue read-only note view, update,
+re-login/reopen and proof/source/ciphertext checks. Existing bounded replay
+limits and genesis/import-high-water restrictions apply; unsupported account
+histories fail closed and must not be presented as fully opened. No browser sync
+device, browser capability PUT or premature ACK. A synthetic Desktop-only Note
+capability PUT was used in the owner-approved isolated integration fixture.
+
+Fixed two pilot UI issues: recovery refusal clears earlier metadata/notes and
+shows a localized safe-history explanation rather than claiming all errors are
+network failures; removed the UI offer to register the recovery browser as a
+sync device. The cloud catalog text now accurately says supported notes can be
+read, in all six languages. No server security gate or release policy changed.
+
+Verification on disposable PostgreSQL 16/FastAPI: 9 tests passed, including
+real Chromium Native Desktop → server → same-profile Web two updates/reopen;
+closed public registration and private invitation flows; two independently
+populated account histories with identical sequence/cursor, checking each sees
+only its own wire and rejects client-supplied account IDs; endpoint auth/logout,
+read-only SQL/timeout, per-process rate/concurrency and unchanged ACK. A new
+actual loopback Chromium/FastAPI HTTP test crosses the natural 100-item page
+boundary: 102 opaque synthetic server-accepted events yield 100+2 items with
+contiguous sequences, identical repeat and empty final page. No proxy page-limit
+clamp is used for this test. This verifies HTTP delivery, not browser owner
+replay or full readiness for a 102-event account. Existing Native Content test
+uses its documented page-limit proxy. Focused Vitest 66 passed, Rust native
+conflict/Resolution 1 passed using existing compiled binary, frontend typecheck
+and build and quick acceptance passed. No Actions were run or polled.
+
+Pilot-specific blockers: target test server has not been inspected or deployed
+in this task; owner approval is required for any VPS deployment. Confirm current
+private HTTPS, invite/SMTP, backup and restore, resources and max two testers,
+and operational security before use. Code config limits PostgreSQL pool to two
+connections per process with no overflow; GET limits (120/min burst 120 per
+account/session, one concurrent/account and four/worker, 10s SQL timeout) are
+per worker, not global. Actual target memory, live DB connection budget and
+multi-worker/ingress behavior are NOT VERIFIED. The latest historical VPS
+checkpoint is not current server evidence. Real physical two-user operation,
+additional existing project shapes, second-user operational onboarding and Web
+failure recovery still need the appropriate focused acceptance.
+
+Separate from the pilot: full Web 6.0 requires the remaining 8/10 reader
+qualification blockers, broader event families/owners and authorized capability
+lifecycle; public release additionally remains blocked by release, security,
+registration and owner-approval gates. E2EE, ordinary server reader/writer gates
+and registration remain unchanged; `ready=false`, `declarationAllowed=false`,
+`writerAuthorized=false`, public release closed. Product stage 2/6, Slice 4/5
+PARTIAL, readiness 2/10. No VPS access, deployment or real-user data. Changes and
+this checkpoint are committed on 6.0 after local checks; final SHA is the commit
+containing this entry (`git rev-parse HEAD`). Next: prepare a concrete, read-only
+inspection of the designated test server's capacity, isolation and invitation
+prerequisites; deployment or server modifications need separate owner approval.
+
+
 ## 2026-11-05 — sequential Content updates (local acceptance)
 
 Starting HEAD `af5271899eddc526641c7835580d70d390135c60`, clean 6.0.
