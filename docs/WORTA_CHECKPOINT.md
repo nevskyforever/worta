@@ -1,5 +1,115 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Desktop Document update → Web (LOCAL COMPLETE, linear project cohort)
+
+Starting SHA `c8560b6b625f5c6838e58d2eaf76a577590340bd`, branch `6.0`, initial
+working tree clean. Final SHA is the commit containing this entry and is reported
+exactly in the task result. Stage 2/6 — full Web reading, Slice 4/5 remains
+PARTIAL. Owner decisions of 05.11.2026 remain unchanged: full Web, bidirectional
+sync, one engine and priority for working functions. This entry supersedes the
+Document-update limitation in earlier historical entries below.
+
+The accepted Document owner is extended to ordinary project-scoped peer update.
+prepareDocumentEvent uses the existing preparation/token contract and freshly
+authenticates source/descriptor, account, bootstrap and Metadata dependency. The
+single parent must be the latest prior document_proven tip in the same project
+slot, with the same entity/bootstrap and revision/generation exactly parent+1.
+Parent source is freshly opened; an unknown/unapplied parent is refused. The
+Native contract is document_sync.rs parent_revision plus its current-tip conflict
+rule; this browser cohort has no local Document drafts or Web editing authority.
+Existing genesis entry points remain compatible. recoverV10 dispatches both
+operations to the same storage ownerPort, using fresh full snapshot CAS and
+mandatory complete server-wire verification for each operation.
+
+An update ledger adds previous_projection, containing the exact encrypted prior
+projection read under the same CAS. Native source identity/nonce/ciphertext and
+the applied outcome remain unchanged. This archive is necessary to verify the
+old proof's projection_digest after replacement of the current head. No old
+ledger, source or inbox proof is rewritten; the new ledger digest covers the
+archive and the existing Inbox11/Document-proof format/version remains unchanged.
+The owner atomically appends ledger/proof, replaces the one encrypted projection
+and advances manifest coverage. Its transition checks that all other inbox rows
+and prior ledgers remain unchanged and that the archive equals the actual prior
+projection. Inventory and reauthentication validate every historical join/source/
+projection/proof while returning only the current Document to Vue.
+
+No new IndexedDB store, database version or schema migration: v7 genesis rows
+retain their exact format. The previous genesis-only reader rejects revision2
+and the extended ledger keys by its existing source checks; no separate old-v7
+binary test is claimed. Existing populated v6→v7 migration/genesis regression
+passed. Source reimport accepts the new received/proven revisions only through
+the same fresh owner authentication. Receiver preflight authenticates the prior
+history and next Document source before staging a safe received continuation;
+staged ciphertext grants neither applied coverage nor display authority.
+
+Actual Native Rust/SQLite → production push → isolated PostgreSQL 16/FastAPI →
+Recovery GET → Chromium/Vue: PASS, 1 integration test. Desktop publishes
+"Первая редакция"; Web uses real account form login, passphrase unlock, cloud
+catalog and Document selection. With the browser still open, Native consumes
+its real self-echo, saves "Вторая редакция" against its actual expected tips,
+creates revision2 with the real parent and publishes through production API.
+Both Native sealed envelopes match PostgreSQL/FastAPI GET and browser wire.
+
+A corrupted update ciphertext is refused before staging: the entire previous
+snapshot is unchanged and no unverified text is displayed. A real IndexedDB
+transaction abort at documentProjection.put leaves exactly the captured state
+before its first owner write: new source remains received, applied_cursor=2,
+old projection/ledger/proofs intact and no partial Document outcome. Retry in the
+SAME unlocked session succeeds, shows "Вторая редакция", keeps one document and
+preserves original inbox proofs/ciphertext/import evidence. Redelivery/reimport
+changes no accepted rows. Actual Chromium profile close/reopen and new login/
+unlock reauthenticate all history and show the latest text, never the old one.
+Historical proof corruption after update also refuses the read with no other
+inventory writes; restoring original evidence permits retry. Current projection
+is one row, ledgers are two rows. Neither revision is stored as plaintext.
+
+The selected Document remains selected after a successful refresh; failed reads,
+lock/revocation still clear plaintext. Vue continues to escape text, without
+executing source HTML/mark URLs. Shared help and all six languages now explain
+Desktop updates and refresh. Catalog generation reports zero missing strings;
+frontend help/locale artifacts were regenerated and export consistency passed.
+
+Final local checks on macOS Apple Silicon: focused Vitest 129 passed in 8 files;
+real HTTP/Chromium update integration 1 passed; separate Native Document
+Chromium/IndexedDB genesis/migration/abort/duplicate/proof regression 1 passed;
+prebuilt Native Rust atomic apply/replay fail-closed guard 1 passed (no Rust code
+change/rebuild); Python help/localization 30 passed. Typecheck, frontend build,
+py_compile, content export --check and maintained quick acceptance passed.
+One erroneous root Vitest invocation discovered generated build-workspace copies
+and failed; it is NOT acceptance evidence. Final tests used the pinned frontend
+runner/config. Only that invocation's task-created root test caches were removed;
+frontend dependencies and user data were preserved. No dependency/lockfile change.
+Existing Starlette/Node deprecations and Vite chunk warnings remain nonfatal.
+
+Scope: ordinary project-scoped linear peer create/update, one Document project
+slot. The receiver currently qualifies one new Document continuation event per
+refresh, within the existing complete-page <=100-event owner bound. Multiple
+pending Document updates in one continuation page, Stage documents, conflicts,
+deletes, self-echo, rich formatting and Web editing are not qualified. Document
+prefix/ACK authority and ordinary full reader readiness remain unqualified.
+General production CAS is reused unchanged; no new update-specific concurrent
+writer race is claimed beyond actual owner CAS/rollback and existing accepted
+shared-CAS evidence. This is local server-to-browser acceptance, not VPS release.
+
+Readiness remains 2/10 closed, eight open. Browser gates ready=false,
+declarationAllowed=false, writerAuthorized=false. Only the isolated synthetic
+Native Desktop declares its qualified reader capabilities; browser capability
+PUT/device registration/ACK requests are forbidden by the test and none occur.
+Browser and Desktop server ACK cursors stay 0. Registration/security/release
+policies, main and VPS remain untouched; no new worktree or deployment.
+
+Checked code/UI/tests/help/contract/roadmap/checkpoint changes are committed and
+pushed without force to origin/6.0; working tree clean after commit. CI was not
+manually triggered or polled; automatic remote status was not read. Task-owned
+PostgreSQL 16 container stopped/removed after acceptance; unrelated Docker data
+and existing user files untouched.
+
+Next concrete task: read one Stage-scoped Document through existing Stage
+dependency proofs, Document owner, Recovery GET and Vue, including Desktop update
+and same-profile restart. Refine the current one-project-slot restriction only
+with authenticated Stage scope; do not accept another entity merely by ID.
+Continue full Web reading before Web writing and bidirectional unified sync.
+
 ## 2026-11-05 — Document Recovery GET → Vue (LOCAL COMPLETE, genesis cohort)
 
 Starting SHA `3fe9471eea8c05754c4cfc1dcde36da06c2fa04a`, branch `6.0`.

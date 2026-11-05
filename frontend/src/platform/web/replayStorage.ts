@@ -1,5 +1,5 @@
-import { commitDocumentGenesis, authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
-import { prepareDocumentGenesis } from './documentPrepare'
+import { commitDocumentEvent, authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
+import { prepareDocumentEvent } from './documentPrepare'
 import { readStageInventory } from './stageApply'
 import {BrowserContentNoteIntents} from './contentNoteIntents'
 import {BrowserV10Recovery} from './v10Recovery'
@@ -386,7 +386,7 @@ class BrowserReplayStorage {
       }
       return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction, validatePrefix, () => ownerTransaction(0), {
         authenticate: () => this.authenticateDocuments(auth, bindings, keys),
-        apply: sequence => this.applyDocumentGenesis(sequence, auth, bindings, keys),
+        apply: sequence => this.applyDocumentEvent(sequence, auth, bindings, keys),
       })
         .bind(auth, bindings, keys, device).run(this.scope, { maxEvents: 1 })
     } finally { unAuth(); unKey() }
@@ -401,6 +401,11 @@ class BrowserReplayStorage {
   }
 
   async applyDocumentGenesis(sequence:number, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+    const row=(await this.read()).rows.find(row=>row.server_sequence===sequence)
+    if(!row||JSON.parse(row.wire_item).event.revision!==1)throw new BrowserPersistenceError('unsupported_local_source')
+    return this.applyDocumentEvent(sequence,auth,bindings,keys)
+  }
+  private async applyDocumentEvent(sequence:number, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
     const stop=()=>{void this.close()},unAuth=auth.onInvalidated(stop),unKey=keys.onInvalidated(stop)
     try {
     await this.authenticateDocuments(auth,bindings,keys)
@@ -421,8 +426,8 @@ class BrowserReplayStorage {
       if(!current())throw new BrowserPersistenceError('closed')
     }
     return await lease.use(async amk=>{
-      const inventory=documentPreparationInventory(expected),token=await prepareDocumentGenesis(this.scope,row,inventory,amk,current)
-      return commitDocumentGenesis(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
+      const inventory=documentPreparationInventory(expected),token=await prepareDocumentEvent(this.scope,row,inventory,amk,current)
+      return commitDocumentEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
         (tx,done,abort)=>readStageInventory(tx,this.scope,done,abort))
     })
     } finally { unAuth();unKey() }

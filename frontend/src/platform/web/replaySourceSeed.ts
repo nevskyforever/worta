@@ -53,7 +53,7 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
       // received until the Document owner authenticates and applies it. Persisted
       // outcomes were freshly authenticated above, never trusted by state alone.
       if (event.project_id !== projectId || row.server_sequence <= remote.initial_max_server_sequence
-        || !['received', 'document_proven'].includes(row.state) || event.operation !== 'event' || event.revision !== 1
+        || !['received', 'document_proven'].includes(row.state) || event.operation !== 'event' || !Number.isSafeInteger(event.revision) || event.revision < 1
         || event.deleted_at !== null || event.device_id === scope.deviceId) fail('source_seed_unsupported_family')
       continue
     }

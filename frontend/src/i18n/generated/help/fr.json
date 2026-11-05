@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous au compte cloud, déverrouillez la clé avec votre mot de passe de chiffrement et ouvrez un projet de la liste cloud. Cliquez sur « Ouvrir le projet en lecture », puis choisissez un document dans « Documents ».</p>\n<p>Ce mode affiche le texte d’un document de projet publié initialement, sans étape. La mise en forme, les révisions ultérieures et la modification dans le navigateur ne sont pas encore prises en charge. Les historiques endommagés ou non pris en charge sont refusés. Une connexion au serveur est nécessaire. Après un redémarrage, reconnectez-vous et déverrouillez la clé. Le verrouillage de la clé masque le texte ouvert.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous au compte cloud, déverrouillez la clé avec votre mot de passe de chiffrement et ouvrez un projet de la liste cloud. Cliquez sur « Ouvrir le projet en lecture », puis choisissez un document dans « Documents ».</p>\n<p>Ce mode affiche le texte d’un document de projet sans étape. Après une modification du texte sur Desktop, cliquez sur « Ouvrir le projet en lecture » pour recevoir la révision suivante vérifiée. Le document sélectionné reste ouvert. La mise en forme et la modification dans le navigateur ne sont pas encore prises en charge. Les historiques endommagés ou non pris en charge sont refusés. Une connexion au serveur est nécessaire. Après un redémarrage, reconnectez-vous et déverrouillez la clé. Le verrouillage de la clé masque le texte ouvert.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Lire les documents cloud sur le Web"
   },

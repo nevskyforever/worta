@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Leer documentos de la nube en Web</h2>\n<p>Inicia sesión en tu cuenta, desbloquea la clave con tu contraseña de cifrado y abre un proyecto de la lista en la nube. Pulsa «Abrir proyecto para leer» y elige un documento en «Documentos».</p>\n<p>Este modo muestra el texto de un documento de proyecto publicado inicialmente y sin etapa. El formato, las revisiones posteriores y la edición en el navegador aún no son compatibles. Los historiales dañados o no compatibles se rechazan. Se requiere conexión al servidor. Tras reiniciar, inicia sesión y desbloquea la clave de nuevo. Bloquear la clave oculta el texto abierto.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Leer documentos de la nube en Web</h2>\n<p>Inicia sesión en tu cuenta, desbloquea la clave con tu contraseña de cifrado y abre un proyecto de la lista en la nube. Pulsa «Abrir proyecto para leer» y elige un documento en «Documentos».</p>\n<p>Este modo muestra el texto de un documento de proyecto sin etapa. Tras cambiar el texto en Desktop, pulsa «Abrir proyecto para leer» para recibir la siguiente revisión verificada. El documento seleccionado permanece abierto. El formato y la edición en el navegador aún no son compatibles. Los historiales dañados o no compatibles se rechazan. Se requiere conexión al servidor. Tras reiniciar, inicia sesión y desbloquea la clave de nuevo. Bloquear la clave oculta el texto abierto.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Leer documentos de la nube en Web"
   },

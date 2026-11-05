@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account, unlock the key with your encryption password and open a project from the cloud list. Click “Open project for reading”, then select a document in “Documents”.</p>\n<p>This mode currently displays the text of an initially published project document without a stage. Formatting, later revisions and browser editing are not supported yet. Unsupported or damaged history is refused. A server connection is required. Sign in and unlock the key again after restarting. Locking the key hides the open text.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account, unlock the key with your encryption password and open a project from the cloud list. Click “Open project for reading”, then select a document in “Documents”.</p>\n<p>This mode displays the text of a project document without a stage. After changing the text on Desktop, click “Open project for reading” to receive the verified next revision. The selected document stays open. Formatting and browser editing are not supported yet. Unsupported or damaged history is refused. A server connection is required. Sign in and unlock the key again after restarting. Locking the key hides the open text.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Reading cloud documents on Web"
   },

@@ -42,12 +42,21 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
   if(after.rows[sequence-1]?.state!=='document_proven'&&!replaySame(before.documents,after.documents))fail()
   if(after.rows[sequence-1]?.state==='document_proven') {
     const row=after.rows[sequence-1]!,old=before.rows[sequence-1]!
-    if(row.state!=='document_proven'||old.state!=='received'||status!=='applied'||sequence!==before.manifest!.applied_cursor!+1)fail()
+    if(row.state!=='document_proven'||old.state!=='received'||status!=='applied'||sequence!==before.manifest!.applied_cursor!+1
+      ||after.rows.length!==before.rows.length||before.rows.some((value,index)=>index!==sequence-1&&!replaySame(value,after.rows[index])))fail()
     const {document_proof:_proof,...wire}=row
     if(!replaySame({...wire,record_version:1,state:'received'},old)||!replaySame(after.manifest,replayCoverage(before.manifest!,row)))fail()
     const doc=after.documents,prior=before.documents
-    if(!doc||!prior||doc.ledger.length!==prior.ledger.length+1||doc.projections.length!==prior.projections.length+1
-      ||prior.ledger.some(value=>!doc.ledger.some(next=>replaySame(value,next)))||prior.projections.some(value=>!doc.projections.some(next=>replaySame(value,next)))
+    const event=JSON.parse(row.wire_item).event
+    const sameDocument=(value:unknown)=>{const p=value as {project_id:string;entity_id:string};return p.project_id===event.project_id&&p.entity_id===event.entity_id}
+    const previous=prior?.projections.filter(sameDocument)??[],next=doc?.projections.filter(sameDocument)??[]
+    const added=doc?.ledger.filter(value=>!prior?.ledger.some(old=>replaySame(old,value)))??[]
+    if(!doc||!prior||doc.ledger.length!==prior.ledger.length+1||added.length!==1||next.length!==1
+      ||(next[0] as {head_event_id:string}).head_event_id!==row.event_id
+      ||(event.revision===1 ? previous.length!==0||doc.projections.length!==prior.projections.length+1
+        : previous.length!==1||doc.projections.length!==prior.projections.length||!replaySame((added[0] as {previous_projection:unknown}).previous_projection,previous[0]))
+      ||prior.ledger.some(value=>!doc.ledger.some(next=>replaySame(value,next)))
+      ||!replaySame(prior.projections.filter(value=>!sameDocument(value)),doc.projections.filter(value=>!sameDocument(value)))
       ||!replaySame({...after,rows:before.rows,manifest:before.manifest,documents:before.documents},before))fail()
     return
   }
@@ -226,11 +235,11 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
     try {
       check(); if (--pending) return
       const documentRows = rows.filter(row => row.state === 'document_proven')
-      if (documentReads.length && (documentReads[0]!.result.length !== documentRows.length || documentReads[1]!.result.length !== documentRows.length)) fail()
+      if (documentReads.length && (documentReads[0]!.result.length !== documentRows.length || documentReads[1]!.result.length !== new Set(documentRows.map(row=>JSON.parse(row.wire_item).event.project_id)).size)) fail()
       if (!documentReads.length && documentRows.length) fail()
       for (const row of documentRows) {
         joinDocumentRecords(s, row, documentReads[0]!.result, documentReads[1]!.result)
-        if (documentRows.some(other => other !== row && JSON.parse(other.wire_item).event.project_id === JSON.parse(row.wire_item).event.project_id)) fail()
+        if (documentRows.some(other => other !== row && JSON.parse(other.wire_item).event.project_id === JSON.parse(row.wire_item).event.project_id && JSON.parse(other.wire_item).event.entity_id !== JSON.parse(row.wire_item).event.entity_id)) fail()
       }
       if (version<6&&counts.some(request => request.result.length !== 0) || version < 4 && projects.result.length || cursors.result.length > 1 || manifests.result.length > 1
         || bindings.result.length > 200 || owners.result.length > 200 || version === 1 && (bindings.result.length || owners.result.length)) fail()

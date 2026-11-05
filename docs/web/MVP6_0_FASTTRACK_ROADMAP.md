@@ -1,5 +1,23 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-05 — Desktop Document update → Web
+
+The ordinary project-scoped peer Document owner now applies a sequential update
+through recoverV10 and the same ownerPort/CAS. The new ledger archives the prior
+encrypted projection so original historical proofs remain verifiable without
+rewriting source/import evidence. Real isolated PostgreSQL/FastAPI/Chromium
+acceptance publishes Native revision2 after Web has read revision1, verifies
+damaged-wire refusal and owner rollback, then reads the latest text in the same
+unlocked session and after profile restart. Duplicate reads preserve one document.
+Vue keeps the selected document when a successful refresh returns its new text.
+
+Stage 2/6 and Slice 4/5 remain PARTIAL; readiness remains 2/10. No browser
+capability, ACK, editing or release gate is enabled. The bounded receiver accepts
+one Document continuation event per refresh; multiple pending continuation
+events remain unqualified. Next read one Stage-scoped Document through existing
+Stage dependency proofs and the same HTTP/replay/UI path. The full Web and
+bidirectional unified sync goal remains unchanged.
+
 ## 2026-11-05 — Document genesis read through the real server
 
 Local Native Rust/SQLite → production push → isolated PostgreSQL 16/FastAPI →

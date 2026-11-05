@@ -1179,3 +1179,52 @@ superseding that limitation above. It does not qualify Document updates, Stage
 scope, self-echo, multiple-document slots, conflicts, rich formatting, Web editing,
 Document prefix/ACK authority or full browser reader capability. Existing bounded
 owner restrictions, CAS, E2EE and reader/writer gates remain in force.
+
+### Ordinary sequential Document update — 2026-11-05
+
+The existing Document preparation/apply owner now accepts project-scoped peer
+`update` after an authenticated current tip. It freshly opens the canonical
+source, verifies descriptor/sequence/account/bootstrap/Metadata and requires one
+parent equal to the latest prior document_proven event, the same entity/scope,
+and revision/generation exactly parent+1. Parent source/dependencies are freshly
+authenticated, not inferred from a tip ID. Unknown parents, forks, deletes,
+Resolution, self-echo and Stage scope remain outside this bounded route.
+
+An update ledger adds `previous_projection`: the exact prior encrypted projection
+read through the same expected snapshot CAS. This is necessary because the
+existing historical proof's projection_digest must remain verifiable after the
+current projection is replaced. Prior source, ledger and inbox proofs are never
+rewritten. The new ledger digest binds this encrypted archive; the existing
+Document proof format/version is unchanged. In one ownerPort transaction the new
+ledger/inbox proof are appended, the single current projection is replaced and
+manifest coverage advances. Full snapshot CAS and server verification remain
+mandatory; the owner transition also checks all other inbox rows are unchanged.
+
+Inventory joins each historical outcome to its unique current/archived encrypted
+projection and validates parent archive identity/sequence/revision, one current
+projection per project slot and a ledger for every applied event. Reauthentication
+opens and checks every retained source/projection/proof, but returns only the
+current projection to Vue. Matching digests alone do not establish authority.
+No new store or DB version is needed: v7 genesis records are unchanged. The
+previous genesis-only reader's revision/key checks reject update rows; this is
+source-contract evidence, not a separate old-v7 binary acceptance claim. Existing
+populated v6→v7 migration/genesis regression remains passing.
+
+The existing receiver preflights a single sequential Document continuation event
+against authenticated prior history before staging its new server snapshot. The
+staged encrypted received event grants no coverage/UI authority: recoverV10 must
+apply it through the owner. Damaged ciphertext leaves the previous snapshot
+unchanged; aborting the owner commit retains the safe received state and the old
+projection/proofs, allowing retry. This extends the existing bounded continuation
+contract; multiple pending Document events in one continuation page are not yet
+qualified. Initial received history is still replayed in server order.
+
+Native Rust/SQLite → production push → isolated PostgreSQL16/FastAPI → real Vue/
+Chromium acceptance exercises first text, live Desktop revision2 publication
+while the browser remains open, damaged update refusal, actual projection-write
+abort with full pre/post transaction equality, same-session retry, idempotent
+redelivery and same-profile restart. The selected document is retained on a
+successful refresh. Original ciphertext/proofs remain intact, only one document
+is displayed, latest text persists and historical proof corruption still refuses
+the read. No plaintext persistence, browser declaration/device registration or
+ACK is introduced. Ordinary full reader/writer readiness remains false.

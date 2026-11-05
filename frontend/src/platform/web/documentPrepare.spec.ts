@@ -7,7 +7,7 @@ import golden from '@/cloud/__fixtures__/documentCodecV1.json'
 import { frameDocumentEvent, type DocumentEvent } from '@/cloud/documentCodec'
 import { encryptObjectBytes } from '@/crypto'
 import { encodeBase64Url } from '@/api/base64url'
-import { inspectPreparedDocumentGenesis, prepareDocumentGenesis } from './documentPrepare'
+import { inspectPreparedDocumentGenesis, prepareDocumentGenesis, prepareDocumentEvent } from './documentPrepare'
 
 async function fixture() {
   const f = await stageSetup(), event = structuredClone(golden.examples[0]!.event) as DocumentEvent
@@ -38,4 +38,18 @@ it('rejects damaged ciphertext, wrong sequence, missing Metadata and revoked ses
   const missing = inventory(f); missing.owners = []
   await expect(prepareDocumentGenesis(scope, input, missing, amk, () => true)).rejects.toThrow()
   await expect(prepareDocumentGenesis(scope, input, inventory(f), amk, () => false)).rejects.toThrow()
+})
+
+it('rejects an encrypted codec10 update without an authenticated current parent', async () => {
+  const { f, event } = await fixture()
+  Object.assign(event.header, { operation: 'update', revision: 2, generation: 2, parents: [crypto.randomUUID()] })
+  const frame = await frameDocumentEvent(event)
+  const sealed = await encryptObjectBytes(amk, { userId: scope.canonicalUserId, projectId: 'p', entityId: 'doc', entityType: 'document' }, frame)
+  try {
+    const wire = { event: { event_id: event.header.event_id, device_id: event.header.device_id, project_id: 'p', entity_id: 'doc', entity_type: 'document', operation: 'event', revision: 2, updated_at: event.header.updated_at, deleted_at: null, server_sequence: 3 },
+      object: { crypto_version: 1, aad_version: 1, nonce: encodeBase64Url(sealed.nonce), ciphertext: encodeBase64Url(sealed.ciphertext) } }
+    const before = structuredClone(f.db)
+    await expect(prepareDocumentEvent(scope, { server_sequence: 3, wire_item: JSON.stringify(wire) }, inventory(f), amk, () => true)).rejects.toThrow()
+    expect(f.db).toEqual(before)
+  } finally { frame.fill(0); sealed.nonce.fill(0); sealed.ciphertext.fill(0) }
 })

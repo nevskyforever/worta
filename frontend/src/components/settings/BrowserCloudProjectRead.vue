@@ -97,13 +97,14 @@ async function open(): Promise<void> {
 }
 async function openRecovery(): Promise<void> {
   if (disposed) return
-  const priorSelection = selectedStage.value, hadRecovery = recovery.value !== null
+  const priorDocument = selectedDocument.value, priorSelection = selectedStage.value, hadRecovery = recovery.value !== null
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
   try {
     const value = await props.session.readRecoveryProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') {
       recovery.value = value
+      selectedDocument.value = value.documents?.some(document => document.id === priorDocument) ? priorDocument : null
       selectedStage.value = hadRecovery && (priorSelection === null || value.stages.some(stage => stage.id === priorSelection))
         ? priorSelection : value.notes.some(note => note.stage_id === null) ? null : value.stages[0]?.id ?? null
     }

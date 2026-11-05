@@ -2,7 +2,7 @@ import { encryptObjectBytes, decryptObjectBytes, type AccountMasterKey } from '@
 import { encodeBase64Url, decodeBase64Url } from '@/api/base64url'
 import { canonical } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
-import { prepareDocumentGenesis, inspectPreparedDocumentGenesis, type PreparedDocumentGenesis } from './documentPrepare'
+import { prepareDocumentEvent, inspectPreparedDocumentGenesis, type PreparedDocumentGenesis } from './documentPrepare'
 import type { BrowserPrefixInventory } from './provenPrefixRecords'
 import { validateBrowserInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
@@ -11,7 +11,7 @@ export type { DocumentLedger as DocumentGenesisLedger, DocumentProjection } from
 const fail = (): never => { throw new BrowserPersistenceError('corrupt_record') }
 
 /** Transaction adapter; caller must supply the replay CAS transaction and its inventory reader. */
-export async function commitDocumentGenesis(transaction: BrowserSyncTransaction, scope: BrowserSyncScope,
+export async function commitDocumentEvent(transaction: BrowserSyncTransaction, scope: BrowserSyncScope,
   token: PreparedDocumentGenesis, expected: BrowserPrefixInventory, amk: AccountMasterKey,
   current: () => boolean, readInventory: (tx: IDBTransaction, done: (inventory: BrowserPrefixInventory) => void, abort: (error: unknown) => void) => void): Promise<'applied' | 'already_applied'> {
   const plan = inspectPreparedDocumentGenesis(token, scope, expected), h = plan.event.header
@@ -25,6 +25,17 @@ export async function commitDocumentGenesis(transaction: BrowserSyncTransaction,
       envelope: { crypto_version: 1, aad_version: 1, nonce: encodeBase64Url(sealed.nonce), ciphertext: encodeBase64Url(sealed.ciphertext) } } }
     finally { sealed.nonce.fill(0); sealed.ciphertext.fill(0) }
   } finally { bytes.fill(0) }
+  // Read the authenticated parent projection through the same full replay CAS.
+  // It remains encrypted, byte-for-byte, inside the new append-only ledger row.
+  if (h.parents.length) {
+    ledger.previous_projection = await transaction(scope, ['documentProjection'], 'readonly', (tx, done, abort) => {
+      const read = tx.objectStore('documentProjection').get([scope.accountId, h.project_id, h.entity_id])
+      read.onsuccess = () => { try { const previous = read.result as DocumentProjection | undefined
+        if (!previous || previous.head_event_id !== h.parents[0]) fail()
+        done(structuredClone(previous!))
+      } catch (error) { abort(error) } }
+    })
+  }
   const proof = { record_version: 1 as const, owner_kind: 'document' as const, outcome: 'applied' as const, ledger_digest: await documentDigest(ledger), projection_digest: await documentDigest(projection) }
   if (!current()) throw new BrowserPersistenceError('closed')
   return transaction(scope, ['documentLedger', 'documentProjection', 'inbox', 'cursors', 'ownerHeads', 'projectBindings', 'outbox', 'receipts', 'legacyNoteHistory'], 'readwrite', (tx, result, abort) => {
@@ -44,13 +55,12 @@ export async function commitDocumentGenesis(transaction: BrowserSyncTransaction,
           if (++loaded !== 2) return
           try {
             if (!current()) throw new BrowserPersistenceError('closed')
-            if (old.result) {
-              // A head ID alone cannot authenticate an encrypted projection.
-              // Until the replay reauthentication path is integrated, fail closed.
-              fail()
-            }
-            if (source.result.length) fail()
-            ledgers.add(ledger); projections.add(projection)
+            if (old.result) fail()
+            if (h.operation === 'create' ? source.result.length !== 0
+              : source.result.length !== 1 || canonical(source.result[0]) !== canonical(ledger.previous_projection)) fail()
+            ledgers.add(ledger)
+            if (h.operation === 'create') projections.add(projection)
+            else projections.put(projection)
             tx.objectStore('inbox').put({ ...sourceRow!, record_version: 11, state: 'document_proven', document_proof: proof } satisfies DocumentInbox)
             result('applied')
           } catch (error) { abort(error) }
@@ -61,7 +71,7 @@ export async function commitDocumentGenesis(transaction: BrowserSyncTransaction,
   })
 }
 
-/** Verify encrypted projection against a freshly authenticated genesis token. */
+/** Verify encrypted projection against a freshly authenticated event token. */
 export async function authenticateDocumentProjection(scope: BrowserSyncScope, token: PreparedDocumentGenesis,
   inventory: BrowserPrefixInventory, ledger: DocumentGenesisLedger, projection: DocumentProjection, amk: AccountMasterKey) {
   const plan = inspectPreparedDocumentGenesis(token, scope, inventory), h = plan.event.header
@@ -99,9 +109,12 @@ export async function authenticateReplayDocuments(scope: BrowserSyncScope,
     const joined = joinDocumentRecords(scope, row, snapshot.documents?.ledger ?? [], snapshot.documents?.projections ?? [])
     if (await documentDigest(joined.ledger) !== row.document_proof.ledger_digest
       || await documentDigest(joined.projection) !== row.document_proof.projection_digest) fail()
-    const token = await prepareDocumentGenesis(scope, row, inventory, amk, current)
-    documents.push(await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk))
+    const token = await prepareDocumentEvent(scope, row, inventory, amk, current)
+    const document = await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
+    if (snapshot.documents?.projections.some(value => (value as DocumentProjection).head_event_id === row.event_id)) documents.push(document)
   }
   if (!current()) throw new BrowserPersistenceError('closed')
   return documents
 }
+
+export const commitDocumentGenesis = commitDocumentEvent

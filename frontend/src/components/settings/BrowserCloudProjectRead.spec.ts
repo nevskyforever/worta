@@ -103,6 +103,12 @@ it('opens authenticated document text safely and clears it on session revocation
   await wrapper.get('[data-document-id="document"]').trigger('click')
   expect(wrapper.get('[data-testid="cloud-document-text"]').text()).toBe('<script>private text</script>')
   expect(wrapper.find('script').exists()).toBe(false)
+  vi.mocked(session.readRecoveryProject).mockResolvedValueOnce({ project: { name: 'Project' }, stages: [], notes: [], documents: [{
+    id: 'document', title: 'Native manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Вторая редакция' }] }] },
+  }] } as never)
+  await wrapper.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
+  expect(wrapper.get('[data-document-id="document"]').attributes('aria-pressed')).toBe('true')
+  expect(wrapper.get('[data-testid="cloud-document-text"]').text()).toBe('Вторая редакция')
   revoke(); await flushPromises()
   expect(wrapper.find('[data-testid="cloud-document-list"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('private text')

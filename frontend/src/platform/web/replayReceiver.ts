@@ -1,3 +1,5 @@
+import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
+import { prepareDocumentEvent } from './documentPrepare'
 import { readReplayStages } from './replayStageView'
 import { validateStageHead } from './stageRecords'
 import { validateStageOrderHead } from './stageOrderRecords'
@@ -97,6 +99,13 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
             if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'document' && event.operation === 'event' && page.items.length === 1) {
+              const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
+              await authenticateReplayDocuments(scope, previous, amk, current)
+              if (event.revision < 2) fail('unsupported_history_family')
+              await prepareDocumentEvent(scope, {server_sequence:event.server_sequence!,wire_item:JSON.stringify(item)}, documentPreparationInventory(previous), amk, current)
+              continue
+            }
             if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 2 && item === page.items[0]) {
               await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
               const rawOrder = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
