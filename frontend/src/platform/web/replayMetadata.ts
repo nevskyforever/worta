@@ -133,8 +133,8 @@ export async function assertReplayHistoryAdmissible(snapshot: ReplaySnapshot, sc
         throw new BrowserReplayError('unsupported_initial_note_history')
     }
   }
-  // Current owners reauthenticate full current Stage membership. Later membership
-  // expansion after an order is a separate cohort, never a silently weakened proof.
+  // New membership must have a subsequent order in the retained account history.
+  // Owners authenticate each Stage and the exact membership at each order sequence.
   if (structural) {
     const ordered = new Set<string>(), known = new Set<string>()
     for (const row of snapshot.rows) {
@@ -142,7 +142,7 @@ export async function assertReplayHistoryAdmissible(snapshot: ReplaySnapshot, sc
       if (event.entity_type === 'stage_order') ordered.add(event.project_id)
       if (event.entity_type === 'stage') {
         const id = JSON.stringify([event.project_id, event.entity_id])
-        if (!known.has(id) && ordered.has(event.project_id)) throw new BrowserReplayError('structural_membership_expansion_unsupported')
+        if (!known.has(id) && ordered.has(event.project_id) && !snapshot.rows.some(next => next.server_sequence > row.server_sequence && JSON.parse(next.wire_item).event.entity_type === 'stage_order' && JSON.parse(next.wire_item).event.project_id === event.project_id)) throw new BrowserReplayError('structural_membership_expansion_unsupported')
         known.add(id)
       }
     }

@@ -40,7 +40,9 @@ async function proofFor(scope: BrowserSyncScope, row: BrowserInboxRecord, e: Str
 }
 async function dependencies(scope: BrowserSyncScope, v: BrowserPrefixInventory, p: BrowserStageOrderProof, amk: AccountMasterKey, current: () => boolean, meta: VerifiedMetadataPrefix, fresh: boolean) {
   structuralMetadataDependency(scope, v, { ...p, stage_id: 'stage_order' }, meta, fresh, 'stage_order');
-  const raw = v.owners.filter(h => (h as HeadIdentity).owner_kind === 'stage' && (h as HeadIdentity).project_id === p.project_id);
+  // Historical orders cover the membership that existed at their server sequence.
+  const raw = v.owners.filter(h => (h as HeadIdentity).owner_kind === 'stage' && (h as HeadIdentity).project_id === p.project_id)
+    .filter(h => validateStageHead(h, scope).history.some(proof => proof.server_sequence <= p.server_sequence));
   for (const h of raw as HeadIdentity[])
     if (h.history?.some((r: { event_id: string; operation: string }) => h.tip_event_ids?.includes(r.event_id) && r.operation === 'delete'))
       fail('stage_tombstone_child_manifest_incomplete');

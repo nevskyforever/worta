@@ -1,5 +1,106 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Stage create → StageOrder → Web (LOCAL COMPLETE for this cohort)
+
+Starting SHA `754914e3a1b39c9979dc075ad33b9993572b3284`, branch 6.0;
+prior uncommitted replay, Vue selection, tests and checkpoint work preserved.
+The Recovery GET receiver now admits a bounded two-event continuation: one
+new peer Stage create followed by its StageOrder update. It reauthenticates the
+prior structure and checks exact account/project/bootstrap/device, Metadata
+reference, descriptor identity and timestamp, genesis revision/generation,
+StageOrder parent and generation, and all Stage head references before staging.
+Existing replayStorage CAS and Stage/StageOrder owners produce the actual proofs
+in sequence; no separate engine or structure store is introduced. Data is shown
+only after full recovery and structure reauthentication, so an intermediate
+Stage commit without its verified StageOrder is not displayed as a complete
+project. Replay metadata admission requires a subsequent order for membership
+expansion. Historical order proofs verify the Stage membership existing at their
+server sequence, allowing earlier authenticated orders to survive later creates.
+
+Real native SQLite → production push → isolated PostgreSQL 16/FastAPI →
+Recovery GET → Chromium passed (1 integration test): two initial named stages,
+real Web login/unlock and initial display, Native normal writer creates S3,
+Stage publication and receipt/self-echo, dependent StageOrder publication,
+Web list/order with S3 and persistent-profile restart/repeated authentication.
+The project starts with authenticated stages_enabled=true. A first diagnostic
+fixture with stages disabled also required a native Metadata update; no writer
+or security gate was bypassed to hide that dependency. The test's negative
+case corrupts an existing Stage proof referenced by StageOrder, observes safe
+UI refusal, restores the original test record and reopens successfully. Existing
+ciphertext reconciliation, rollback and ACK/capability checks in the reused
+harness remain active. No browser capability PUT; synthetic Desktop-only
+capability declaration uses the owner's earlier isolated-test authorization.
+
+Final focused Vitest 67 passed; prebuilt Rust native Stage creation/order test
+1 passed; frontend typecheck/build and quick acceptance passed. Compiler errors
+from broad transport event types were fixed with the existing V3 descriptor
+type. No CI run/poll or VPS access. Only task-owned disposable PostgreSQL used.
+Ready flags remain false: ready=false, declarationAllowed=false,
+writerAuthorized=false; readiness 2/10, eight blockers open; public registration
+and release closed. Whole product stage 2/6, Slice 4/5 PARTIAL; this local
+acceptance covers enabled-stage projects and the exact create/order pair.
+Multiple creates, Metadata transitions, rename/delete/conflicts and larger
+extensions are not newly qualified. The earlier single Stage update guard is
+preserved but rename is not accepted by this task. Owner decisions for full Web,
+unified bidirectional sync and pragmatic development remain recorded below.
+
+This entry and checked implementation are committed/pushed on 6.0; final SHA
+is the commit containing this entry. Next: independently qualify Stage rename
+through the existing update owner and recovery continuation with HTTP/reopen;
+then continue remaining full Web reading and unified sync. No overall progress
+percentage is changed.
+
+## 2026-11-05 — Stage continuation implementation (PARTIAL)
+
+Starting/final HEAD `754914e3a1b39c9979dc075ad33b9993572b3284`, branch 6.0.
+Existing uncommitted Vue selection and checkpoint changes are preserved.
+`replayReceiver.ts` now admits one peer Stage update for an existing verified
+Stage after reauthenticating prior Stage/StageOrder, checking account, writer,
+bootstrap, metadata, event, parent, revision, generation and timestamp before
+staging the encrypted event through the existing replay CAS. Owner application
+and later proof authentication remain mandatory. This change is unaccepted:
+no actual Native/HTTP/Chromium rename was run, and no claim of working Stage
+update or atomicity is made. Stage creation and a Stage+StageOrder continuation
+are not implemented; `replayMetadata.ts` retains its membership expansion guard.
+No user-visible incomplete history should be accepted as complete.
+
+Focused Vitest: 49 passed; frontend typecheck and build passed. No Rust,
+PostgreSQL/FastAPI or Chromium tests were run in this task. No commit or push;
+changes to replayReceiver, Vue, its spec and checkpoint remain uncommitted.
+No CI run/poll, VPS access, browser capability PUT or gate change. Readiness
+2/10, ready=false, declarationAllowed=false, writerAuthorized=false; stage 2/6,
+Slice 4/5 PARTIAL. Next implement owner-verified Stage create followed by
+StageOrder membership update, reconcile the membership guard with authenticated
+causal history, then run the requested native SQLite → PostgreSQL/FastAPI →
+Chromium create/rename/reorder/restart acceptance before committing. Owner
+full-Web and unified sync decisions remain below and in the roadmap.
+
+## 2026-11-05 — dynamic Stage recovery (PARTIAL)
+
+Starting and final HEAD `754914e3a1b39c9979dc075ad33b9993572b3284`, branch
+6.0 initially clean. The Vue recovery view now retains the selected Stage when
+refreshing verified history and selects an available fallback if that Stage is
+absent. Focused Vitest 4 passed; frontend build including typecheck passed.
+The first test invocation from the repository root failed to resolve the `@`
+alias; rerun from frontend passed. No new Chromium or PostgreSQL acceptance ran.
+
+Creation and rename after opening are NOT implemented or accepted: the recovery
+extension in `replayReceiver.ts` only admits peer Content updates or a single
+StageOrder update, and `replayMetadata.ts` explicitly rejects Stage membership
+expansion after an order. These are concrete remaining integration requirements;
+no guard was disabled. Reorder previously passed at the starting commit, but was
+not rerun here. Next implement and authenticate Stage create/update and associated
+StageOrder sequences as a recoverable atomic progression through the existing
+owners, then run the requested Native SQLite → PostgreSQL/FastAPI → Chromium
+scenario including restart and corruption. Do not mark the feature complete.
+
+Changes in `BrowserCloudProjectRead.vue`, its spec and this checkpoint remain
+uncommitted; no push or CI run/poll. Stage 2/6, Slice 4/5 PARTIAL; readiness
+2/10, `ready=false`, `declarationAllowed=false`, `writerAuthorized=false`.
+Public registration remains closed. No VPS, browser capability PUT, ACK or
+security-gate changes. Owner decisions for full Web and unified bidirectional
+sync remain intact below and in the roadmap.
+
 ## 2026-11-05 — authenticated Stage and StageOrder Web view
 
 Starting SHA `397b0b6ac912463cb61b0c0631c165b0ba22339a`, branch 6.0,

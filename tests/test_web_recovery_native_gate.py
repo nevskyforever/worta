@@ -31,6 +31,8 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
     with sqlite3.connect(db) as connection:
         register_remote_apply_authorization_guard(connection)
         connection.execute("UPDATE projects SET status='активен' WHERE id=?", (PROJECT_ID,))
+        if stage_format:
+            connection.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.stages_enabled',json('true')) WHERE id=?", (PROJECT_ID,))
     assert client.put(f"/api/v1/sync/devices/{identity['device_id']}", headers=headers).status_code == 200
     boot = bootstrap(tmp_path, db, identity, 'bootstrap_prepare')['bootstrap_id']
     assert client.post(f'/api/v1/cloud/projects/{PROJECT_ID}/bootstrap', headers=headers,
@@ -160,6 +162,14 @@ def test_native_content_publication_fails_closed_without_reader_capability(cloud
             assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
             pull_structure(client, tmp_path, token, db, identity, user, amk)
             check_stage_order(['S2', 'S1'])
+            structural(tmp_path, db, identity, user, 'edit', stage_id='S3', proposed=dict(stage, name='Stage S3'))
+            assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+            pull_structure(client, tmp_path, token, db, identity, user, amk)
+            assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
+            pull_structure(client, tmp_path, token, db, identity, user, amk)
+            with sqlite3.connect(db) as connection:
+                stage_order = [row[0] for row in connection.execute('SELECT stage_id FROM stage_order WHERE project_id=? ORDER BY position', (PROJECT_ID,))]
+            check_stage_order(stage_order)
             return
         receive(client, tmp_path, token, db, identity, user, amk)
         content(tmp_path, db, identity, user, 'edit', note_id='native-note', stage_id=None, patch={'content': 'Second native edit after browser recovery'})

@@ -97,6 +97,44 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
             if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 2 && item === page.items[0]) {
+              await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
+              const rawOrder = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
+              if (!rawOrder || previous.owners.some(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id && owner.stage_id === event.entity_id)) fail('invalid_history')
+              const orderHead = validateStageOrderHead(rawOrder, scope), tip = orderHead.history.find(proof => proof.event_id === orderHead.tip_event_ids[0])
+              const following = page.items[1]!, next = following.event as V3Descriptor
+              const open = async (value: typeof item, type: 'stage' | 'stage_order') => {
+                const nonce = decodeBase64Url((value.object as { nonce: string }).nonce), ciphertext = decodeBase64Url((value.object as { ciphertext: string }).ciphertext)
+                try { return await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id, entityId: (value.event as V3Descriptor).entity_id, entityType: type, eventId: value.event.event_id }, { ...(value.object as { crypto_version: 1; aad_version: 1 }), nonce, ciphertext }) as StructuralEvent }
+                finally { nonce.fill(0); ciphertext.fill(0) }
+              }
+              if (next.entity_type !== 'stage_order' || next.project_id !== event.project_id || next.operation !== 'upsert' || next.device_id !== event.device_id) fail('invalid_history')
+              const created = await open(item, 'stage'), ordered = await open(following, 'stage_order'), h = created.header, o = ordered.header
+              const expected = Object.fromEntries(previous.owners.filter(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id).map(owner => { const head = validateStageHead(owner, scope); return [head.stage_id, head.tip_event_ids] }))
+              expected[event.entity_id] = [event.event_id]
+              if (!tip || created.version !== 1 || h.operation !== 'create' || h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.entity_id !== event.entity_id || h.event_id !== event.event_id || h.device_id !== event.device_id || h.bootstrap_id !== orderHead.bootstrap_id || h.metadata_event_id !== tip.metadata_event_id || h.revision !== 1 || event.revision !== 1 || h.generation !== 1 || h.parent_event_ids.length || !created.stage
+                || ordered.version !== 1 || o.operation !== 'update' || o.account_id !== scope.canonicalUserId || o.project_id !== event.project_id || o.entity_id !== 'stage_order' || o.event_id !== next.event_id || o.device_id !== next.device_id || o.bootstrap_id !== orderHead.bootstrap_id || o.metadata_event_id !== tip.metadata_event_id || o.revision !== tip.revision + 1 || o.revision !== next.revision || o.generation !== tip.generation + 1 || !replaySame(o.parent_event_ids, orderHead.tip_event_ids)
+                || canonicalizeSyncTimestamp(h.updated_at) !== canonicalizeSyncTimestamp(event.updated_at) || canonicalizeSyncTimestamp(o.updated_at) !== canonicalizeSyncTimestamp(next.updated_at) || !replaySame(ordered.stage_heads, expected)) fail('invalid_history')
+              break
+            }
+            if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 1) {
+              await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
+              const rawHead = previous.owners.find(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id && owner.stage_id === event.entity_id)
+              if (!rawHead) fail('unsupported_history_family')
+              const head = validateStageHead(rawHead, scope), priorProof = head.history.find(proof => proof.event_id === head.tip_event_ids[0])
+              const nonce = decodeBase64Url((item.object as { nonce: string }).nonce), ciphertext = decodeBase64Url((item.object as { ciphertext: string }).ciphertext)
+              try {
+                const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
+                  entityId: event.entity_id, entityType: 'stage', eventId: event.event_id }, { ...(item.object as { crypto_version: 1; aad_version: 1 }), nonce, ciphertext }) as StructuralEvent
+                const h = decoded.header
+                if (!priorProof || h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.device_id !== event.device_id
+                  || h.entity_id !== event.entity_id || h.entity_type !== 'stage' || h.operation !== 'update' || h.event_id !== event.event_id
+                  || h.bootstrap_id !== head.bootstrap_id || h.metadata_event_id !== priorProof.metadata_event_id || h.revision !== event.revision
+                  || h.revision !== priorProof.revision + 1 || h.generation !== priorProof.generation + 1 || !replaySame(h.parent_event_ids, head.tip_event_ids)
+                  || canonicalizeSyncTimestamp(h.updated_at) !== canonicalizeSyncTimestamp(event.updated_at) || !decoded.stage) fail('invalid_history')
+              } finally { nonce.fill(0); ciphertext.fill(0) }
+              continue
+            }
             if (event.entity_type === 'stage_order' && event.operation === 'upsert' && page.items.length === 1) {
               await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
               const rawHead = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
