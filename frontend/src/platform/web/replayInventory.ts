@@ -235,11 +235,10 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
     try {
       check(); if (--pending) return
       const documentRows = rows.filter(row => row.state === 'document_proven')
-      if (documentReads.length && (documentReads[0]!.result.length !== documentRows.length || documentReads[1]!.result.length !== new Set(documentRows.map(row=>JSON.parse(row.wire_item).event.project_id)).size)) fail()
+      if (documentReads.length && (documentReads[0]!.result.length !== documentRows.length || documentReads[1]!.result.length !== new Set(documentRows.map(row=>{const e=JSON.parse(row.wire_item).event;return JSON.stringify([e.project_id,e.entity_id])})).size)) fail()
       if (!documentReads.length && documentRows.length) fail()
       for (const row of documentRows) {
         joinDocumentRecords(s, row, documentReads[0]!.result, documentReads[1]!.result)
-        if (documentRows.some(other => other !== row && JSON.parse(other.wire_item).event.project_id === JSON.parse(row.wire_item).event.project_id && JSON.parse(other.wire_item).event.entity_id !== JSON.parse(row.wire_item).event.entity_id)) fail()
       }
       if (version<6&&counts.some(request => request.result.length !== 0) || version < 4 && projects.result.length || cursors.result.length > 1 || manifests.result.length > 1
         || bindings.result.length > 200 || owners.result.length > 200 || version === 1 && (bindings.result.length || owners.result.length)) fail()

@@ -1,5 +1,5 @@
 import { commitDocumentEvent, authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
-import { prepareDocumentEvent } from './documentPrepare'
+import { prepareDocumentEvent, inspectPreparedDocumentGenesis } from './documentPrepare'
 import { readStageInventory } from './stageApply'
 import {BrowserContentNoteIntents} from './contentNoteIntents'
 import {BrowserV10Recovery} from './v10Recovery'
@@ -427,6 +427,9 @@ class BrowserReplayStorage {
     }
     return await lease.use(async amk=>{
       const inventory=documentPreparationInventory(expected),token=await prepareDocumentEvent(this.scope,row,inventory,amk,current)
+      const document=inspectPreparedDocumentGenesis(token,this.scope,inventory).projection
+      const existing=await authenticateReplayDocuments(this.scope,expected,amk,current)
+      if(existing.some(value=>value.project_id===document.project_id&&value.stage_id===document.stage_id&&value.id!==document.id))throw new BrowserPersistenceError('unsupported_local_source')
       return commitDocumentEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
         (tx,done,abort)=>readStageInventory(tx,this.scope,done,abort))
     })

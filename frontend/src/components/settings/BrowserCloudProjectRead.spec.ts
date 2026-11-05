@@ -92,7 +92,7 @@ it('opens authenticated document text safely and clears it on session revocation
   const session = { status: 'unlocked', onRevoked: (callback: () => void) => { revoke = callback; return () => {} },
     readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
     readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [], notes: [], documents: [{
-      id: 'document', title: 'Native manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [
+      id: 'document', stage_id: null, title: 'Native manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [
         { type: 'text', text: '<script>private text</script>' },
       ] }] },
     }] }),
@@ -104,7 +104,7 @@ it('opens authenticated document text safely and clears it on session revocation
   expect(wrapper.get('[data-testid="cloud-document-text"]').text()).toBe('<script>private text</script>')
   expect(wrapper.find('script').exists()).toBe(false)
   vi.mocked(session.readRecoveryProject).mockResolvedValueOnce({ project: { name: 'Project' }, stages: [], notes: [], documents: [{
-    id: 'document', title: 'Native manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Вторая редакция' }] }] },
+    id: 'document', stage_id: null, title: 'Native manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Вторая редакция' }] }] },
   }] } as never)
   await wrapper.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
   expect(wrapper.get('[data-document-id="document"]').attributes('aria-pressed')).toBe('true')
@@ -112,4 +112,42 @@ it('opens authenticated document text safely and clears it on session revocation
   revoke(); await flushPromises()
   expect(wrapper.find('[data-testid="cloud-document-list"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('private text')
+})
+
+it('isolates documents by Stage and restores the account-scoped selection on remount', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const key = `worta:recovery-stage:${JSON.stringify(['stage-reader-account', 'project'])}`
+  const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage'), preferences = new Map<string, string>()
+  Object.defineProperty(window, 'localStorage', { configurable: true, value: {
+    getItem: (key: string) => preferences.get(key) ?? null, setItem: (key: string, value: string) => preferences.set(key, value), removeItem: (key: string) => preferences.delete(key),
+  } })
+  const session = { status: 'unlocked', currentIdentity: { local_account_id: 'stage-reader-account' }, onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
+    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [{ id: 'b', name: 'Second' }, { id: 'a', name: 'First' }], notes: [], documents: [
+      { id: 'project-document', stage_id: null, title: 'Project manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Project text' }] }] } },
+      { id: 'stage-document', stage_id: 'a', title: 'Stage manuscript', content_json: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Stage A text' }] }] } },
+    ] }),
+  } as unknown as BrowserCloudAccountSession
+  const open = async () => {
+    const view = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project' }, global: { plugins: [pinia] } })
+    await flushPromises(); await view.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
+    return view
+  }
+  const first = await open()
+  expect(first.find('[data-document-id="project-document"]').exists()).toBe(true)
+  expect(first.find('[data-document-id="stage-document"]').exists()).toBe(false)
+  await first.get('[data-stage-id="a"]').trigger('click')
+  await first.get('[data-document-id="stage-document"]').trigger('click')
+  expect(first.get('[data-testid="cloud-document-text"]').text()).toBe('Stage A text')
+  await first.get('[data-stage-id="b"]').trigger('click')
+  expect(first.find('[data-testid="cloud-document-list"]').exists()).toBe(false)
+  expect(first.find('[data-testid="cloud-document-text"]').exists()).toBe(false)
+  await first.get('[data-stage-id="a"]').trigger('click'); first.unmount()
+  const reopened = await open()
+  expect(reopened.get('[data-stage-id="a"]').attributes('aria-pressed')).toBe('true')
+  expect(reopened.find('[data-document-id="project-document"]').exists()).toBe(false)
+  expect(reopened.find('[data-document-id="stage-document"]').exists()).toBe(true)
+  reopened.unmount(); window.localStorage.removeItem(key)
+  if (descriptor) Object.defineProperty(window, 'localStorage', descriptor)
+  else Reflect.deleteProperty(window, 'localStorage')
 })

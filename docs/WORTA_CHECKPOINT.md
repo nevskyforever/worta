@@ -1,5 +1,119 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Stage-scoped Document reading (LOCAL COMPLETE)
+
+Starting SHA `d1041c03cbeef8e5a685e271b2b3fce840e9d2ab`, branch `6.0`, initial
+working tree clean. Final SHA is the commit containing this entry and is reported
+exactly in the task result. Stage 2/6 — full Web reading; Slice 4/5 remains
+PARTIAL. This completes the bounded Stage Document create/update reading task,
+superseding the Stage-scope restriction in earlier historical entries below.
+
+Owner requirements reaffirmed in roadmap and here: full ordinary projects,
+full game mode with all existing game mechanics, Web creation/editing,
+bidirectional synchronization and one sync engine. Keep implementation simple,
+reuse existing components and prioritize working user features. Game work is a
+required subsequent product priority, NOT part of this Stage Document task.
+
+Native Document header.stage_id and stage_event_ids reference the Stage. Its
+document_codec::dependencies_ready calls the same stage_sync::content_reference_ready
+as Content Notes. The existing browser requireContentStageDependency now accepts
+an authenticated Document event directly alongside Content, without fabricating
+a Note, adding a second handler or changing Stage-proof semantics. It requires
+the genuine Stage prefix certificate, matching project/account/bootstrap, one
+live tip and actual reference coverage. Earlier unresolved Stage outcomes and
+missing/corrupted proofs refuse authorization. StageOrder is required for verified
+presentation, not invented as a direct Document dependency.
+
+Document prepare scopes its causal parent chain by project/entity and ordinary
+updates preserve stage_id. The same private storage owner checks the Native
+one-document-per-(project,stage) collision rule against freshly authenticated
+current projections under its exact expected snapshot; reauthentication checks
+it again. Project scope is null and remains distinct. Inventory counts current
+projections by project/entity and retains all historical ledger/proof joins.
+The existing ownerPort atomically appends ledger/proof, saves encrypted projection
+and advances manifest coverage with unchanged full CAS/server verification.
+Sibling project/Stage projections and original import/ciphertext/proofs remain
+unchanged. No new engine, proof format, store or IndexedDB version/migration.
+
+The unlocked session requires Stage Documents to belong to the freshly verified
+Stage/StageOrder view. Vue lists/opens only documents in the selected Stage or
+project view, clears the old body on switching and retains a valid selection on
+refresh. A small optional UI preference stores ONLY opaque account/project/Stage
+IDs in localStorage; no text/title/key/credential. It is account/project scoped,
+restored only after real history authentication and checked against the verified
+Stage list. Storage failure falls back to ordinary selection; the preference
+cannot authorize data or enable offline opening. No new content store/outbox.
+The project navigation label now covers both notes and documents. Shared help
+and all six languages describe Stage scope, updates and remembered selection.
+
+Actual Native Rust/SQLite → production push → isolated PostgreSQL 16/FastAPI →
+authenticated Recovery GET → real Chromium/Vue: project-only AND Stage scenarios
+passed (2 tests). The Stage fixture publishes Metadata, S1/S2, real StageOrder
+[S2,S1], a project Document and an S1 Document via existing writers. Both local
+documents are created before initial Document publication, matching the Native
+multi-document contract; after publication Native consumes its actual self-echo
+and uses genuine expected tips for update. An earlier fixture draft changed
+Metadata after capture, then omitted the required new-scope editor CAS after
+project consent; those invalid fixture orders were corrected, not bypassed.
+
+Real user form login/unlock, cloud project opening and project manuscript reading
+pass. S2 shows neither the project nor S1 document; S1 shows "Текст этапа 1".
+While Web remains open Native publishes "Обновлённый текст этапа 1"; the same
+Document owner applies it, with no duplicate Stage/Document and unchanged scope.
+Original Native sealed envelopes match PostgreSQL GET and browser source wire.
+There are two current encrypted Document projections and three Document ledger
+outcomes after the update; project manuscript remains intact. Two Stage proofs
+and one StageOrder proof are confirmed. Duplicate reads/imports preserve the
+entire accepted snapshot.
+
+Actual profile close/reopen and new login/unlock reauthenticate all history and
+show the updated S1 manuscript. The UI restores S1 itself even though S2 is first
+in StageOrder; the harness does not select S1 again after restart. Corrupted Stage
+proof refuses the whole project read, shows no documents/text and changes no
+unrelated inventory; original proof restoration enables retry. Document-proof
+corruption and corrupted update ciphertext remain fail-closed. Actual projection
+transaction abort and same-session retry retain complete pre/post owner atomicity
+including Stage proofs and manifest, with no false Document outcome. Both
+manuscript revisions remain encrypted in IndexedDB. Lock clears displayed text.
+
+Final checks on macOS Apple Silicon: Vitest 211 passed in 10 focused files,
+including shared Stage-Content/ACK regressions; real PostgreSQL/FastAPI/Chromium
+project+Stage tests 2 passed; separate Native Document Chromium/IndexedDB
+genesis/migration/abort/duplicate/proof regression 1 passed. Prebuilt Native Rust
+Document atomic guard and Stage reference-coverage guard each 1 passed (2 total,
+no Rust source change/rebuild). Python help/localization 30 passed; generator
+reports zero missing strings; typecheck/build, py_compile, generated-content
+export --check and quick acceptance passed. Existing Starlette/Node deprecations
+and Vite chunk/dynamic-import warnings remain nonfatal.
+
+Qualified: ordinary peer project/Stage Document genesis and sequential update,
+one Document per scope. Moves, deletion, conflicting revisions, self-echo,
+rich formatting and Web editing are not qualified. Receiver continuation still
+qualifies one new Document event per refresh, complete owner page <=100 events;
+batch continuation/multi-project Document histories and new-scope genesis after
+initial Web opening are not qualified here. Document prefix/ACK and ordinary full browser reader/writer readiness remain
+unqualified. Existing shared production CAS is retained; no new Stage-specific
+concurrent-writer race is claimed beyond real owner CAS/rollback checks.
+
+Readiness remains 2/10 closed, eight open. Browser gates ready=false,
+declarationAllowed=false, writerAuthorized=false. Only synthetic Native Desktop
+capabilities are declared in the isolated test; browser capability PUT, sync-device
+registration and ACK requests are forbidden and none occur. Server still has
+only that Desktop device; browser/server ACK cursors remain 0. Registration,
+release and security gates, main and VPS remain unchanged; no deployment, new
+worktree, dependency addition or user-data modification.
+
+Checked production/UI/tests/help/contract/roadmap/checkpoint changes are committed
+and pushed without force to origin/6.0; working tree clean after commit. CI was
+not manually started or polled; remote automatic status was not read. Task-owned
+PostgreSQL 16 container stopped/removed after checks; unrelated Docker data intact.
+
+Next concrete task: safely receive a batch of ordinary accumulated Document
+continuation updates through this same engine, then qualify final text, duplicate
+delivery and profile restart through HTTP/Vue. Keep moves/deletion/conflicts and
+Web/game writing as later scoped functions; the full Web + unified sync product
+goal remains mandatory.
+
 ## 2026-11-05 — Desktop Document update → Web (LOCAL COMPLETE, linear project cohort)
 
 Starting SHA `c8560b6b625f5c6838e58d2eaf76a577590340bd`, branch `6.0`, initial

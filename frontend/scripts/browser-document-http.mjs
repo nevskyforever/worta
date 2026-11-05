@@ -8,7 +8,9 @@ const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const backend = process.argv[3], profile = process.argv[4]
 let vite, context
 const forbidden = [], recovery = []
-let fault = false
+let fault = false, visitedStage = false
+const initialCursor = fixture.items.length, documentIndex = fixture.items.findIndex(item => item.event.entity_type === 'document' && item.event.entity_id === fixture.expected.id)
+const documentCount = fixture.projectDocument ? 2 : 1
 try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } }); await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
@@ -64,6 +66,23 @@ try {
   }
   const read = async (panel, expectedText = fixture.text) => {
     await panel.locator('[data-testid="cloud-notes-open"]').click()
+    if(fixture.stageId){
+      const stages=panel.locator('[data-testid="cloud-stage-list"]')
+      await stages.waitFor()
+      assert.deepEqual(await stages.locator('[data-stage-id]').evaluateAll(nodes=>nodes.map(node=>node.dataset.stageId)),['S2','S1'])
+      if(!visitedStage){
+        assert.equal(await panel.locator(`[data-document-id="${fixture.expected.id}"]`).count(),0)
+        await panel.locator(`[data-document-id="${fixture.projectDocument.id}"]`).click()
+        assert.equal((await panel.locator('[data-testid="cloud-document-text"]').textContent()).trimEnd(),'Текст проекта')
+        await stages.locator('[data-stage-id="S2"]').click()
+        assert.equal(await panel.locator('[data-document-id]').count(),0)
+        assert.equal(await panel.locator('[data-testid="cloud-document-text"]').count(),0)
+        await stages.locator(`[data-stage-id="${fixture.stageId}"]`).click();visitedStage=true
+      }
+      // On subsequent reads AND profile reopen the UI must restore S1 itself,
+      // although StageOrder puts S2 first. The harness does not select it again.
+      assert.equal(await stages.locator(`[data-stage-id="${fixture.stageId}"]`).getAttribute('aria-pressed'),'true')
+    }
     await panel.locator(`[data-document-id="${fixture.expected.id}"]`).waitFor()
     if(await panel.locator('[data-testid="cloud-document-text"]').count() === 0) await panel.locator(`[data-document-id="${fixture.expected.id}"]`).click()
     assert.equal(await panel.locator('[data-document-id]').count(), 1)
@@ -82,9 +101,9 @@ try {
   })
   let panel = await loginAndOpen(page); await read(panel)
   let first = await snapshot(page)
-  assert.equal(first.inbox[1].state, 'document_proven'); assert.equal(first.documentLedger.length, 1); assert.equal(first.documentProjection.length, 1)
+  assert.equal(first.inbox[documentIndex].state, 'document_proven'); assert.equal(first.documentLedger.length, documentCount); assert.equal(first.documentProjection.length, documentCount)
   assert.deepEqual(first.inbox.map(row => JSON.parse(row.wire_item)), fixture.items)
-  assert.equal(first.replayManifest[0].applied_cursor, 2); assert.equal(first.cursors[0].ack_cursor, 0)
+  assert.equal(first.replayManifest[0].applied_cursor, initialCursor); assert.equal(first.cursors[0].ack_cursor, 0)
   assert.ok(!JSON.stringify(first).includes(fixture.text))
   assert.equal(await page.evaluate(() => window.documentInjected), undefined)
   // Same unlocked session reimports already proven Document source without a duplicate.
@@ -110,19 +129,19 @@ try {
       }
       IDBObjectStore.prototype.put=function(value,...args){const r=window.originalDocumentPut.call(this,value,...args)
         if(this.name==='documentProjection'&&value.head_event_id===eventId){window.documentUpdateAborted=true;r.addEventListener('success',()=>this.transaction.abort(),{once:true})}return r}
-    },update.items[2].event.event_id)
+    },update.items.at(-1).event.event_id)
     await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
     const aborted=await page.evaluate(()=>{IDBObjectStore.prototype.add=window.originalDocumentAdd;IDBObjectStore.prototype.put=window.originalDocumentPut;return {fired:window.documentUpdateAborted,before:window.documentBeforeCommit}})
     assert.equal(aborted.fired,true);const pending=await snapshot(page);assert.deepEqual(pending,aborted.before)
     assert.deepEqual(pending.documentProjection,first.documentProjection);assert.deepEqual(pending.documentLedger,first.documentLedger)
-    assert.equal(pending.inbox[2].state,'received');assert.equal(pending.replayManifest[0].applied_cursor,2)
-    assert.deepEqual(pending.inbox.slice(0,2),first.inbox)
+    assert.equal(pending.inbox[initialCursor].state,'received');assert.equal(pending.replayManifest[0].applied_cursor,initialCursor)
+    assert.deepEqual(pending.inbox.slice(0,initialCursor),first.inbox)
     await read(panel,update.text)
     const applied=await snapshot(page)
-    assert.equal(applied.documentProjection.length,1);assert.equal(applied.documentLedger.length,2)
-    assert.equal(applied.inbox[2].state,'document_proven');assert.equal(applied.replayManifest[0].applied_cursor,3)
-    assert.deepEqual(applied.inbox.slice(0,2),first.inbox);assert.deepEqual(applied.inbox.map(row=>JSON.parse(row.wire_item)),update.items)
-    assert.deepEqual(applied.documentLedger.find(row=>row.event_id===update.items[2].event.event_id).previous_projection,first.documentProjection[0])
+    assert.equal(applied.documentProjection.length,documentCount);assert.equal(applied.documentLedger.length,documentCount+1)
+    assert.equal(applied.inbox[initialCursor].state,'document_proven');assert.equal(applied.replayManifest[0].applied_cursor,initialCursor+1)
+    assert.deepEqual(applied.inbox.slice(0,initialCursor),first.inbox);assert.deepEqual(applied.inbox.map(row=>JSON.parse(row.wire_item)),update.items)
+    assert.deepEqual(applied.documentLedger.find(row=>row.event_id===update.items.at(-1).event.event_id).previous_projection,first.documentProjection.find(row=>row.entity_id===fixture.expected.id))
     assert.ok(!JSON.stringify(applied).includes(update.text));assert.equal(applied.cursors[0].ack_cursor,0)
     fixture.text=update.text;fixture.items=update.items;first=applied
     await read(panel);assert.deepEqual(await snapshot(page),first)
@@ -130,11 +149,23 @@ try {
   await context.close(); page = await launch(); panel = await loginAndOpen(page); await read(panel)
   assert.deepEqual(await snapshot(page), first)
   // A damaged durable owner proof must clear the UI instead of showing cached text.
-  const original = first.inbox[1]
+  const original = first.inbox[documentIndex]
   const replaceProof = async row => page.evaluate(async row => {
     const q = indexedDB.open('worta-web-replay', 7), db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
     try { await new Promise((ok, no) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = ok; tx.onabort = no }) } finally { db.close() }
   }, row)
+  if(fixture.stageId){
+    assert.equal(first.inbox.filter(row=>row.state==='stage_proven').length,2)
+    assert.equal(first.inbox.filter(row=>row.state==='stage_order_proven').length,1)
+    const stage = first.inbox.find(row=>row.state==='stage_proven'&&JSON.parse(row.wire_item).event.entity_id===fixture.stageId)
+    const badStage=structuredClone(stage);badStage.stage_proof.wire_digest='0'.repeat(64)
+    await replaceProof(badStage)
+    await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
+    assert.equal(await panel.locator('[data-testid="cloud-document-list"]').count(),0)
+    assert.equal(await panel.locator('[data-testid="cloud-document-text"]').count(),0)
+    const bad=await snapshot(page);assert.deepEqual({...bad,inbox:first.inbox},first)
+    await replaceProof(stage);await read(panel);assert.deepEqual(await snapshot(page),first)
+  }
   const damaged = structuredClone(original); damaged.document_proof.ledger_digest = '0'.repeat(64)
   await replaceProof(damaged)
   await panel.locator('[data-testid="cloud-notes-open"]').click(); await panel.locator('[role="alert"]').waitFor()

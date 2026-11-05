@@ -1,5 +1,27 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-05 — Stage-scoped Document reading and updates
+
+Local Native SQLite → production push → isolated PostgreSQL16/FastAPI → Chromium
+acceptance now reads and updates a Document inside its authenticated Stage.
+The existing shared Stage-dependency validator consumes the Document's real
+stage_event_ids and Stage owner certificate; no separate Document/Stage sync
+engine is introduced. Documents are isolated by project and Stage scope, while
+the same ledger/projection/proof/CAS path remains in use.
+
+The real two-Stage test keeps a project Document alongside the Stage1 Document,
+checks Stage2 shows neither, publishes the Stage1 update while Web is open, and
+reopens the same Chromium profile. Stage1 selection survives even though Stage2
+is first in StageOrder. Only opaque scoped IDs are kept as a UI preference;
+history/Stage proof validation and the server remain mandatory before display.
+Damaged Stage proof refuses the project read without partial writes.
+
+Stage 2/6, Slice 4/5 and full readiness remain PARTIAL (2/10 blockers closed).
+Next qualify a batch of ordinary Document continuation updates through the same
+recovery path; one new continuation event per refresh is the current bound.
+Web editing, moves/deletion/conflicts and ordinary browser capability/ACK are
+not enabled by this reading feature.
+
 ## 2026-11-05 — Desktop Document update → Web
 
 The ordinary project-scoped peer Document owner now applies a sequential update
@@ -40,6 +62,12 @@ The product goal is full WORTA Web with the core Desktop capabilities: projects
 and structure, documents and editor, notes, mind maps, progress and other
 supported features. A limited read-only pilot is a temporary milestone, not the
 finished product. At most two initial testers limits user count, not functionality.
+
+Owner reaffirmation: ordinary projects and full game mode with all existing game
+mechanics are mandatory product goals, together with Web creation/editing and
+bidirectional unified sync. Game work is a subsequent product priority and is
+not part of Stage-scoped Document reading acceptance. Prefer the simplest safe
+working implementation and reuse existing components without speculative layers.
 
 Use the existing unified WORTA synchronization engine for Desktop → Server →
 Web, Web → Server → Desktop and Desktop → Server → Desktop, including creation,

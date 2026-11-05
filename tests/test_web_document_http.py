@@ -9,6 +9,7 @@ from queue import Queue
 from uuid import uuid4
 
 import uvicorn
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,11 +17,14 @@ from test_cloud_auth import ROOT, cloud_client, create_user, login, migrated_dat
 from test_cloud_c15_headless_cross_runtime import PROJECT_ID, _headers
 from test_cloud_c18_authority_cross_runtime import provision, bootstrap, native, publish, sync
 from test_cloud_c18_content_note_gate import capabilities
+from test_cloud_c18_structural_cross_runtime import structural
+from test_cloud_c18_structural_integration import publish_pending, pull_structure
 from test_cloud_c18_document_acceptance import document, content, emit, support, receive, heads
 from nfprogress.core.sqlite.connection import register_remote_apply_authorization_guard
 
 
-def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_path):
+@pytest.mark.parametrize("stage_scoped", [False, True], ids=["project", "stage"])
+def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_path, stage_scoped):
     client, engine = cloud_client
     user = str(create_user(engine))
     token = login(client).json()['access_token']
@@ -30,6 +34,8 @@ def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_
     with sqlite3.connect(db) as connection:
         register_remote_apply_authorization_guard(connection)
         connection.execute("UPDATE projects SET status='активен',payload_json=json_set(payload_json,'$.work_method','app')")
+        if stage_scoped:
+            connection.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.stages_enabled',json('true'))")
     device = identity['device_id']
     assert client.put(f'/api/v1/sync/devices/{device}', headers=headers).status_code == 200
     boot = bootstrap(tmp_path, db, identity, 'bootstrap_prepare')['bootstrap_id']
@@ -52,28 +58,56 @@ def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_
     assert client.put('/api/v3/sync/encrypted/note-reader-capabilities', headers=headers,
                       json=capabilities(device)).status_code == 204
     support(client, headers, device)
-    text = 'Первая редакция'
-    saved = document(tmp_path, db, identity, user, 'save', content=content(text))
+    project_document = None
+    if stage_scoped:
+        stage = json.loads((ROOT / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
+        with sqlite3.connect(db) as connection:
+            register_remote_apply_authorization_guard(connection)
+            for position, stage_id in enumerate(('S2', 'S1')):
+                details = dict(stage, name=f'Stage {stage_id}', work_method='app')
+                connection.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                    (stage_id, PROJECT_ID, details['name'], details['goal'], int(details['infinite']), details['unit'], details['status'], details['created_at'], json.dumps(details)))
+                connection.execute('INSERT INTO stage_order VALUES(?,?,?)', (stage_id, PROJECT_ID, position))
+        structural(tmp_path, db, identity, user, 'begin')
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, key)) == 2
+        pull_structure(client, tmp_path, token, db, identity, user, key)
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, key)) == 1
+        pull_structure(client, tmp_path, token, db, identity, user, key)
+        saved_project = document(tmp_path, db, identity, user, 'save', content=content('Текст проекта'))
+        assert 'error' not in saved_project
+        # Both local scopes are created before initial publication, as in the
+        # Desktop's existing multi-document acceptance. No fabricated editor CAS.
+    stage_id = 'S1' if stage_scoped else None
+    cursor = 6 if stage_scoped else 2
+    text = 'Текст этапа 1' if stage_scoped else 'Первая редакция'
+    updated_text = 'Обновлённый текст этапа 1' if stage_scoped else 'Вторая редакция'
+    saved = document(tmp_path, db, identity, user, 'save', stage_id=stage_id, content=content(text))
     assert 'error' not in saved, saved
     document(tmp_path, db, identity, user, 'begin')
-    expected = document(tmp_path, db, identity, user, 'pending')[0]['event']['document']
+    pending_documents = document(tmp_path, db, identity, user, 'pending')
+    expected = next(value['event']['document'] for value in pending_documents if value['event']['document']['stage_id'] == stage_id)
+    if stage_scoped:
+        project_document = next(value['event']['document'] for value in pending_documents if value['event']['document']['stage_id'] is None)
     published = emit(client, tmp_path, token, db, identity, user, key)
-    assert len(published) == 1
+    assert len(published) == (2 if stage_scoped else 1)
     page = client.get('/api/v3/recovery/encrypted/history', headers=headers,
-        params={'since': 0, 'limit': 100, 'expected_cursor': 2, 'expected_epoch': 2})
+        params={'since': 0, 'limit': 100, 'expected_cursor': cursor, 'expected_epoch': 2})
     assert page.status_code == 200, page.text
     items = page.json()['items']
-    assert [item['event']['entity_type'] for item in items] == ['project_metadata', 'document']
-    assert items[1]['object'] == published[0]['items'][0]['object']
+    assert [item['event']['entity_type'] for item in items] == (['project_metadata', 'stage', 'stage', 'stage_order', 'document', 'document'] if stage_scoped else ['project_metadata', 'document'])
+    genesis = next(item for item in items if item['event']['entity_id'] == expected['id'])
+    sent = next(request['items'][0] for request in published if request['items'][0]['event']['entity_id'] == expected['id'])
+    assert genesis['object'] == sent['object']
+    assert expected['stage_id'] == stage_id
     assert client.get('/api/v3/recovery/encrypted/history').status_code == 401
     create_user(engine, username='Foreign', email='foreign@example.test')
     foreign_token = login(client, username='Foreign').json()['access_token']
     foreign_page = client.get('/api/v3/recovery/encrypted/history', headers=_headers(foreign_token),
-                              params={'since': 0, 'limit': 100, 'expected_cursor': 2, 'expected_epoch': 2})
+                              params={'since': 0, 'limit': 100, 'expected_cursor': cursor, 'expected_epoch': 2})
     assert foreign_page.status_code == 409
     assert foreign_page.json()['detail']['code'] == 'recovery_snapshot_changed'
     fixture = tmp_path / 'document-http.json'
-    fixture.write_text(json.dumps({'key': key, 'project': PROJECT_ID, 'expected': expected, 'text': text, 'items': items, 'updateRequest': True}))
+    fixture.write_text(json.dumps({'key': key, 'project': PROJECT_ID, 'expected': expected, 'text': text, 'items': items, 'updateRequest': True, 'stageId': stage_id, 'projectDocument': project_document}))
     fixture.chmod(0o600)
     api_socket = socket.socket(); api_socket.bind(('127.0.0.1', 0))
     port = api_socket.getsockname()[1]
@@ -87,11 +121,14 @@ def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_
             ready = Queue()
             threading.Thread(target=lambda: ready.put(process.stdout.readline()), daemon=True).start()
             line = ready.get(timeout=120)
-            assert line and json.loads(line)['phase'] == 'ready_for_update', line
+            if not line:
+                stdout, stderr = process.communicate(timeout=10)
+                raise AssertionError(stdout + stderr)
+            assert json.loads(line)['phase'] == 'ready_for_update', line
             # The real Desktop consumes its published event before authoring a
             # successor, so expected tips and revision come from its own owner.
-            assert receive(client, tmp_path, token, db, identity, user, key) == ['applied']
-            updated = document(tmp_path, db, identity, user, 'save', content=content('Вторая редакция'),
+            assert receive(client, tmp_path, token, db, identity, user, key) == (['applied', 'applied'] if stage_scoped else ['applied'])
+            updated = document(tmp_path, db, identity, user, 'save', stage_id=stage_id, content=content(updated_text),
                                expected=heads(tmp_path, db, identity, user, expected['id']))
             assert 'error' not in updated, updated
             document(tmp_path, db, identity, user, 'begin')
@@ -99,17 +136,17 @@ def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_
             assert len(pending) == 1
             event = pending[0]['event']
             assert event['header']['operation'] == 'update' and event['header']['revision'] == 2
-            assert event['document']['id'] == expected['id'] and event['document']['stage_id'] is None
-            assert event['header']['parents'] == [items[1]['event']['event_id']]
+            assert event['document']['id'] == expected['id'] and event['document']['stage_id'] == stage_id
+            assert event['header']['parents'] == [genesis['event']['event_id']]
             published_update = emit(client, tmp_path, token, db, identity, user, key)
             assert len(published_update) == 1
             latest = client.get('/api/v3/recovery/encrypted/history', headers=headers,
-                params={'since': 0, 'limit': 100, 'expected_cursor': 3, 'expected_epoch': 2})
+                params={'since': 0, 'limit': 100, 'expected_cursor': cursor + 1, 'expected_epoch': 2})
             assert latest.status_code == 200, latest.text
             latest_items = latest.json()['items']
-            assert latest_items[:2] == items
-            assert latest_items[2]['object'] == published_update[0]['items'][0]['object']
-            stdout, stderr = process.communicate(json.dumps({'text': 'Вторая редакция', 'expected': event['document'], 'items': latest_items}) + '\n', timeout=120)
+            assert latest_items[:cursor] == items
+            assert latest_items[-1]['object'] == published_update[0]['items'][0]['object']
+            stdout, stderr = process.communicate(json.dumps({'text': updated_text, 'expected': event['document'], 'items': latest_items}) + '\n', timeout=120)
             assert process.returncode == 0, stdout + stderr
             assert json.loads(stdout.strip().splitlines()[-1])['pass']
         finally:

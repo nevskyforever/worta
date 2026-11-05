@@ -47,9 +47,9 @@ const recoveryLabels: Record<SupportedLanguage, { open: string; heading: string;
 }
 const result = ref<BrowserCloudProjectRead | null>(null), busy = ref(false), error = ref<string | null>(null)
 const stageLabels: Record<SupportedLanguage, { stages: string; project: string }> = {
-  ru: { stages: 'Этапы', project: 'Заметки проекта' }, en: { stages: 'Stages', project: 'Project notes' },
-  es: { stages: 'Etapas', project: 'Notas del proyecto' }, de: { stages: 'Etappen', project: 'Projektnotizen' },
-  fr: { stages: 'Étapes', project: 'Notes du projet' }, pt_BR: { stages: 'Etapas', project: 'Notas do projeto' },
+  ru: { stages: 'Этапы', project: 'Проект' }, en: { stages: 'Stages', project: 'Project' },
+  es: { stages: 'Etapas', project: 'Proyecto' }, de: { stages: 'Etappen', project: 'Projekt' },
+  fr: { stages: 'Étapes', project: 'Projet' }, pt_BR: { stages: 'Etapas', project: 'Projeto' },
 }
 const documentUnavailable: Record<SupportedLanguage, string> = {
   ru: 'Этот тип истории документов пока недоступен в Web. История проекта не открыта.',
@@ -71,8 +71,30 @@ function documentText(node: Record<string, unknown>): string {
   return content + (['paragraph', 'heading', 'codeBlock'].includes(String(node.type)) ? '\n' : '')
 }
 const selectedDocument = ref<string | null>(null)
-const activeDocument = computed(() => recovery.value?.documents?.find(document => document.id === selectedDocument.value))
+const stageDocuments = computed(() => recovery.value?.documents?.filter(document => document.stage_id === selectedStage.value) ?? [])
+const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value))
 const selectedStage = ref<string | null>(null)
+// UI preference only: opaque account/project/Stage IDs, never text or keys.
+function selectionKey(): string | null {
+  const account = props.session.currentIdentity?.local_account_id
+  return account ? `worta:recovery-stage:${JSON.stringify([account, props.projectId])}` : null
+}
+function rememberedStage(): string | null | undefined {
+  try {
+    const key = selectionKey(), raw = key && window.localStorage.getItem(key)
+    if (!raw) return undefined
+    const value: unknown = JSON.parse(raw)
+    return value === null || typeof value === 'string' ? value : undefined
+  } catch { return undefined } // Optional view preference; it grants no authority.
+}
+function rememberStage(): void {
+  try { const key = selectionKey(); if (key) window.localStorage.setItem(key, JSON.stringify(selectedStage.value)) }
+  catch { /* Reading remains available when optional browser preferences are blocked. */ }
+}
+function selectStage(id: string | null): void {
+  if (id !== selectedStage.value) selectedDocument.value = null
+  selectedStage.value = id; rememberStage()
+}
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
 let controller: AbortController | null = null
@@ -104,9 +126,11 @@ async function openRecovery(): Promise<void> {
     const value = await props.session.readRecoveryProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') {
       recovery.value = value
-      selectedDocument.value = value.documents?.some(document => document.id === priorDocument) ? priorDocument : null
-      selectedStage.value = hadRecovery && (priorSelection === null || value.stages.some(stage => stage.id === priorSelection))
-        ? priorSelection : value.notes.some(note => note.stage_id === null) ? null : value.stages[0]?.id ?? null
+      const remembered = hadRecovery ? priorSelection : rememberedStage()
+      selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
+        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) ? null : value.stages[0]?.id ?? null
+      selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
+      rememberStage()
     }
   } catch (cause) {
     if (active.signal.aborted) return
@@ -135,12 +159,12 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     <article v-if="recovery" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
       <nav v-if="recovery.stages.length" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
-        <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectedStage = null">{{ stageLabels[locale.language].project }}</button>
-        <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectedStage = stage.id">{{ stage.name }}</button>
+        <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
+        <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
-      <section v-if="recovery.documents?.length" data-testid="cloud-document-list">
+      <section v-if="stageDocuments.length" data-testid="cloud-document-list">
         <h4>{{ documentLabels[locale.language] }}</h4>
-        <button v-for="document in recovery.documents" :key="document.id" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+        <button v-for="document in stageDocuments" :key="document.id" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
       </section>
       <section v-if="activeDocument" data-testid="cloud-document-read">
         <h5>{{ activeDocument.title }}</h5>

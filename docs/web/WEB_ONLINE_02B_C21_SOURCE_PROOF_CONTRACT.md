@@ -1228,3 +1228,43 @@ successful refresh. Original ciphertext/proofs remain intact, only one document
 is displayed, latest text persists and historical proof corruption still refuses
 the read. No plaintext persistence, browser declaration/device registration or
 ACK is introduced. Ordinary full reader/writer readiness remains false.
+
+### Stage-scoped Document create/update — 2026-11-05
+
+Document preparation now consumes the same Stage dependency verification used
+for ordinary Content. The existing requireContentStageDependency accepts the
+authenticated Document event directly, without fabricating a Note event. Its
+Native content_reference_ready contract is unchanged: one live authenticated
+Stage tip/projection, matching account/project/bootstrap, genuine Stage prefix
+certificate and bounded stage_event_ids reference coverage. Earlier unresolved
+Stage events cannot authorize the Document. StageOrder remains a presentation
+dependency, not a fabricated direct Document dependency.
+
+The same Document owner applies genesis and sequential updates. Parent chains
+are scoped to project/entity; an ordinary update must preserve stage_id. The
+Native one-document-per-(project,stage) collision rule is checked against freshly
+authenticated current projections under the exact commit snapshot and again
+during reauthentication. Project-level scope is null, distinct from any Stage.
+Inventory counts one projection per project/entity and joins every historical
+ledger/proof as before. Slot identity is validated after decryption; no plaintext
+Stage field, store, new proof format or database version is added. Current-row
+replacement and archive semantics remain unchanged, preserving sibling scopes.
+
+The unlocked session requires each Stage Document to belong to an owner-verified
+Stage in the authenticated StageOrder view. Vue filters document list/body by
+the selected Stage and retains that selection on refresh. An optional UI
+preference stores only opaque account/project/Stage IDs in localStorage, using
+the established UI-preference pattern. It grants no authority: restore occurs
+only after full server/history authentication and validates the Stage against
+the freshly verified list. No content, credential or key is stored there, and
+no offline opening or new IndexedDB content store is introduced.
+
+Real Native writers publish Metadata, two Stages, StageOrder, a project Document
+and a Stage1 Document via production API. The HTTP/Chromium test reads both
+scopes, verifies Stage2 hides them, updates Stage1 in the same session and
+reopens the profile with Stage1 selected while Stage2 is first in StageOrder.
+Corrupted Stage proof and Document proof refuse presentation without unrelated
+inventory writes; ciphertext, encrypted persistence, atomic abort/retry and
+duplicate replay checks are retained. A separate project-only run preserves
+the previously accepted behavior. No Stage move, deletion/conflict, browser
+writer/capability, Document ACK/prefix or full reader readiness is qualified.

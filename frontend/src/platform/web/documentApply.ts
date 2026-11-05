@@ -56,8 +56,9 @@ export async function commitDocumentEvent(transaction: BrowserSyncTransaction, s
           try {
             if (!current()) throw new BrowserPersistenceError('closed')
             if (old.result) fail()
-            if (h.operation === 'create' ? source.result.length !== 0
-              : source.result.length !== 1 || canonical(source.result[0]) !== canonical(ledger.previous_projection)) fail()
+            const selected = (source.result as DocumentProjection[]).filter(value => value.entity_id === h.entity_id)
+            if (h.operation === 'create' ? selected.length !== 0
+              : selected.length !== 1 || canonical(selected[0]) !== canonical(ledger.previous_projection)) fail()
             ledgers.add(ledger)
             if (h.operation === 'create') projections.add(projection)
             else projections.put(projection)
@@ -112,6 +113,12 @@ export async function authenticateReplayDocuments(scope: BrowserSyncScope,
     const token = await prepareDocumentEvent(scope, row, inventory, amk, current)
     const document = await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
     if (snapshot.documents?.projections.some(value => (value as DocumentProjection).head_event_id === row.event_id)) documents.push(document)
+  }
+  const slots = new Set<string>()
+  for (const document of documents) {
+    const slot = JSON.stringify([document.project_id, document.stage_id])
+    if (slots.has(slot)) fail()
+    slots.add(slot)
   }
   if (!current()) throw new BrowserPersistenceError('closed')
   return documents
