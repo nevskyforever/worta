@@ -208,6 +208,12 @@
   },
   {
     "children": [],
+    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich im Cloudkonto an, entsperre den Schlüssel mit deinem Verschlüsselungspasswort und öffne ein Projekt aus der Cloudliste. Klicke auf „Projekt zum Lesen öffnen“ und wähle ein Dokument unter „Dokumente“.</p>\n<p>Dieser Modus zeigt den Text eines erstmals veröffentlichten Projektdokuments ohne Etappenzuordnung. Formatierung, spätere Versionen und Bearbeitung im Browser werden noch nicht unterstützt. Beschädigte oder nicht unterstützte Verläufe werden abgelehnt. Eine Serververbindung ist erforderlich. Melde dich nach einem Neustart erneut an und entsperre den Schlüssel. Das Sperren des Schlüssels blendet den geöffneten Text aus.</p>\n</body></html>",
+    "key": "web_document_reading",
+    "title": "Clouddokumente im Web lesen"
+  },
+  {
+    "children": [],
     "content": "<html><body>\n<h2>Diagnose und Problemmeldung</h2>\n<p>Gehen Sie in der Desktop-App zu Einstellungen → Diagnose. Das Protokoll hilft Ihnen, die Fehlerursache zu finden und wird nur auf diesem Computer gespeichert, auch nach einem Neustart. Die Texte von Dokumenten und Notizen, Namen, Passwörter, Schlüssel und Anmeldedaten werden darin nicht erfasst. Es erfolgt kein automatischer Versand.</p>\n<ol><li>Klicken Sie auf Protokoll löschen.</li><li>Wiederholen Sie die Aktion, die das Problem verursacht.</li><li>Kehren Sie zu „Diagnose“ zurück und klicken Sie auf „Protokoll kopieren“ oder „Protokoll exportieren“.</li><li>Fügen Sie das Ergebnis zur Überprüfung in eine Nachricht ein oder hängen Sie die ausgewählte JSONL-Datei an.</li></ol>\n<p>Es werden die letzten 512 Ereignisse mit maximal 512 KB Inhalt gespeichert. Es werden bis zu 100 aktuelle Ereignisse kopiert, nicht mehr als 60 KB, mit einer Markierung zur Reduzierung. Beim Exportieren werden alle verfügbaren Protokolle gespeichert. Durch das Löschen wird nur das Diagnoseprotokoll gelöscht.</p>\n<p>In den Statuskarten werden im Abschnitt „Technische Informationen“ der Code und die Nummer der Anfrage angezeigt. Sie helfen Ihnen dabei, den Fehler mit der Aktivität im Protokoll zu verknüpfen. Wiederholen Sie bei dem Streak-Recovery-Problem die Wiederherstellung im Entwicklermodus, nachdem Sie das Protokoll gelöscht haben, und senden Sie das Ergebnis zur Überprüfung.</p>\n</body></html>",
     "key": "application_diagnostics",
     "title": "Diagnose und Problemmeldung"

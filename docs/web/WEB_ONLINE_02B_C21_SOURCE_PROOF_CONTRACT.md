@@ -1144,3 +1144,38 @@ projection parity and corrupted-proof refusal through recoverV10 itself.
 This supersedes only the automatic-dispatch limitation above. HTTP/UI opening,
 source reimport with an already proven Document, updates and full reader
 qualification remain unqualified. No Document ACK/prefix authority is introduced.
+
+### Recovery GET and unlocked Document presentation — 2026-11-05
+
+Source reimport now freshly authenticates every retained document_proven outcome
+with the existing genesis source, Metadata dependency, ledger/proof joins and
+encrypted projection checks. The same helper is used by recoverV10, replay owner
+reauthentication and presentation; it does not issue a substitute proof. A state
+label or matching digest without these checks cannot authorize source reimport.
+The original source seed/import evidence remains unchanged on repeated reads.
+
+BrowserCloudAccountSession.readRecoveryProject reconciles the real server
+snapshot, reimports the source, completes ordered recoverV10 through the accepted
+ownerPort and requires full manifest applied coverage. It authenticates Document
+projections, filters by project and rechecks the session lifetime and full replay
+snapshot before returning data to Vue. Plaintext exists in unlocked session/UI
+memory; IndexedDB retains only original encrypted wire and encrypted projection.
+The project reader lists the authenticated documents and opens their text with
+Vue interpolation. It does not interpret Tiptap text as HTML, execute scripts,
+load embedded resources or activate mark URLs. Lock/logout/revocation and failed
+recovery clear the displayed result.
+
+Actual isolated PostgreSQL 16/FastAPI/Chromium acceptance publishes production
+Native Rust/SQLite Metadata and Document genesis through production push, uses
+authenticated Recovery GET and the real Vue login/unlock/catalog/open controls,
+then reopens the same Chromium profile. Exact Native source wire, owner outcome,
+manifest coverage, text parity, repeated source import, proof corruption refusal,
+encrypted persistence and absence of browser ACK/capability/device registration
+are checked. Only the isolated synthetic Native Desktop declares its qualified
+codec8/Resolution2/codec10 capabilities; the Web reader remains recovery-only.
+
+This qualifies project-scoped peer Document genesis reading through HTTP/UI,
+superseding that limitation above. It does not qualify Document updates, Stage
+scope, self-echo, multiple-document slots, conflicts, rich formatting, Web editing,
+Document prefix/ACK authority or full browser reader capability. Existing bounded
+owner restrictions, CAS, E2EE and reader/writer gates remain in force.

@@ -1,5 +1,21 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-05 — Document genesis read through the real server
+
+Local Native Rust/SQLite → production push → isolated PostgreSQL 16/FastAPI →
+Recovery GET → Chromium/Vue acceptance now opens a project-scoped peer Document
+genesis. Real account login, passphrase unlock, document selection, text reading,
+repeated source import and same-profile restart are checked. The existing owner
+authenticates source/ledger/encrypted projection and the UI waits for complete
+manifest coverage. Damaged proof refuses the read and clears previous text;
+locking the key removes plaintext from the UI. No browser capability/ACK is issued.
+
+This is one bounded reading feature in stage 2/6, Slice 4/5 PARTIAL, not full Web
+readiness. Next implement one Desktop Document update through the same recovery
+owners and qualify it through HTTP/Vue/restart. Stage documents, multiple slots,
+rich formatting and Web writing/bidirectional sync remain subsequent work; the
+owner's full Web/unified sync product goal below remains unchanged.
+
 ## Owner decisions — 2026-11-05: full Web and unified sync
 
 The product goal is full WORTA Web with the core Desktop capabilities: projects

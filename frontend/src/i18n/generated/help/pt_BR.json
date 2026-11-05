@@ -208,6 +208,12 @@
   },
   {
     "children": [],
+    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem, desbloqueie a chave com a senha de criptografia e abra um projeto da lista na nuvem. Clique em «Abrir projeto para leitura» e escolha um documento em «Documentos».</p>\n<p>Este modo exibe o texto de um documento de projeto publicado inicialmente e sem etapa. Formatação, revisões posteriores e edição no navegador ainda não são compatíveis. Históricos danificados ou incompatíveis são recusados. É necessária uma conexão com o servidor. Após reiniciar, entre e desbloqueie a chave novamente. Bloquear a chave oculta o texto aberto.</p>\n</body></html>",
+    "key": "web_document_reading",
+    "title": "Ler documentos na nuvem na Web"
+  },
+  {
+    "children": [],
     "content": "<html><body>\n<h2>Diagnóstico e relato de problemas</h2>\n<p>No aplicativo de desktop, vá para Configurações → Diagnóstico. O log ajuda a encontrar a causa do erro e é armazenado somente neste computador, inclusive após uma reinicialização. Nele não ficam registrados os textos de documentos e notas, nomes, senhas, chaves e dados de login. Não há envio automático.</p>\n<ol><li>Clique em Limpar registro.</li><li>Repita a ação que está causando o problema.</li><li>Retorne para Diagnóstico e clique em Copiar Log ou Exportar Log.</li><li>Cole o resultado em uma mensagem para verificação ou anexe o arquivo JSONL selecionado.</li></ol>\n<p>São armazenados os últimos 512 eventos, com no máximo 512 KB de conteúdo. São copiados até 100 eventos mais recentes, com no máximo 60 KB, com uma marca para redução. A exportação salva todos os logs disponíveis. A limpeza exclui apenas o log de diagnóstico.</p>\n<p>Nos cartões de status, a seção “Informações Técnicas” mostra o código e o número da solicitação. Eles ajudam você a associar o erro à atividade no log. Para o problema de recuperação contínua, repita a recuperação no modo de desenvolvedor após limpar o log e envie o resultado para verificação.</p>\n</body></html>",
     "key": "application_diagnostics",
     "title": "Diagnóstico e relato de problemas"

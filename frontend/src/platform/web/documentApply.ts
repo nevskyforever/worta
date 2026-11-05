@@ -2,11 +2,11 @@ import { encryptObjectBytes, decryptObjectBytes, type AccountMasterKey } from '@
 import { encodeBase64Url, decodeBase64Url } from '@/api/base64url'
 import { canonical } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
-import { inspectPreparedDocumentGenesis, type PreparedDocumentGenesis } from './documentPrepare'
+import { prepareDocumentGenesis, inspectPreparedDocumentGenesis, type PreparedDocumentGenesis } from './documentPrepare'
 import type { BrowserPrefixInventory } from './provenPrefixRecords'
 import { validateBrowserInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
-import { documentDigest, type DocumentInbox, type DocumentLedger as DocumentGenesisLedger, type DocumentProjection } from './documentRecords'
+import { joinDocumentRecords, documentDigest, type DocumentInbox, type DocumentLedger as DocumentGenesisLedger, type DocumentProjection } from './documentRecords'
 export type { DocumentLedger as DocumentGenesisLedger, DocumentProjection } from './documentRecords'
 const fail = (): never => { throw new BrowserPersistenceError('corrupt_record') }
 
@@ -84,4 +84,24 @@ export function documentPreparationInventory(snapshot: import('./replayInventory
   if(!c) throw new BrowserPersistenceError('corrupt_record')
   return { rows:snapshot.rows, out:snapshot.author?.out??[], receipts:snapshot.author?.receipts??[], bindings:snapshot.bindings,
     owners:snapshot.owners, history:snapshot.noteHistory??[], cursor:{pull_cursor:c.pull_cursor,ack_cursor:c.ack_cursor,proven_prefix:c.proven_prefix,next_local_ordinal:c.next_local_ordinal} }
+}
+
+/** Reauthenticate durable outcomes using the same source/ledger/projection checks
+ * for recovery, source reimport and unlocked presentation. Digests alone never
+ * authorize a row. The caller retains its full snapshot CAS/lifetime check. */
+export async function authenticateReplayDocuments(scope: BrowserSyncScope,
+  snapshot: import('./replayInventory').ReplaySnapshot, amk: AccountMasterKey, current: () => boolean) {
+  if (!current()) throw new BrowserPersistenceError('closed')
+  if (!snapshot.rows.some(row => row.state === 'document_proven')) return []
+  const inventory = documentPreparationInventory(snapshot), documents = []
+  for (const row of snapshot.rows) if (row.state === 'document_proven') {
+    if (!current()) throw new BrowserPersistenceError('closed')
+    const joined = joinDocumentRecords(scope, row, snapshot.documents?.ledger ?? [], snapshot.documents?.projections ?? [])
+    if (await documentDigest(joined.ledger) !== row.document_proof.ledger_digest
+      || await documentDigest(joined.projection) !== row.document_proof.projection_digest) fail()
+    const token = await prepareDocumentGenesis(scope, row, inventory, amk, current)
+    documents.push(await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk))
+  }
+  if (!current()) throw new BrowserPersistenceError('closed')
+  return documents
 }

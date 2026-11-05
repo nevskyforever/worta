@@ -1,3 +1,4 @@
+import { authenticateReplayDocuments } from './documentApply'
 import {BrowserContentNoteApply} from './contentNoteApply'
 import { BrowserV10Transport } from './v10Transport'
 import { BrowserResolutionContinuation } from './resolutionContinuation'
@@ -160,6 +161,8 @@ export async function reauthenticateReplayOwners(scope: BrowserSyncScope, snapsh
     certificates.set('stage_proven', stageSequences(await prepareStagePrefix(scope, inventory, amk, current, meta, true), scope, inventory))
     certificates.set('stage_order_proven', stageOrderSequences(await prepareStageOrderPrefix(scope, inventory, amk, current, meta, true), scope, inventory))
   }
+  await authenticateReplayDocuments(scope, snapshot, amk, current)
+  certificates.set('document_proven', new Set(snapshot.rows.filter(row => row.state === 'document_proven').map(row => row.server_sequence)))
   let authenticated = 0
   for (const row of snapshot.rows) if (row.state !== 'received') {
     if (!(row.state === 'note_proven' || row.state === 'content_note_proven' || row.state === 'content_note_conflict_preserved' || row.state === 'note_resolution_proven'||row.state==='content_note_self_echo_proven' ? notes.has(row.server_sequence) : certificates.get(row.state)?.has(row.server_sequence)))

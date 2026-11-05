@@ -1,6 +1,5 @@
-import { commitDocumentGenesis, authenticateDocumentProjection, documentPreparationInventory } from './documentApply'
+import { commitDocumentGenesis, authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
 import { prepareDocumentGenesis } from './documentPrepare'
-import { joinDocumentRecords, documentDigest } from './documentRecords'
 import { readStageInventory } from './stageApply'
 import {BrowserContentNoteIntents} from './contentNoteIntents'
 import {BrowserV10Recovery} from './v10Recovery'
@@ -396,17 +395,7 @@ class BrowserReplayStorage {
     const snapshot=await this.read(),{context}=await bindings.ensureForCurrentUser(this.scope.accountId),lease=keys.leaseForAccount(this.scope.accountId)
     const current=()=>{try{this.check();return auth.isCurrent(context)&&!!lease?.isCurrent()}catch{return false}}
     if(!lease||lease.localAccountId!==this.scope.accountId||context.userId!==this.scope.canonicalUserId||lease.canonicalUserId!==context.userId||lease.authEpoch!==context.authEpoch||!current())throw new BrowserPersistenceError('closed')
-    const inventory=documentPreparationInventory(snapshot)
-    const documents=await lease.use(async amk=>{
-      const values=[]
-      for(const row of snapshot.rows)if(row.state==='document_proven'){
-        const joined=joinDocumentRecords(this.scope,row,snapshot.documents?.ledger??[],snapshot.documents?.projections??[])
-        if(await documentDigest(joined.ledger)!==row.document_proof.ledger_digest||await documentDigest(joined.projection)!==row.document_proof.projection_digest)fail()
-        const token=await prepareDocumentGenesis(this.scope,row,inventory,amk,current)
-        values.push(await authenticateDocumentProjection(this.scope,token,inventory,joined.ledger,joined.projection,amk))
-      }
-      return values
-    })
+    const documents=await lease.use(amk=>authenticateReplayDocuments(this.scope,snapshot,amk,current))
     if(!current()||!replaySame(snapshot,await this.read()))throw new BrowserPersistenceError('stale_authority')
     return documents
   }

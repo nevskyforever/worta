@@ -1,5 +1,93 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-05 — Document Recovery GET → Vue (LOCAL COMPLETE, genesis cohort)
+
+Starting SHA `3fe9471eea8c05754c4cfc1dcde36da06c2fa04a`, branch `6.0`.
+Final SHA is the commit containing this entry, reported exactly in the task
+result. Stage 2/6 — full Web reading; Slice 4/5 remains PARTIAL. Owner decisions
+of 05.11.2026 remain: full Web, bidirectional synchronization, one sync engine,
+priority for working user functions. This entry supersedes the HTTP/UI/source
+reimport limitations of the prior automatic-dispatch task below.
+
+Implemented Document source reimport with fresh source/Metadata/ledger/proof/
+encrypted-projection authentication. The former storage authentication body is
+shared by recovery, replay owner verification and source seeding; no new owner,
+proof format or token. document_proven is accepted only after those checks.
+Existing source/import evidence and full snapshot CAS are retained. Recovery GET
+and recoverV10 still use the existing ownerPort and mandatory server-history
+reconciliation; no server protocol/gate changes or new IndexedDB stores/version.
+
+readRecoveryProject waits for complete applied coverage, freshly authenticates
+Document projections, filters by project and checks the unlocked session and
+unchanged full snapshot before returning them. Vue lists documents and opens
+their real text using escaped text interpolation, not HTML/mark URLs. Lock,
+revocation, unmount and failed recovery discard displayed plaintext. IndexedDB
+contains only original encrypted source and encrypted Document projection.
+The pre-existing Vue/session diagnostic changes are preserved and integrated
+into this checked task; unsupported Document histories retain a localized error.
+
+Actual production Native Rust/SQLite → production push → isolated PostgreSQL 16/
+FastAPI → authenticated Recovery GET → real Chromium/Vue: PASS, 1 test. Native
+Metadata and project-scoped Document genesis are sealed/published by existing
+writers; only the isolated synthetic Native Desktop declares qualified codec8,
+Resolution2 and codec10 capabilities. NO browser capability PUT or sync-device
+registration; backend still lists only the Desktop device. Native wire/ciphertext
+matches browser inbox, Document owner outcome is document_proven, ledger and
+encrypted projection are present and manifest.applied_cursor=2. Actual account
+form login, passphrase unlock through wrapped-key API, cloud catalog selection,
+document list selection and original text display pass. The fixture key is used
+only to provision the isolated account's encrypted wrapping records; it is never
+injected into the production login/unlock/project-opening path.
+
+Same unlocked session rereads/reimports without duplicate writes; real Chromium
+profile close/reopen, new login/unlock and full reauthentication preserve the
+entire replay snapshot and visible text. Persisted proof corruption causes UI
+refusal and removes previous content with no partial inventory changes; restoring
+the original evidence permits retry. Literal script text remains escaped and
+does not execute; persisted records contain no manuscript plaintext. Actual lock
+control removes displayed text. Unauthorized GET returns 401; another account
+using the first account's snapshot gets 409/recovery_snapshot_changed and no
+history. Browser ACK/capability/device-registration requests are prohibited by
+the harness and none occur; ACK cursor and server Desktop ACK remain 0.
+
+Final checks: real PostgreSQL/FastAPI/Chromium test 1 passed; Native Document
+owner Chromium/IndexedDB migration/abort/retry/redelivery/proof-corruption
+regression 1 passed; focused Vitest 128 passed in 8 files; existing prebuilt Native
+Rust Document atomic apply/replay guard 1 passed (no Rust source change/rebuild).
+Python localization/help 30 passed; py_compile, frontend typecheck/build, content
+export --check and maintained quick acceptance passed. Existing Starlette/Node
+deprecation and Vite chunk/dynamic-import warnings remain nonfatal.
+
+Added shared help for this reading workflow in all 6 languages. Catalog checks
+exposed pre-existing missing entries. Existing Vue translations were reused and
+remaining terminology added as manual overrides; normal catalog generator then
+completed with zero missing strings in all 5 target languages. Initial remote
+translation attempt failed local TLS trust and the system-CA retry was stopped
+when it stalled; final generation needed no remote translation. Baseline catalog
+comparison confirms no existing translation value changed or was removed; only
+missing entries were added. Help/locale artifacts were regenerated, not edited
+by hand. Full localization/help checks pass after reconciliation.
+
+Accepted support: one project-scoped ordinary peer genesis, codec10 revision/
+generation1, no Stage/parents, bounded complete server page <=100 events, no
+mixed Resolution history. Text reading only; rich formatting, Document updates,
+multiple slots, Stage documents, conflicts, self-echo, Web editing and Document
+prefix/ACK authority are NOT qualified. HTTP success does not establish ordinary
+browser reader or writer readiness. Readiness remains 2/10 closed, eight open;
+ready=false, declarationAllowed=false, writerAuthorized=false. Registration,
+release/security policies unchanged. No VPS/deployment/main/worktree changes.
+
+Checked production/UI/tests/help/contract/roadmap/checkpoint changes are committed
+and pushed to origin/6.0 without force. Existing task-related dirty changes were
+included after validation; working tree is clean after commit. CI was neither
+started nor polled. The task-owned PostgreSQL 16 container was stopped/removed;
+no unrelated Docker data or real account was touched.
+
+Next concrete task: support one project-scoped Desktop Document update through
+the existing Document owner and Recovery GET/replay path, then verify new text
+in Vue and after same-profile restart. Keep Stage scope, conflicts and browser
+writing as separate subsequent work; continue the full Web + unified sync goal.
+
 ## 2026-11-05 — Automatic Document recoverV10 dispatch (LOCAL COMPLETE)
 
 Starting SHA `350a5eefe5579d90390e09ee758ac162808ea4e9`, branch `6.0`.

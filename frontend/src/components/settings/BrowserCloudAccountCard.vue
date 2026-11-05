@@ -202,7 +202,7 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
     </div>
     <div v-else class="browser-cloud-account__inputs">
       <p class="browser-cloud-account__online-policy">{{ words.onlineOnly }}</p>
-      <button class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" @click="toggleCloudCatalog">
+      <button class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
       </button>
       <section v-if="cloudCatalogOpen" class="browser-cloud-account__catalog" :aria-label="words.cloudProjects" data-testid="server-cloud-project-catalog">
@@ -218,7 +218,7 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
           <ul v-else>
             <li v-for="id in cloudProjects.cloud_project_ids" :key="id">
               <code>{{ id }}</code>
-              <button class="nf-button nf-button--secondary" type="button" :disabled="status !== 'unlocked'" @click="selectedCloudProject = id">{{ words.openCloudProject }}</button>
+              <button class="nf-button nf-button--secondary" type="button" :disabled="status !== 'unlocked'" :data-cloud-project-id="id" @click="selectedCloudProject = id">{{ words.openCloudProject }}</button>
             </li>
           </ul>
           <p>{{ words.projectIdsOnly }}</p>
@@ -229,7 +229,7 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
         <label>{{ t('Пароль шифрования') }} <input ref="encryptionPasswordInput" type="password" autocomplete="off" required /></label>
         <button class="nf-button" type="submit" :disabled="busy">{{ t('Разблокировать') }}</button>
       </form>
-      <button v-if="status === 'unlocked'" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
+      <button v-if="status === 'unlocked'" class="nf-button nf-button--secondary" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
       <button v-if="status === 'unlocked'" class="nf-button" type="button" :disabled="busy" @click="toggleWorkspace">
         {{ workspaceOpen ? t('Закрыть рабочее пространство') : words.localWorkspace }}
       </button>

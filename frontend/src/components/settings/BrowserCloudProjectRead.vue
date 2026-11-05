@@ -38,12 +38,12 @@ function noteHtmlDocument(content: string): string {
   return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; base-uri 'none'; form-action 'none'"><meta name="referrer" content="no-referrer"></head><body>${output.innerHTML}</body></html>`
 }
 const recoveryLabels: Record<SupportedLanguage, { open: string; heading: string; unavailable: string }> = {
-  ru: { open: 'Открыть заметки для чтения', heading: 'Заметки', unavailable: 'Не удалось безопасно проверить историю проекта. Она может содержать пока не поддерживаемые данные.' },
-  en: { open: 'Open notes for reading', heading: 'Notes', unavailable: 'The project history could not be verified safely. It may contain data that is not supported yet.' },
-  es: { open: 'Abrir notas para leer', heading: 'Notas', unavailable: 'No se pudo verificar el historial del proyecto de forma segura. Puede contener datos aún no compatibles.' },
-  de: { open: 'Notizen zum Lesen öffnen', heading: 'Notizen', unavailable: 'Der Projektverlauf konnte nicht sicher geprüft werden. Er kann noch nicht unterstützte Daten enthalten.' },
-  fr: { open: 'Ouvrir les notes en lecture', heading: 'Notes', unavailable: 'L’historique du projet n’a pas pu être vérifié en toute sécurité. Il peut contenir des données non encore prises en charge.' },
-  pt_BR: { open: 'Abrir notas para leitura', heading: 'Notas', unavailable: 'Não foi possível verificar o histórico do projeto com segurança. Ele pode conter dados ainda não compatíveis.' },
+  ru: { open: 'Открыть проект для чтения', heading: 'Заметки', unavailable: 'Не удалось безопасно проверить историю проекта. Она может содержать пока не поддерживаемые данные.' },
+  en: { open: 'Open project for reading', heading: 'Notes', unavailable: 'The project history could not be verified safely. It may contain data that is not supported yet.' },
+  es: { open: 'Abrir proyecto para leer', heading: 'Notas', unavailable: 'No se pudo verificar el historial del proyecto de forma segura. Puede contener datos aún no compatibles.' },
+  de: { open: 'Projekt zum Lesen öffnen', heading: 'Notizen', unavailable: 'Der Projektverlauf konnte nicht sicher geprüft werden. Er kann noch nicht unterstützte Daten enthalten.' },
+  fr: { open: 'Ouvrir le projet en lecture', heading: 'Notes', unavailable: 'L’historique du projet n’a pas pu être vérifié en toute sécurité. Il peut contenir des données non encore prises en charge.' },
+  pt_BR: { open: 'Abrir projeto para leitura', heading: 'Notas', unavailable: 'Não foi possível verificar o histórico do projeto com segurança. Ele pode conter dados ainda não compatíveis.' },
 }
 const result = ref<BrowserCloudProjectRead | null>(null), busy = ref(false), error = ref<string | null>(null)
 const stageLabels: Record<SupportedLanguage, { stages: string; project: string }> = {
@@ -51,20 +51,41 @@ const stageLabels: Record<SupportedLanguage, { stages: string; project: string }
   es: { stages: 'Etapas', project: 'Notas del proyecto' }, de: { stages: 'Etappen', project: 'Projektnotizen' },
   fr: { stages: 'Étapes', project: 'Notes du projet' }, pt_BR: { stages: 'Etapas', project: 'Notas do projeto' },
 }
+const documentUnavailable: Record<SupportedLanguage, string> = {
+  ru: 'Этот тип истории документов пока недоступен в Web. История проекта не открыта.',
+  en: 'This document history is not supported on Web yet. The project history was not opened.',
+  es: 'Este historial de documentos aún no es compatible con Web. No se abrió el historial.',
+  de: 'Dieser Dokumentverlauf wird im Web noch nicht unterstützt. Der Verlauf wurde nicht geöffnet.',
+  fr: 'Cet historique de documents n’est pas encore pris en charge sur le Web. L’historique n’a pas été ouvert.',
+  pt_BR: 'Este histórico de documentos ainda não é compatível com a Web. O histórico não foi aberto.',
+}
+const documentLabels: Record<SupportedLanguage, string> = {
+  ru: 'Документы', en: 'Documents', es: 'Documentos', de: 'Dokumente', fr: 'Documents', pt_BR: 'Documentos',
+}
+// Only authenticated Tiptap text is presented. No source HTML, URLs or mark
+// attributes enter the DOM; Vue escapes even literal markup inside text nodes.
+function documentText(node: Record<string, unknown>): string {
+  if (node.type === 'text') return typeof node.text === 'string' ? node.text : ''
+  if (node.type === 'hardBreak') return '\n'
+  const content = Array.isArray(node.content) ? node.content.map(child => documentText(child as Record<string, unknown>)).join('') : ''
+  return content + (['paragraph', 'heading', 'codeBlock'].includes(String(node.type)) ? '\n' : '')
+}
+const selectedDocument = ref<string | null>(null)
+const activeDocument = computed(() => recovery.value?.documents?.find(document => document.id === selectedDocument.value))
 const selectedStage = ref<string | null>(null)
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
-  controller?.abort(); result.value = null; recovery.value = null; error.value = null; recoveryError.value = false
+  controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false
   emit('invalidated')
 })
 async function open(): Promise<void> {
   if (disposed) return
   controller?.abort()
   const active = new AbortController(); controller = active
-  result.value = null; recovery.value = null; error.value = null; recoveryError.value = false; busy.value = true
+  result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false; busy.value = true
   try {
     const value = await props.session.readCloudProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') result.value = value
@@ -78,7 +99,7 @@ async function openRecovery(): Promise<void> {
   if (disposed) return
   const priorSelection = selectedStage.value, hadRecovery = recovery.value !== null
   controller?.abort(); const active = new AbortController(); controller = active
-  result.value = null; recovery.value = null; error.value = null; recoveryError.value = true; busy.value = true
+  result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
   try {
     const value = await props.session.readRecoveryProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') {
@@ -93,14 +114,14 @@ async function openRecovery(): Promise<void> {
   } finally { if (controller === active) busy.value = false }
 }
 onMounted(() => { void open() })
-onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null })
+onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null })
 </script>
 
 <template>
   <section data-testid="cloud-project-read" :data-project-id="projectId">
     <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="open">{{ busy ? t('Загружаем с сервера…') : words.open }}</button>
     <button data-testid="cloud-notes-open" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="openRecovery">{{ recoveryLabels[locale.language].open }}</button>
-    <p v-if="error" role="alert" :data-read-code="error">{{ error === 'connection_failed' ? words.network : recoveryError ? recoveryLabels[locale.language].unavailable : `${words.blocked}: ${error}` }}</p>
+    <p v-if="error" role="alert" :data-read-code="error">{{ error === 'connection_failed' ? words.network : error === 'document_recovery_unavailable' ? documentUnavailable[locale.language] : recoveryError ? recoveryLabels[locale.language].unavailable : `${words.blocked}: ${error}` }}</p>
     <article v-if="result" data-testid="cloud-project-metadata">
       <h3>{{ result.metadata.name }}</h3>
       <p>{{ words.partial }}</p>
@@ -116,6 +137,14 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectedStage = null">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectedStage = stage.id">{{ stage.name }}</button>
       </nav>
+      <section v-if="recovery.documents?.length" data-testid="cloud-document-list">
+        <h4>{{ documentLabels[locale.language] }}</h4>
+        <button v-for="document in recovery.documents" :key="document.id" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+      </section>
+      <section v-if="activeDocument" data-testid="cloud-document-read">
+        <h5>{{ activeDocument.title }}</h5>
+        <p data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
+      </section>
       <h4>{{ recoveryLabels[locale.language].heading }}</h4>
       <section v-for="note in recovery.notes.filter(note => note.stage_id === selectedStage)" :key="note.id">
         <h5>{{ note.title }}</h5>

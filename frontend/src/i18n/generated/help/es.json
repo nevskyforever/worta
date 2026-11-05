@@ -208,6 +208,12 @@
   },
   {
     "children": [],
+    "content": "<html><body>\n<h2>Leer documentos de la nube en Web</h2>\n<p>Inicia sesión en tu cuenta, desbloquea la clave con tu contraseña de cifrado y abre un proyecto de la lista en la nube. Pulsa «Abrir proyecto para leer» y elige un documento en «Documentos».</p>\n<p>Este modo muestra el texto de un documento de proyecto publicado inicialmente y sin etapa. El formato, las revisiones posteriores y la edición en el navegador aún no son compatibles. Los historiales dañados o no compatibles se rechazan. Se requiere conexión al servidor. Tras reiniciar, inicia sesión y desbloquea la clave de nuevo. Bloquear la clave oculta el texto abierto.</p>\n</body></html>",
+    "key": "web_document_reading",
+    "title": "Leer documentos de la nube en Web"
+  },
+  {
+    "children": [],
     "content": "<html><body>\n<h2>Diagnóstico y notificación de problemas.</h2>\n<p>En la aplicación de escritorio, vaya a Configuración → Diagnóstico. El registro le ayuda a encontrar la causa del error y se almacena únicamente en esta computadora, incluso después de reiniciar. En él no se registran los textos de documentos y notas, nombres, contraseñas, claves y datos de inicio de sesión. No hay envío automático.</p>\n<ol><li>Haga clic en Borrar registro.</li><li>Repita la acción que está causando el problema.</li><li>Regrese a Diagnóstico y haga clic en Copiar registro o Exportar registro.</li><li>Pegue el resultado en un mensaje para verificación o adjunte el archivo JSONL seleccionado.</li></ol>\n<p>Se almacenan los últimos 512 eventos, con un máximo de 512 KB de contenido. Se copian hasta 100 últimos eventos, no más de 60 KB, con una marca de reducción. Exportar guarda todos los registros disponibles. Al borrar solo se elimina el registro de diagnóstico.</p>\n<p>En las tarjetas de estado, en el apartado “Información Técnica” se muestra el código y número de la solicitud. Le ayudan a asociar el error con la actividad en el registro. Para el problema de recuperación de rachas, repita la recuperación en modo desarrollador después de borrar el registro y envíe el resultado para su verificación.</p>\n</body></html>",
     "key": "application_diagnostics",
     "title": "Diagnóstico e informe de problemas"

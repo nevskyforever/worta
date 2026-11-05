@@ -208,6 +208,12 @@
   },
   {
     "children": [],
+    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account, unlock the key with your encryption password and open a project from the cloud list. Click “Open project for reading”, then select a document in “Documents”.</p>\n<p>This mode currently displays the text of an initially published project document without a stage. Formatting, later revisions and browser editing are not supported yet. Unsupported or damaged history is refused. A server connection is required. Sign in and unlock the key again after restarting. Locking the key hides the open text.</p>\n</body></html>",
+    "key": "web_document_reading",
+    "title": "Reading cloud documents on Web"
+  },
+  {
+    "children": [],
     "content": "<html><body>\n<h2>Diagnosis and problem reporting</h2>\n<p>In the desktop app, go to Settings → Diagnostics. The log helps you find the cause of the error and is stored only on this computer, including after a restart. The texts of documents and notes, names, passwords, keys and login data are not recorded in it. There is no automatic sending.</p>\n<ol><li>Click Clear Log.</li><li>Repeat the action that is causing the problem.</li><li>Return to Diagnostics and click Copy Log or Export Log.</li><li>Paste the result into a message for verification or attach the selected JSONL file.</li></ol>\n<p>The last 512 events are stored, with a maximum of 512 KB of content. Up to 100 latest events are copied, no more than 60 KB, with a mark for reduction. Export saves all available log. Clearing only deletes the diagnostic log.</p>\n<p>In the status cards, the “Technical Information” section shows the code and number of the request. They help you associate the error with activity in the log. For the streak recovery issue, repeat the recovery in developer mode after clearing the log and submit the result for verification.</p>\n</body></html>",
     "key": "application_diagnostics",
     "title": "Diagnostics and reporting a problem"

@@ -208,6 +208,12 @@
   },
   {
     "children": [],
+    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous au compte cloud, déverrouillez la clé avec votre mot de passe de chiffrement et ouvrez un projet de la liste cloud. Cliquez sur « Ouvrir le projet en lecture », puis choisissez un document dans « Documents ».</p>\n<p>Ce mode affiche le texte d’un document de projet publié initialement, sans étape. La mise en forme, les révisions ultérieures et la modification dans le navigateur ne sont pas encore prises en charge. Les historiques endommagés ou non pris en charge sont refusés. Une connexion au serveur est nécessaire. Après un redémarrage, reconnectez-vous et déverrouillez la clé. Le verrouillage de la clé masque le texte ouvert.</p>\n</body></html>",
+    "key": "web_document_reading",
+    "title": "Lire les documents cloud sur le Web"
+  },
+  {
+    "children": [],
     "content": "<html><body>\n<h2>Diagnostic et rapport de problèmes</h2>\n<p>Dans l'application de bureau, accédez à Paramètres → Diagnostics. Le journal vous aide à trouver la cause de l'erreur et est stocké uniquement sur cet ordinateur, y compris après un redémarrage. Les textes des documents et notes, les noms, les mots de passe, les clés et les données de connexion n'y sont pas enregistrés. Il n'y a pas d'envoi automatique.</p>\n<ol><li>Cliquez sur Effacer le journal.</li><li>Répétez l'action à l'origine du problème.</li><li>Revenez à Diagnostics et cliquez sur Copier le journal ou Exporter le journal.</li><li>Collez le résultat dans un message pour vérification ou joignez le fichier JSONL sélectionné.</li></ol>\n<p>Les 512 derniers événements sont stockés, avec un maximum de 512 Ko de contenu. Jusqu'à 100 derniers événements sont copiés, pas plus de 60 Ko, avec une marque de réduction. L'exportation enregistre tous les journaux disponibles. L'effacement supprime uniquement le journal de diagnostic.</p>\n<p>Dans les fiches de statut, la section « Informations techniques » indique le code et le numéro de la demande. Ils vous aident à associer l'erreur à l'activité dans le journal. Pour le problème de récupération par série, répétez la récupération en mode développeur après avoir effacé le journal et soumettez le résultat pour vérification.</p>\n</body></html>",
     "key": "application_diagnostics",
     "title": "Diagnostic et signalement d’un problème"

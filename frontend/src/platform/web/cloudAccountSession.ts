@@ -1,3 +1,4 @@
+import type { PortableDocument } from '@/cloud/documentCodec'
 import { readReplayStages, type ReplayStageView } from './replayStageView'
 import { replaySame } from './replayRecords'
 import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteResult, ReplayOrderedContentResult } from './replayMetadata'
@@ -133,7 +134,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[] }> {
     this.assertWeb()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -146,7 +147,11 @@ export class BrowserCloudAccountSession {
       await storage.importRecoveryProject(projectId, this.auth, bindings, keys, 'recovery')
       for (let i = 0; i <= 200; i++) {
         const result = await storage.recoverV10(this.auth, bindings, keys, 'recovery')
-        if (result.blocker && result.blocker.kind !== 'budget_exhausted') throw new BrowserCloudReadError('unsupported_history')
+        if (result.blocker && result.blocker.kind !== 'budget_exhausted') {
+          const blocked = (await storage.read()).rows.find(row => row.server_sequence === result.blocker!.sequence)
+          if (blocked && JSON.parse(blocked.wire_item).event.entity_type === 'document') throw new BrowserCloudReadError('document_recovery_unavailable')
+          throw new BrowserCloudReadError('unsupported_history')
+        }
         if (!result.more) break
         if (i === 200) throw new BrowserCloudReadError('history_limit')
       }
@@ -157,8 +162,9 @@ export class BrowserCloudAccountSession {
       const source = await local.readSnapshot(scope, projectId)
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
+      const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents,
       }))
       if (result.notes.some(note => note.stage_id !== null && !stages.some(stage => stage.id === note.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (!current() || !replaySame(snapshot, await storage.read())) throw new BrowserCloudReadError('unsupported_history')
