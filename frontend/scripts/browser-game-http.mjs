@@ -71,6 +71,8 @@ try {
     ])
     const account=expected.projections.account
     const accountPanel=panel.locator('[data-testid="cloud-account-game"]')
+    assert.equal(await accountPanel.locator('[data-testid="cloud-account-freezes"]').textContent(),String(account.global_streak.freezes))
+    assert.equal(await accountPanel.locator('[data-testid="cloud-account-streak"] strong').textContent(),String(account.global_streak.history.length))
     const formatted=await page.evaluate(async a=>{const {useLocaleStore}=await import('/src/stores/locale.ts');const locale=useLocaleStore();return {coins:locale.formatNumber(Number(a.coins),2),experience:locale.formatNumber(Number(a.experience),2)}},account)
     assert.equal(await accountPanel.locator('[data-testid="cloud-game-coins"]').textContent(),formatted.coins)
     assert.equal(await accountPanel.locator('[data-testid="cloud-game-experience"]').textContent(),formatted.experience)

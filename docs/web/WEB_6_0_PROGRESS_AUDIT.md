@@ -1,5 +1,103 @@
 # WORTA 6.0 — ревизия чтения Web и reader qualification, 06.11.2026
 
+## 2026-11-06 — Loss-v2: actual Native → HTTP → Web implementation
+
+Starting SHA `b91d61d877f3e779022dbdc0210fcf95080567bd`, branch6.0; nine changed
+files include the six preserved changes from the previous passes. Product stage2/6,
+technical Slice4/5 PARTIAL. Final SHA is the commit containing this entry (reported
+in the task result). No previous checkpoint history or owner product requirement
+was removed. Full Web, all game mechanics and bidirectional unified sync remain goals.
+
+The existing Game preparation now admits only actual version2 Native standalone
+loss, authenticating the stable action identity against the parent streak. Existing
+codec checks exact loss date/history/maximum/freeze reset and zero reward. The
+existing transition reproduces Native health damage and single resurrection potion
+consumption. Game events continue through recoverV10 and the SAME ownerPort/full
+snapshot CAS, server checks, encrypted projection, source/ledger/proof/manifest
+transaction and reauthentication. No new engine, proof format, store or schema.
+Vue now exposes retained global length and freeze count from that verified state.
+
+Real acceptance extends the existing Native Game HTTP fixture: retained3-day global
+series, genuine Progress/writing reward, buy2 items, then completion/reward, sell1,
+Native `loss` command and production push. A second loss command returns false.
+History8→13, Game ledger5→9; account/project encrypted snapshots exactly match Native
+SQLite. Both legal project/reward wire orders are tested. Existing login/passphrase
+unlock, actual PostgreSQL16/FastAPI Recovery GET, redelivery, account ciphertext
+refusal, last-account-projection IDB abort/full rollback, reopen/retry, final restart
+and durable account-proof corruption checks are retained. Original wire/import seeds
+and binding are preserved; ACK0. No new concurrent race is claimed: existing common
+ownerPort CAS is retained. See the verification result below for final run counts.
+
+Remaining requested work is NOT accepted: Native growth/global_streak-v1 and freeze
+capture/apply were not implemented in this pass. `game.rs::apply_event(ProgressAdded)`
+updates writing rewards/productive counters, not global history; current `freeze`
+only decrements inventory and emits a command result. `game_writer::capture_domain`
+queues the existing writing/reward pair and checks exact account post-state, while
+`game_sync::transition_with_source` rejects the unimplemented action families.
+Their codec shapes are not genuine producer semantics or successful owner proofs.
+Implement and test the real Native streak growth/freeze state transition and its
+capture/dependencies before claiming end-to-end freeze. Do not merely synthesize
+an after-history from a local inventory debit. This is an implementation gap, not
+a claim that the required feature is technically impossible.
+
+Readiness2/10 closed and seven remaining Web reading groups unchanged. All three
+security flags remain false; no browser capability PUT/ACK, main, VPS, deployment,
+registration change, new worktree or CI start/poll. Synthetic Native capability PUT
+is confined to the existing qualified isolated fixture. Next task remains Native
+ordinary global-streak/freeze capture/apply and real HTTP/Web acceptance, retaining
+the now-tested standalone loss path. Full account Game and Slice4 are incomplete.
+
+Verification for this bounded loss-v2 change: 2 real Game HTTP/Chromium tests
+PASS (73.22s), 57 focused Vitest PASS, 15 existing Native owner Rust tests PASS
+(unchanged Native binary; no Native source changed), 30 help/localization tests
+PASS; typecheck/build, generated-content check, changed Python compile and quick
+PASS. Only one help source key was added per non-Russian language, with existing
+translations preserved. The isolated task PostgreSQL16 container/anonymous volume
+was verified, stopped and removed. Commit/push contains the tested loss-v2 subset,
+including the preserved prior changes, not an assertion of complete streak/freeze.
+Normal origin/6.0 push; no CI query. Final exact SHA/clean-tree result is in the
+user-facing task result. Earlier PARTIAL entries below are historical evidence.
+
+## 2026-11-06 — Native streak/freeze continuation (PARTIAL)
+
+Starting/Final SHA `b91d61d877f3e779022dbdc0210fcf95080567bd`; branch 6.0.
+The six prior uncommitted files and their existing loss-v2 work were preserved.
+No new Native capture/apply route was implemented or accepted in this pass.
+`game.rs::GameApplicationService::freeze` decrements the inventory item inside
+`Self::mutate`; it does not itself write a synchronized freeze Game event or update
+streak history. The portable writer `game_writer.rs::capture_domain` currently
+queues a writing/completion Project Game event and a linked Account reward, then
+requires the rebuilt account snapshot to equal the actual post-action account base;
+a mismatch becomes `game_unsupported_local_mutation` and blocks the migration.
+`game_sync.rs::transition_with_source` has no version-1 global_streak or freeze
+branch. Codec declarations are not proof of capture, apply or dependency safety.
+Do not equate a local item decrement with a synchronized freeze or fabricate an
+after-state. The pre-existing browser loss-v2 adapter remains uncommitted and has
+not passed real HTTP/Chromium/restart acceptance. No Native parity, new CAS race,
+rollback, or freeze end-to-end PASS is claimed. See task result for test counts.
+
+Next: trace the actual Desktop streak updater and freeze transaction to their
+logical-day, inventory and Progress dependencies, implement a shared Native
+capture/apply of its genuine committed outcomes with an account/project causal
+proof, then extend the existing browser owner and test real SQLite → isolated
+PostgreSQL16/FastAPI → Chromium with restart, redelivery and rollback. Preserve
+all six changes and do not infer writer capability from codec IDs. Readiness stays
+2/10 closed, seven Web reading groups remain, stage2/6 Slice4/5 PARTIAL. Security
+gates stay ready=false, declarationAllowed=false, writerAuthorized=false; no
+browser capability PUT, ACK, VPS, main or CI access. No commit or push pending
+mandatory local acceptance. Full ordinary/game Web, all game mechanics, creation,
+editing and bidirectional unified sync remain the owner's product objective.
+
+## 06.11.2026 — Account Game streak/freeze PARTIAL
+
+Browser standalone Native loss-v2 transition is implemented locally and has focused
+unit coverage, but Native SQLite → HTTP → Chromium acceptance is not run. Native
+`game_sync` lacks apply for ordinary global_streak-v1 and freeze; `game_writer`
+currently captures standalone loss, not those requested event families. Complete
+the authentic Native writer/apply contract and end-to-end acceptance next. Existing
+readiness 2/10, 7 remaining Web reading groups, stage2/6, Slice4/5 and closed security
+gates are unchanged. Full Web, all game mechanics and bidirectional sync remain goals.
+
 Основание: утверждённые владельцем шесть продуктовых этапов в
 [checkpoint](../WORTA_CHECKPOINT.md#worta-60--утверждённый-упрощённый-план-завершения-mvp),
 [пять технических Slice](WEB_ONLINE_RESOLUTION2_REPLAY_CONTRACT.md#5-sequential-implementation-slices-and-acceptance),

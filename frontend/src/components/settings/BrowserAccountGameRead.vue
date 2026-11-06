@@ -37,7 +37,8 @@ const status=computed(()=>!props.value.global_streak.enabled?'Off':props.value.g
     <h5>{{ t('Навыки') }}</h5>
     <dl><template v-for="[key,label] in skills" :key="key"><dt>{{ t(label) }}</dt><dd>{{ value.skills[key] }}</dd></template></dl>
     <details><summary>{{ t('Подробные коэффициенты') }}</summary><dl><template v-for="[label,amount] in coefficients" :key="label"><dt>{{ t(label) }}</dt><dd>{{ number(amount) }}</dd></template></dl></details>
-    <StreakBadge :length="value.global_streak.history.length" :max-length="value.global_streak.maximum" :status="status" scope="global" show-max />
+    <dl><dt>{{ t('Использовано заморозок') }}</dt><dd data-testid="cloud-account-freezes">{{ value.global_streak.freezes }}</dd></dl>
+    <StreakBadge data-testid="cloud-account-streak" :length="value.global_streak.history.length" :max-length="value.global_streak.maximum" :status="status" scope="global" show-max />
     <div data-testid="cloud-game-inventory"><InventoryShopPanel :inventory="inventory" :shop="{categories:[],custom_awards:{items:[]}}" :busy="false" view="inventory" :can-open-credit="false" read-only /></div>
   </section>
 </template>

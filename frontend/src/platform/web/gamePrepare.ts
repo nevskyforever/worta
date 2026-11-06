@@ -73,7 +73,7 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
     }finally{n.fill(0);c.fill(0)}
    }
   }
- }else if(!['genesis','reward','inventory'].includes(a.kind))reject()
+ }else if(!['genesis','reward','inventory','global_streak'].includes(a.kind))reject()
  let previous:GamePlan|undefined,source:ProjectGameEvent|undefined
  // Filter by durable owner key only to select candidates. Each candidate is
  // independently decrypted and its actual owner identity checked below.
@@ -102,6 +102,7 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
   if(plan.event.header.scope!=='project'||h.event_id!==await gameActionId(h.account_id,'reward',a.project_action_id))reject()
   source=plan.event as ProjectGameEvent
  }
+ if(a.kind==='global_streak' && (event.version!==2 || h.event_id!==await gameActionId(h.account_id,'global_streak_loss',a.before)))reject()
  const projection=transitionGame(event,previous?.projection,source)
  if(!current())throw new BrowserPersistenceError('closed')
  if(identity!==immutableWireIdentity(snapshot))throw new BrowserPersistenceError('stale_source')

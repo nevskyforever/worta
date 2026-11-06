@@ -58,6 +58,22 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
     }
     return fail()
   }
+  if(a.kind==='global_streak'){
+    if(e.version!==2||e.header.rule!=='native-game-v1')fail()
+    const account=state as AccountGameBase
+    if(canonical(account.global_streak)!==canonical(a.before))fail()
+    account.global_streak=structuredClone(a.after)
+    const damage=BigInt(a.after.lost_length)*5000000n
+    const health=progressMicros(account.health), max=progressMicros(account.max_health)
+    const remaining=(health<max?health:max)-damage
+    const safe=remaining>0n?remaining:0n
+    account.health=`${safe/1000000n}.${(safe%1000000n).toString().padStart(6,'0')}`
+    if(safe===0n){
+      const index=account.inventory.findIndex(item=>item.category==='Зелья'&&item.item_id==='Зелье воскрешения'&&item.count>0)
+      if(index>=0){if(account.inventory[index]!.count===1)account.inventory.splice(index,1);else account.inventory[index]!.count--;account.health=account.max_health}
+    }
+    return account
+  }
   if(a.kind==='inventory'){
     if(e.header.rule!=='native-game-v1'||!['buy','sell'].includes(a.operation))fail()
     const account=state as AccountGameBase

@@ -60,6 +60,7 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
     source = {'gamer': json.loads((ROOT/'frontend/src/cloud/__fixtures__/gameLegacyDefaultsV1.json').read_text()),
               'project_game_state': {f'project:{PROJECT_ID}': {'streaks':['2026-10-01','2026-10-02'], 'max_streak':4, 'streak_status':True}}}
     source['gamer']['coins'] = 1000
+    source['global_streak'] = {'global_streaks':['2026-11-03','2026-11-04','2026-11-05'],'max_global_streak':3,'global_streak_status':'Go'}
     assert game(tmp_path, db, identity, user, 'init', source=source) is True
     assert client.put('/api/v3/sync/encrypted/game-reader-capabilities', headers=headers, json=declaration(device)).status_code == 204
     progress(tmp_path, db, identity, user, 'begin')
@@ -131,6 +132,9 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
             assert len(publish_game())==2
             assert game(tmp_path,db,identity,user,'inventory',category='Зелья',item_id='Микро зелье здоровья',count=1,operation='sell') is not None
             assert len(publish_game())==1
+            assert game(tmp_path,db,identity,user,'loss',writing_day='2026-11-08',now='2026-11-08T00:00:00.000000Z') is True
+            assert len(publish_game())==1
+            assert game(tmp_path,db,identity,user,'loss',writing_day='2026-11-09',now='2026-11-09T00:00:00.000000Z') is False
             latest=history();assert latest[:len(items)]==items
             stdout,stderr=process.communicate(json.dumps({'items':latest,'expected':expected()})+'\n',timeout=180)
             assert process.returncode==0,stdout+stderr

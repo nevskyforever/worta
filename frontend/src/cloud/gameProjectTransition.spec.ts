@@ -63,3 +63,19 @@ it('uses Native inventory before/after counts, signed price and canonical post-s
  expect(()=>transitionGame(buy,{...before,coins:'0.000000'})).toThrow('game_invalid_rule')
  expect(transitionGame(account)).toEqual(before)
 })
+it('applies Native standalone streak loss once, including health and resurrection inventory',()=>{
+ const genesis=event('account-genesis') as AccountGameEvent
+ const base=transitionGame(genesis) as AccountGameBase
+ const loss=event('global-streak') as AccountGameEvent
+ if(loss.action.kind!=='global_streak')throw Error('fixture')
+ const before=structuredClone(base.global_streak)
+ loss.version=2;loss.action.before=before;loss.action.writing_day='2026-10-03';loss.action.project_action_ids=[]
+ loss.action.after={...before,history:[],freezes:0,lost_day:'2026-10-03',lost_length:1,maximum:Math.max(before.maximum,1)}
+ loss.action.reward={coins:'0.000000',experience:'0.000000'}
+ const after=transitionGame(loss,base) as AccountGameBase
+ expect(after.health).toBe('95.000000');expect(after.global_streak).toEqual(loss.action.after)
+ expect(()=>transitionGame(loss,after)).toThrow('game_invalid_rule')
+ const low={...structuredClone(base),health:'3.000000',inventory:[{category:'Зелья',item_id:'Зелье воскрешения',count:1}]}
+ const revived=transitionGame(loss,low) as AccountGameBase
+ expect(revived.health).toBe(low.max_health);expect(revived.inventory).toEqual([])
+})
