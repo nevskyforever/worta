@@ -1,3 +1,5 @@
+import type { ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
+import { validateBrowserMetadataHead } from './metadataApplyRecords'
 import { prepareMapEvent } from './mapPrepare'
 import { authenticateReplayMaps, mapPreparationInventory } from './mapApply'
 import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
@@ -53,12 +55,12 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
   // This is receipt validation, never an owner outcome. Dependencies/proofs are
   // checked by the existing owners only after all pages have been received.
   const authenticateCanonicalWires = (items: ReturnType<typeof prepareReplayPage>['page']['items']) => lease.use(async amk => {
-    for (const item of items) if (['document', 'map', 'progress'].includes((item.event as V3Descriptor).entity_type)) {
+    for (const item of items) if (['document', 'map', 'progress', 'project_game', 'account_game'].includes((item.event as V3Descriptor).entity_type)) {
       const event = item.event as V3Descriptor
       const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
       const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
       try {
-        await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
+        await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: String(event.entity_type) === 'account_game' ? null : event.project_id,
           entityId: event.entity_id, entityType: event.entity_type, eventId: event.event_id }, { ...object, nonce, ciphertext })
       } finally { nonce.fill(0); ciphertext.fill(0) }
       check()
@@ -120,7 +122,24 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           let documentHead: DocumentEvent['header'] | undefined
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
-            if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'project_metadata' && event.operation === 'upsert') {
+              const rawHead=previous.owners.find(owner=>owner.owner_kind==='project_metadata'&&owner.owner_id===event.project_id)
+              if(!rawHead)fail('invalid_history')
+              const head=validateBrowserMetadataHead(rawHead,scope),tip=head.history.find(proof=>proof.event_id===head.tip_event_ids[0]) ?? fail('invalid_history')
+              if(!tip||head.tip_event_ids.length!==1)fail('invalid_history')
+              const object=item.object as {crypto_version:1;aad_version:1;nonce:string;ciphertext:string},nonce=decodeBase64Url(object.nonce),ciphertext=decodeBase64Url(object.ciphertext)
+              try {
+                const decoded=await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:event.project_id,entityId:event.entity_id,entityType:'project_metadata',eventId:event.event_id},{...object,nonce,ciphertext}) as ProjectMetadataEvent
+                const h=decoded.header
+                if(h.device_id!==event.device_id||h.bootstrap_id!==head.bootstrap_id||h.operation!=='update'||h.parent_event_ids.length!==1||h.parent_event_ids[0]!==tip.event_id
+                  ||h.revision!==tip.revision+1||h.generation<=tip.generation||h.revision!==event.revision||h.updated_at!==canonicalizeSyncTimestamp(event.updated_at))fail('invalid_history')
+              }finally{nonce.fill(0);ciphertext.fill(0)}
+              continue // Receipt only. The Metadata owner still authenticates/commits its outcome.
+            }
+            if (['project_game','account_game'].includes(event.entity_type) && ['event','upsert'].includes(event.operation)) {
+              await authenticateCanonicalWires([item]);continue
+            }
             if (event.entity_type === 'progress' && event.operation === 'event') {
               await authenticateCanonicalWires([item])
               continue

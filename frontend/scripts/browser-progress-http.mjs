@@ -85,7 +85,7 @@ try {
     assert.deepEqual(rows,expected.entries.map(row=>row.id).reverse())
   }
   const snapshot = page => page.evaluate(async () => {
-    const q = indexedDB.open('worta-web-replay', 9)
+    const q = indexedDB.open('worta-web-replay')
     const db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
     try { return await new Promise((ok, no) => {
       const tx = db.transaction([...db.objectStoreNames]), rows = {}
@@ -100,6 +100,32 @@ try {
   assert.equal(first.replayManifest[0].applied_cursor,initialCursor);assert.equal(first.cursors[0].ack_cursor,0)
   assert.ok(!JSON.stringify(first.progressProjection).includes('base_total'))
   await read(panel,fixture.expected);assert.deepEqual(await snapshot(page),first)
+  if (!fixture.stageId) {
+  await context.close(); page=await launch()
+  await page.evaluate(async () => {
+    const req=q=>new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})
+    const db=await req(indexedDB.open('worta-web-replay')),saved=[]
+    for(const name of db.objectStoreNames){if(name.startsWith('game'))continue;const st=db.transaction(name).objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return{name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
+    db.close();await req(indexedDB.deleteDatabase('worta-web-replay'))
+    const old=indexedDB.open('worta-web-replay',9);old.onupgradeneeded=()=>{for(const entry of saved){const st=old.result.createObjectStore(entry.name,{keyPath:entry.keyPath});for(const i of entry.indexes)st.createIndex(i.name,i.keyPath,{unique:i.unique});for(const row of entry.rows)st.put(row)}}
+    ;(await req(old)).close()
+    const create=IDBDatabase.prototype.createObjectStore
+    IDBDatabase.prototype.createObjectStore=function(name,...args){if(name==='gameProjection')throw new DOMException('test interrupted upgrade','AbortError');return create.call(this,name,...args)}
+    let rejected=false
+    const i=saved.find(e=>e.name==='identities').rows[0]
+    try{const {openBrowserReplayStorage}=await import('/src/platform/web/replayStorage.ts');await openBrowserReplayStorage({accountId:i.local_account_id,canonicalUserId:i.canonical_user_id,deviceId:i.device_id},new AbortController().signal,()=>true)}catch{rejected=true}finally{IDBDatabase.prototype.createObjectStore=create}
+    assertMigration(rejected,'migration abort not exercised')
+    const unchanged=await req(indexedDB.open('worta-web-replay',9))
+    assertMigration(unchanged.version===9&&!unchanged.objectStoreNames.contains('gameLedger'),'partial migration')
+    for(const entry of saved){const rows=await req(unchanged.transaction(entry.name).objectStore(entry.name).getAll());assertMigration(JSON.stringify(rows)===JSON.stringify(entry.rows),'migration changed prior data')}
+    unchanged.close()
+    function assertMigration(value,message){if(!value)throw Error(message)}
+  })
+  panel=await loginAndOpen(page);await read(panel,fixture.expected)
+  assert.deepEqual(await snapshot(page),first)
+  assert.equal(await page.evaluate(()=>new Promise(resolve=>{const q=indexedDB.open('worta-web-replay',9);q.onerror=()=>resolve(q.error.name);q.onsuccess=()=>{q.result.close();resolve('incorrectly_opened')}})),'VersionError')
+  }
+
   const input=createInterface({input:process.stdin}),updateLine=new Promise(ok=>input.once('line',ok))
   console.log(JSON.stringify({phase:'ready_for_update'}))
   const update=JSON.parse(await updateLine);input.close()
@@ -130,7 +156,7 @@ try {
   const projection=await page.evaluate(async({row,key})=>{
     const {decryptObjectBytes}=await import('/src/crypto/index.ts'),{decodeBase64Url}=await import('/src/api/base64url.ts')
     // Canonical account ID is already bound in persisted identity, never inferred from local alias.
-    const q=indexedDB.open('worta-web-replay',9),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
+    const q=indexedDB.open('worta-web-replay'),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     const identity=await new Promise(ok=>{const r=db.transaction('identities').objectStore('identities').getAll();r.onsuccess=()=>ok(r.result[0])});db.close()
     const amk=Uint8Array.from(key),nonce=decodeBase64Url(row.envelope.nonce),ciphertext=decodeBase64Url(row.envelope.ciphertext)
     let bytes
@@ -142,7 +168,7 @@ try {
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.expected)
   assert.deepEqual(await snapshot(page),accepted)
   await page.evaluate(async()=>{
-    const q=indexedDB.open('worta-web-replay',9),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
+    const q=indexedDB.open('worta-web-replay'),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='progress_proven');row.progress_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
   })
   await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()

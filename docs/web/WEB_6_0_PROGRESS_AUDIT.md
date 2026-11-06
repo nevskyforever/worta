@@ -73,8 +73,8 @@ Slice 5 не заявляются. Технические Slice и шесть п
 добавлять в его критерии автоматически. Важны полное безопасное чтение
 поддерживаемых Native данных, новые Desktop revisions и reopen.
 
-Осталось **8 явно перечисленных функциональных групп чтения**. Это единицы
-учёта roadmap, а не 8 новых технических этапов и не оценка процента готовности.
+Осталось **7 явно перечисленных функциональных групп чтения**. Это единицы
+учёта roadmap, а не 7 новых технических этапов и не оценка процента готовности.
 Для каждой требуется свой обычный Native→HTTP→Vue→restart сценарий.
 
 | № | Незавершённая функция | Наблюдаемый критерий завершения |
@@ -83,10 +83,9 @@ Slice 5 не заявляются. Технические Slice и шесть п
 | 2 | Полное представление Document | Форматирование действующего Tiptap JSON видно в Web; поздний новый Document после unlock и допустимые delete/Resolution histories применяются owner, а не блокируют проект. Текущий continuation preflight требует revision≥2, поэтому поздний genesis также остаётся конкретным пробелом. Plain text/create/linear updates обоих scopes уже приняты. |
 | 3 | Оставшиеся Map histories | Stage Map create/update, annotations, Stage proof и restart теперь приняты вместе с project Map. Остаются ранее перечисленные delete/Resolution Native Map histories; группа пока не закрыта. |
 | 4 | Свойства и связи Notes | Проверенные checklist/tags/annotations и Map-derived Notes доступны пользователю. Сейчас основной recovery UI показывает заголовок и body. |
-| 5 | Состояние игры проекта | Project Game owner отдаёт UI все существующие механики/состояния проекта, без потери их данных после update/reopen. Это обязательный продуктовый scope. |
-| 6 | Состояние игры аккаунта | Account Game owner подключён к cabinet/shop/rhythm/баффам/наградам и другим уже существующим панелям чтения; игровые действия/запись относятся к этапам 3–4. |
-| 7 | Полный облачный каталог | Canonical folders/order/membership и project order показываются через владельцев account history. Bootstrap project list не заменяет эти данные. |
-| 8 | Зашифрованные обложки | Metadata2/cover references и encrypted blob проверяются, отображаются и обновляются без раскрытия ключа серверу. |
+| 5 | Состояние игры аккаунта | Account Game owner подключён к cabinet/shop/rhythm/баффам/наградам и другим уже существующим панелям чтения; игровые действия/запись относятся к этапам 3–4. |
+| 6 | Полный облачный каталог | Canonical folders/order/membership и project order показываются через владельцев account history. Bootstrap project list не заменяет эти данные. |
+| 7 | Зашифрованные обложки | Metadata2/cover references и encrypted blob проверяются, отображаются и обновляются без раскрытия ключа серверу. |
 
 Дополнительно остаются **сквозные условия чтения**, а не новые UI функции:
 совместное открытие полного mixed account history (сейчас Map/Document вместе с
@@ -103,8 +102,18 @@ project/Stage complete genesis + append, реальные HTTP updates, цели
 это остаток существующей полной source/strategy матрицы и mixed-history приёмки,
 а не новая функциональная группа или новый Slice.
 
-Следующие продуктовые задачи: **project Game reading**, **account Game reading**,
-затем оставшиеся группы чтения. Rich Document и оставшиеся строки не исключены
+Project Game basic route принят: Native genesis, writing + точный Progress fact,
+completion + Metadata status и связанная account reward проверены через HTTP/
+Chromium/restart; project streak/claim/reward UI совпадает с Native. Счётчик7
+отражает этот пользовательский маршрут, а не полную Game qualification. Account
+UI не принят. Обратный допустимый порядок R-before-G пока не проходит строгую
+последовательную ownerPort coverage; Stage Game HTTP и advanced Game histories
+также не заявлены PASS. Это конкретный остаток existing dependency/source matrix,
+не новый Slice и не разрешение обходить префикс/proofs. Все игровые механики
+остаются обязательной целью полного Web.
+
+Следующая продуктовая задача: **account Game reading**, затем остальные группы
+чтения. Rich Document и оставшиеся строки не исключены
 из этапа 2. После полного чтения следующий продуктовый этап — **3/6, создание,
 редактирование и Web→Server→Desktop**, с проверенным server confirmation,
 собственным echo и обоими направлениями единого sync engine. Полная WORTA Web,

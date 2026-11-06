@@ -1,3 +1,4 @@
+import type { ProjectGameEvent } from '@/cloud/gameCodec'
 import type { ProgressEvent } from '@/cloud/progressCodec'
 import type { AccountMasterKey } from '@/crypto'
 import type { MapEvent } from '@/cloud/mapCodec'
@@ -11,8 +12,8 @@ import { validateStageHead } from './stageRecords'
 import { validateBrowserInboxRecord,type BrowserSyncScope,type BrowserInboxRecord } from './syncDurability'
 import type { BrowserPrefixInventory } from './provenPrefixRecords'
 /** Native content_reference_ready: one authenticated live projection/tip, bounded actual parent coverage. No Stage-order dependency. */
-export async function requireContentStageDependency(scope:BrowserSyncScope,row:Pick<BrowserInboxRecord,'server_sequence'>,content:ContentNoteEvent|DocumentEvent|MapEvent|ProgressEvent,v:BrowserPrefixInventory,amk:AccountMasterKey,current:()=>boolean,metadata:VerifiedMetadataPrefix):Promise<void>{
- const isMap='header' in content&&('map' in content||'entries' in content)
+export async function requireContentStageDependency(scope:BrowserSyncScope,row:Pick<BrowserInboxRecord,'server_sequence'>,content:ContentNoteEvent|DocumentEvent|MapEvent|ProgressEvent|ProjectGameEvent,v:BrowserPrefixInventory,amk:AccountMasterKey,current:()=>boolean,metadata:VerifiedMetadataPrefix):Promise<void>{
+ const isMap='header' in content&&('map' in content||'entries' in content||'action' in content)
  const document='header' in content
  if(!document&&content.event.version!==1)throw new BrowserPersistenceError('unsupported_local_source')
  const note=isMap?content.header:document?content.document:content.event.version===1?content.event.note:null,refs=document?content.header.stage_event_ids:content.dependencies.stage_event_ids

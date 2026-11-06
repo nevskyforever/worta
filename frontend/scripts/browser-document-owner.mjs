@@ -53,7 +53,7 @@ try {
   await page.evaluate(async()=>{
     const req=q=>new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})
     const db=await req(indexedDB.open('worta-web-replay')),saved=[]
-    for(const name of db.objectStoreNames){if(name.startsWith('document')||name.startsWith('map')||name.startsWith('progress'))continue;const tx=db.transaction(name),st=tx.objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return {name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
+    for(const name of db.objectStoreNames){if(name.startsWith('document')||name.startsWith('map')||name.startsWith('progress')||name.startsWith('game'))continue;const tx=db.transaction(name),st=tx.objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return {name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
     db.close();await req(indexedDB.deleteDatabase('worta-web-replay'))
     const q=indexedDB.open('worta-web-replay',6);q.onupgradeneeded=()=>{for(const entry of saved){const st=q.result.createObjectStore(entry.name,{keyPath:entry.keyPath});for(const i of entry.indexes)st.createIndex(i.name,i.keyPath,{unique:i.unique});for(const row of entry.rows)st.put(row)}}
     const old=await req(q);old.close()
@@ -96,7 +96,7 @@ try {
     await store.close()
     const req=q=>new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})
     const db=await req(indexedDB.open('worta-web-replay')),saved=[]
-    for(const name of db.objectStoreNames){if(name.startsWith('map')||name.startsWith('progress'))continue;const tx=db.transaction(name),st=tx.objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return{name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
+    for(const name of db.objectStoreNames){if(name.startsWith('map')||name.startsWith('progress')||name.startsWith('game'))continue;const tx=db.transaction(name),st=tx.objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return{name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
     db.close();await req(indexedDB.deleteDatabase('worta-web-replay'))
     const old=indexedDB.open('worta-web-replay',7);old.onupgradeneeded=()=>{for(const entry of saved){const st=old.result.createObjectStore(entry.name,{keyPath:entry.keyPath});for(const i of entry.indexes)st.createIndex(i.name,i.keyPath,{unique:i.unique});for(const row of entry.rows)st.put(row)}}
     ;(await req(old)).close()

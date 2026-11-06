@@ -1,5 +1,31 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 06.11.2026 — Project Game reader LOCAL COMPLETE (bounded linear route)
+
+Actual Native SQLite → production push → PostgreSQL16/FastAPI → Chromium login/
+unlock/restart accepts project Game capture, writing-linked rewards and completed
+project/reward update. Existing StreakBadge shows canonical streak fields; claim
+and reward history are visible. Values and both encrypted Native projections
+match. Account balances/inventory/etc are distinct and are NOT shown as project
+state. Internal account genesis/reward verification is necessary for the real
+paired feed, not a claim of account Game UI/readiness. No game rules changed.
+
+Replay v10 adds encrypted Game stores, inbox14 source/projection proof, full CAS
+and ownerPort atomic coverage. Preserve original import at an account-wide reward
+boundary; authenticate Metadata completed continuation through its existing owner.
+5 HTTP/Chromium regressions,181 Vitest,15 existing Native Rust,30 help/localization,
+populated v6/v7/v8/v9 migration/reopen/abort checks, typecheck/build/quick PASS.
+
+**7 basic reading groups remain**, Note readiness2/10, stage2/6 and Slice4/5
+PARTIAL. Acceptance uses genuine dependency-first publication. Reverse legal
+account-reward-before-project-source order, Stage Game HTTP variants and advanced
+Game/source/strategy cases are explicitly unqualified, not silently skipped.
+These remain in the existing dependency/feed matrix; full Game is not declared
+ready. Next task is **account Game reading/UI**, followed by remaining reading,
+Web writing and bidirectional sync. All existing game mechanics/full Web remain
+required; ready/declarationAllowed/writerAuthorized false; no browser PUT or ACK.
+
+
 ## 06.11.2026 — Progress/history/statistics LOCAL COMPLETE (linear)
 
 Project and Stage Codec11 complete genesis/append now use the existing recovery,

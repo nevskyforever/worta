@@ -1,3 +1,6 @@
+import type { BrowserProjectGame } from './gameApply'
+import type { ProjectGameEvent } from '@/cloud/gameCodec'
+import type { ProjectGameState } from '@/cloud/gameProjectTransition'
 import { presentProgress, type BrowserProgressView, type ProgressSettings } from './progressView'
 import type { BrowserProjectMap } from './mapApply'
 import type { PortableDocument } from '@/cloud/documentCodec'
@@ -136,7 +139,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
     this.assertWeb()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -165,6 +168,7 @@ export class BrowserCloudAccountSession {
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
       const progressChains = (await storage.authenticateProgress(this.auth, bindings, keys)).filter(value => value.project_id === projectId)
+      const games = (await storage.authenticateGames(this.auth,bindings,keys)).filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
       const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
@@ -180,8 +184,9 @@ export class BrowserCloudAccountSession {
           }, 0) : undefined
           return presentProgress(chain, settings as unknown as ProgressSettings, day, total)
         }),
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps, games,
       }))
+      if (games.some(value => value.event.header.stage_id !== null && !stages.some(stage=>stage.id===value.event.header.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (result.notes.some(note => note.stage_id !== null && !stages.some(stage => stage.id === note.stage_id))
         || result.documents.some(document => document.stage_id !== null && !stages.some(stage => stage.id === document.stage_id))) throw new BrowserCloudReadError('unsupported_history')

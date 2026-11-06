@@ -26,7 +26,7 @@ import {openBrowserCanonicalObject} from './canonicalReaders'
 import {openNoteTransport} from './noteTransport'
 import {bindMixedV10Recovery,bindPostFMetadataRecovery} from './v10MixedRecovery'
 
-type Route='progress'|'map'|'document'|'metadata'|'stage'|'stage_order'|'legacy'|'content'|'content_self_echo'|'resolution'|'continuation'
+type Route='game'|'progress'|'map'|'document'|'metadata'|'stage'|'stage_order'|'legacy'|'content'|'content_self_echo'|'resolution'|'continuation'
 export interface RecoveryBlocker {
  sequence:number;kind:'missing_sequence'|'dependency_unavailable'|'unsupported_route'|'unsupported_generation'|'unresolved_fork'|'unqualified_family'|'budget_exhausted'
  retryable:boolean
@@ -55,7 +55,8 @@ export class BrowserV10Recovery {
   private readonly prefixTransaction?:()=>Promise<BrowserSyncTransaction>,
   private readonly documentOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
   private readonly mapOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
-  private readonly progressOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>}){}
+  private readonly progressOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
+  private readonly gameOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>}){}
  /** Separate dormant manual slice; the historical bind below is unchanged. */
  bindMixedSources(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindMixedV10Recovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  /** Explicit bounded .18 route; historical K/G/Q bindings keep their contracts. */
@@ -89,6 +90,7 @@ export class BrowserV10Recovery {
     const step=async<T>(p:Promise<T>)=>{const result=await p;check();return result}
     const load=()=>step(tx<ResolutionInventorySnapshot>(s,resolutionInventoryStores,'readonly',(tx,result,abort)=>scheduleResolutionInventory(tx,s,live,result,abort)))
     if(this.documentOwner)await step(this.documentOwner.authenticate())
+    if(this.gameOwner)await step(this.gameOwner.authenticate())
     if(this.progressOwner)await step(this.progressOwner.authenticate())
     if(this.mapOwner)await step(this.mapOwner.authenticate())
     const result:V10RecoveryResult={ready:false,declarationAllowed:false,ackAuthorized:false,applied:[],blocker:null,more:false,replayed_events:0,prefix:null,readiness:null}
@@ -99,6 +101,7 @@ export class BrowserV10Recovery {
      // inbox keys/index ownership. Always restart at zero; no caller offset can
      // hide an earlier pending event or persisted gap after a crash.
      const pending=await step(transport.listReceived(s,200)),loaded=await load();v=loaded
+     if(!this.gameOwner&&v.rows.some(r=>(r as {state:string}).state==='game_proven'))fail('unsupported_local_source')
      if(!this.progressOwner&&v.rows.some(r=>(r as {state:string}).state==='progress_proven'))fail('unsupported_local_source')
      if(!this.mapOwner&&v.rows.some(r=>(r as {state:string}).state==='map_proven'))fail('unsupported_local_source')
      if(!this.documentOwner&&v.rows.some(r=>(r as {state:string}).state==='document_proven'))fail('unsupported_local_source')
@@ -127,6 +130,13 @@ export class BrowserV10Recovery {
      const block=(kind:RecoveryBlocker['kind'],retryable=false)=>{result.blocker={sequence:row.server_sequence,kind,retryable}}
      const wire=JSON.parse(row.wire_item),e=wire.event
      const own=e.device_id===s.deviceId
+     if(['project_game','account_game'].includes(e.entity_type)){
+      if(!this.gameOwner||own||hasResolution(v)){block('unsupported_route');break}
+      const outcome=await step(this.gameOwner.apply(row.server_sequence))
+      if(outcome!=='applied')fail('stale_source')
+      result.applied.push({sequence:row.server_sequence,route:'game',status:'applied'})
+      continue
+     }
      if(e.entity_type==='progress'){
       if(!this.progressOwner||own||hasResolution(v)){block('unsupported_route');break}
       const outcome=await step(this.progressOwner.apply(row.server_sequence))

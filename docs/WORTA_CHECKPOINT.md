@@ -1,5 +1,127 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — Project Game Web reading (LOCAL COMPLETE, admitted linear route)
+
+Starting SHA `92c53091d465f2bf528cdcfbb48fe4a1940bf555`, branch6.0;
+initial tree clean. Final SHA is the commit containing this entry; exact hash
+reported in the task result (`git log -1`). Previous checkpoint history and the
+owner's05.11.2026 full-Web/bidirectional-sync requirements are preserved.
+
+**Actual project data versus account data:** Native project Game owner stores
+`streak` (ordered frozen/day history, maximum, freezes, enabled, previous reward/
+loss markers) and `completion_claimed`, with immutable writing/completion reward
+actions linked to exact Progress sources. Coins/XP/level/skills/health/inventory,
+quests/cabinet/rhythm/global streak are account-owned, never invented as project
+balances. The Web project panel uses existing StreakBadge, displays retained
+streak/maximum/freezes, the historical completion-reward claim and immutable
+per-action rewards. The claim label does NOT imply current Metadata status.
+Account UI and other account action families remain the next separate task.
+
+Implemented existing Game owner browser transaction/projection adapter through
+Recovery GET → BrowserV10Recovery → replayStorage.ownerPort. Codec12 project
+complete genesis, linear writing and Native completion are admitted; Crypto/
+Codec13 account genesis and linked reward are necessary internal dependencies
+of the actual paired Native publication. They are cryptographically applied,
+not skipped or assigned fabricated coverage, but no account Game UI/readiness
+is declared. No second sync engine, plaintext fallback or new game mechanics.
+
+`gameProjectTransition` ports the frozen Native `game_sync` effects (including
+stable action tuple IDs, writing reward rounding, project completion claim and
+necessary linked account reward/level effects). No game rules/economy changed.
+Preparation authenticates account/device/scope, original descriptor/ciphertext,
+sequence/revision, bootstrap/import, Metadata/Stage certificates, current owner
+parent, exact introducing Progress append/fact or completion total/status.
+Unique stable action IDs and one current owner head prevent replayed rewards.
+Project source/AAD and account source/AAD remain separate; account projection
+uses actual account envelope2, project projection envelope1. Neither plaintext
+Game state nor AMK is written to IndexedDB. No Game consumer/reward is executed
+on Web read. Cached digest alone never proves source or authorizes projection.
+
+Replay schema **v10** additively adds Game ledger/projection; inbox14 proof binds
+source wire, ledger and encrypted snapshot. Stable Native owner key is retained
+separately from each event-specific entity ID. Full Snapshot/CAS includes Game;
+ownerPort rechecks server anchor/immutable wire and commits source outcome,
+ledger/projection/proof/manifest atomically. On reopening all original frames,
+parent and Progress dependencies, stored proof and encrypted snapshot are
+re-authenticated/recomputed. Old ciphertext/seeds/bindings/other proofs retained.
+
+Two necessary continuation fixes: (1) import high-water is account-wide and can
+end on a proven account Game reward. Replay now recognizes that exact joined
+account owner outcome as retained boundary, retaining original project seed/
+bootstrap and import proof; it never replaces cursor or grants authority from
+an unproven account row. Game source is reauthenticated before use/presentation.
+(2) existing encrypted Metadata continuation is checked for exact linear parent/
+bootstrap/revision/generation and later applied by its real owner. Original
+seed still requires active genesis; an authenticated later completed revision
+is admitted for the Game completion dependency, preserving initial import.
+
+**Real acceptance:** **5 HTTP/Chromium tests PASS in126.82s**: Game plus project/
+Stage Progress and project/Stage Maps. Game: real Native SQLite creation and
+capture, immutable Progress genesis, real manual100 writing action + reward;
+real API push to isolated PostgreSQL16/FastAPI; browser login/passphrase unlock;
+Recovery GET; project Game/Streak/reward UI. Native complete after actual goal100
+then publishes Metadata + completion + paired reward; Web claim becomes checked,
+reward history updates, Progress remains100. History grows7→10 real server
+sequences. Both project AND internal account encrypted projection snapshots
+exactly equal Native SQLite (including completion's actual level/coins effect).
+Checks duplicate delivery without extra actions/claims, full unchanged source
+wire/import/seeds, ACK0, actual Game projection transaction abort/full rollback,
+reopen/retry and final profile restart/complete reauthentication; damaged HTTP
+ciphertext and durable proof refuse display. Original import boundary7 is the
+real account reward, so same-profile extension exercises the fixed boundary.
+Only Native Desktop is registered on server. No browser capability PUT, sync
+device registration or ACK. Native-only synthetic capability PUT uses the
+previously authorized isolated scope and actual supported Native codec12/13.
+
+**Compatibility/checks:**181 focused Vitest PASS (10 files: Game codecs/runtime/
+transitions/preparation, real replay adapter regressions, source seed/receiver,
+Progress/Map/Vue).15 Native Game Rust tests PASS in the existing local test/bridge
+binary; Native source unchanged, no fresh Cargo/cross-platform claim. Typecheck,
+frontend build, maintained quick acceptance and driver/Python syntax PASS.
+30 help/localization PASS; existing help updated/generated in all six languages.
+Project UI claim has explicit six-language labels. Document owner/migration
+regression PASS(1), schema script PASS. Real HTTP regressions migrate populated
+Map v8 and Progress v9 to v10, interrupt versionchange, compare all old rows,
+retry/reopen and reject incompatible older readers. Historical v6/v7 Document
+ciphertext/proofs likewise retained. No backend/protocol/release gate changed.
+
+**Acceptance boundary:** project-scope genesis/writing/completion with dependencies
+published before their dependants. Test publisher uses actual Native pending
+sealed frames and real push API, orders project action before its linked account
+reward, and never fabricates/rewrites server sequence. Default Native pending
+order can also produce the REVERSE legitimate order. Browser sequential
+ownerPort coverage currently cannot apply a later Game source ahead of earlier
+account reward; that order is NOT accepted and fails closed. It is a concrete
+remaining dependency/ordinary-feed qualification case, not PASS. Likewise no
+Game conflict/resolution, adopt_local/compensation, Stage Game HTTP qualification,
+account inventory/global-loss/other action or nondefault deferred Native legacy
+family acceptance is claimed. Typed initial streak fields are preserved, not
+advanced by inventing unsupported actions; full Game mechanics remain mandatory.
+
+Readiness stays **2/10**, stage **2/6**, Slice **4/5 PARTIAL**. **7 basic reading
+groups remain**, after accepting the bounded project Game user route. This
+counter does not close full Game/source/strategy qualification: remaining groups
+are Stage deletion; rich/late/delete/Resolution Document; other Map histories;
+Note properties; account Game; catalog; encrypted covers. Existing cross-cutting
+mixed/full source matrix includes the reverse Game pair order and Stage variants;
+own P2 prefix/continuation, dependency closure, eligible ordinary two-recipient
+feed/gates/capability lifecycle and >200-event qualification remain. No ACK or
+ordinary proven_prefix permission follows from local Game applied coverage.
+
+Security: `ready=false`, `declarationAllowed=false`, `writerAuthorized=false`.
+No main/VPS/deployment/public registration/real user data/worktree/CI changes.
+Task-owned PostgreSQL is stopped after checks; unrelated Docker data untouched.
+Accepted code/tests/help/docs committed and pushed without force to origin/6.0;
+final working tree checked clean. CI neither manually started nor polled.
+
+**Next concrete task:** account Game reading/UI through this same owner adapter,
+starting with authenticated existing account state and its supported Native
+inventory/other actions; retain explicit reverse-order dependency limitation
+until it is implemented/qualified. Then remaining reading, Web editing and
+bidirectional sync. Full ordinary/game Web, all existing mechanics, one engine,
+maximum reuse, simple safe implementation and extensibility remain required.
+
+
 ## 2026-11-06 — Web Progress/history/statistics (LOCAL COMPLETE, linear histories)
 
 Starting SHA `67aa288445d32acfa722062d2b0f22ffdadba225`, branch `6.0`; initial

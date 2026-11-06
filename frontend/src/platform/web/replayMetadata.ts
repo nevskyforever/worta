@@ -1,3 +1,4 @@
+import { authenticateReplayGames } from './gameApply'
 import { authenticateReplayProgress } from './progressApply'
 import { authenticateReplayMaps } from './mapApply'
 import { authenticateReplayDocuments } from './documentApply'
@@ -163,8 +164,10 @@ export async function reauthenticateReplayOwners(scope: BrowserSyncScope, snapsh
     certificates.set('stage_proven', stageSequences(await prepareStagePrefix(scope, inventory, amk, current, meta, true), scope, inventory))
     certificates.set('stage_order_proven', stageOrderSequences(await prepareStageOrderPrefix(scope, inventory, amk, current, meta, true), scope, inventory))
   }
+  await authenticateReplayGames(scope, snapshot, amk, current)
   await authenticateReplayProgress(scope, snapshot, amk, current)
   await authenticateReplayMaps(scope, snapshot, amk, current)
+  certificates.set('game_proven', new Set(snapshot.rows.filter(row => row.state === 'game_proven').map(row => row.server_sequence)))
   certificates.set('progress_proven', new Set(snapshot.rows.filter(row => row.state === 'progress_proven').map(row => row.server_sequence)))
   certificates.set('map_proven', new Set(snapshot.rows.filter(row => row.state === 'map_proven').map(row => row.server_sequence)))
   await authenticateReplayDocuments(scope, snapshot, amk, current)
