@@ -16710,3 +16710,15 @@ Tests:
 - Targeted loss tests: 10 passed.
 
 Final SHA: e09584bdde77a61703d72879c20e4b82d07d9e31
+
+
+## Web global streak/freeze partial acceptance — OpenCode
+
+Starting/Final SHA `016b795b6b29ca53bff9629d6c70b85c729a9bea`.
+No source code changes were made in this Web task; Web UI already exposes global streak and freezes.
+
+Frontend acceptance: 866 passed, 2 skipped, 1 pre-existing unrelated failure in stageOrderApply.spec.ts.
+Backend acceptance: 288 passed, 7 failed in metadata/replay PostgreSQL tests (environment/Chromium-harness related, not global streak).
+Full HTTP/Chromium global streak growth/freeze end-to-end acceptance was not completed in this run.
+
+Status: PARTIAL.
