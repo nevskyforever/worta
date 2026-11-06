@@ -1,3 +1,4 @@
+import { requireContentStageDependency } from './contentStageDependency'
 import type { AccountMasterKey } from '@/crypto'
 import type { MapEvent } from '@/cloud/mapCodec'
 import { decodeBase64Url } from '@/api/base64url'
@@ -42,7 +43,6 @@ export async function prepareMapEvent(scope: BrowserSyncScope, input: MapGenesis
   if (h.account_id !== scope.canonicalUserId || h.device_id !== descriptor.device_id || h.project_id !== descriptor.project_id
     || h.entity_id !== descriptor.entity_id || h.event_id !== descriptor.event_id || h.revision !== descriptor.revision
     || h.updated_at !== canonicalizeSyncTimestamp(descriptor.updated_at) || !['create', 'update'].includes(h.operation) || h.generation !== h.revision
-    || h.stage_id !== null || h.stage_event_ids.length !== 0 || h.entity_id !== 'project-map'
     || event.mutation !== 'upsert' || !event.map) reject()
   const binding = inventory.bindings.map(value => validateBrowserProjectBinding(value, scope)).find(value => value.project_id === h.project_id)
   if (!binding || binding.mode !== 'import_remote' || binding.phase !== 'captured' || binding.remote_state !== 'active' || binding.bootstrap_id !== h.bootstrap_id) reject()
@@ -55,6 +55,7 @@ export async function prepareMapEvent(scope: BrowserSyncScope, input: MapGenesis
   if (!reference || head.bootstrap_id !== h.bootstrap_id || reference.operation === 'delete' || reference.server_sequence >= input.server_sequence
     || !verified.has(reference.server_sequence) || head.tip_event_ids.length !== 1
     || head.history.find(value => value.event_id === head.tip_event_ids[0])?.operation === 'delete') reject()
+  await requireContentStageDependency(scope, input, event, dependencies, amk, current, certificate)
   // Native parent_revision + full current-tip rule, restricted to a linear
   // peer chain. Parent source is freshly decrypted, not inferred from its ID.
   const prior = inventory.rows.filter(value => {

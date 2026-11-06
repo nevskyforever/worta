@@ -112,11 +112,11 @@ export async function authenticateReplayMaps(scope: BrowserSyncScope,
       || await mapDigest(joined.projection) !== row.map_proof.projection_digest) fail()
     const token = await prepareMapEvent(scope, row, inventory, amk, current, verified)
     const map = await authenticateMapProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
-    if (snapshot.maps?.projections.some(value => (value as MapProjection).head_event_id === row.event_id)) maps.push({ project_id: JSON.parse(row.wire_item).event.project_id, event_id: row.event_id, ...map })
+    if (snapshot.maps?.projections.some(value => (value as MapProjection).head_event_id === row.event_id)) maps.push({ project_id: JSON.parse(row.wire_item).event.project_id, event_id: row.event_id, stage_id: inspectPreparedMapEvent(token, scope, inventory).event.header.stage_id, ...map })
   }
   if (!current()) throw new BrowserPersistenceError('closed')
   return maps
 }
 
-export interface BrowserProjectMap { project_id: string; event_id: string; data: Record<string, unknown>; annotations: Record<string, unknown> }
+export interface BrowserProjectMap { project_id: string; event_id: string; stage_id: string | null; data: Record<string, unknown>; annotations: Record<string, unknown> }
 export const commitMapGenesis = commitMapEvent

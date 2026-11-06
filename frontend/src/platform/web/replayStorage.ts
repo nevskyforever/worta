@@ -495,7 +495,7 @@ class BrowserReplayStorage {
         const noteId = (value as { note_id: string }).note_id
         if (expected.notes?.some(note => note.note_id === noteId)
           || existing.some(map => Object.entries(map.annotations).some(([oldNode, annotation]) =>
-            (annotation as { note_id: string }).note_id === noteId && (map.project_id !== plan.event.header.project_id || oldNode !== node))))
+            (annotation as { note_id: string }).note_id === noteId && (map.project_id !== plan.event.header.project_id || map.stage_id !== plan.event.header.stage_id || oldNode !== node))))
           throw new BrowserPersistenceError('unsupported_local_source')
       }
       return commitMapEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,

@@ -1,5 +1,113 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — Stage Map reading/update (LOCAL COMPLETE)
+
+Starting SHA `b1967b326008605108c7ff7ae72b8b630486f83c`, branch6.0.
+Final SHA is the commit containing this entry, reported exactly in the result.
+Preserved all uncommitted Stage Map changes from the previous partial pass.
+Stage2/6 and Slice4/5 remain PARTIAL; this Stage Map function is locally accepted.
+
+The existing Map owner now authenticates Stage dependency using the SAME
+requireContentStageDependency certificate/coverage checks as Content and Document,
+matching Native map_codec::dependencies_ready → stage_sync::content_reference_ready.
+Codec9 validates the SHA256-derived Stage Map entity ID; each linear successor
+retains its project/entity/Stage/bootstrap identity and genuine parent chain.
+No new owner/engine/store/schema/proof format. Existing v8 ledger/projection/proof
+and manifest stay atomic under ownerPort CAS. Map views expose the authenticated
+stage_id. Note identity collision checks distinguish Stage as well as project.
+Vue selects only the current Stage's map using the same secure read-only editor;
+verified annotation title/tags/checklist are displayed as escaped user text.
+The selected Stage is retained by the existing scoped UI preference, revalidated
+against Stage/StageOrder on reopening. Session presentation rejects unknown Stage
+membership. Original encrypted source/import/proofs remain unchanged.
+
+Actual Native SQLite → production push → isolated PostgreSQL16/FastAPI → real
+Recovery GET → Chromium login/unlock: **2 PASS in35.96s**, project regression and
+Stage scenario. Native creates S2/S1 and authentic StageOrder, then S1 Map with
+nonempty annotation title/tags/checklist via the Native owning Note writer.
+S1 displays its Map; S2 displays no Map. Native revision2 updates the same Map;
+annotations and exact Native SQLite projection match browser encrypted projection.
+Redelivery, original wire, original source seed/import binding, one current Map,
+real projection transaction abort/full rollback, safe retry after profile reopen,
+final restart/reauthentication and Stage selection preservation pass. Corrupted
+ciphertext and durable Map proof refuse display; Stage scenario additionally
+corrupts the genuine S1 Stage proof, refuses display, restores it and reauthenticates
+without changed state. ACK remains0; only the Native Desktop device exists on
+server. Browser capability PUT and registration/ACK requests are monitored absent.
+Synthetic Native capabilities retain the prior owner-approved isolated scope.
+
+Focused Vitest: **88 PASS** (Map/Document preparation, Content Stage and Vue).
+Includes missing Stage authority and damaged Stage proof refusal without writes.
+Typecheck, frontend build, driver/Python syntax and quick acceptance PASS.
+Help/localization: **30 PASS**; Map reading help updated and generated for all
+six languages with TLS verification using the system CA bundle. Native source
+unchanged, no separate Rust/Cargo run required. No large previous batch rerun.
+
+Progress: **2/10 Note readiness criteria closed**, unchanged. These are not a
+Web feature counter. The previous audit's **9 functional groups remain9**: Stage
+Map is now completed inside group3, but that SAME group's previously listed
+Map delete/Resolution histories remain open. No new group or technical Slice was
+added. Other remaining groups: Stage deletion; complete Document presentation/
+late genesis/delete/Resolution; Note properties; Progress/history/stats; project
+Game; account Game; canonical catalog; encrypted covers. Mixed-history/two-project
+reading and the current200-event bound remain cross-cutting limitations.
+Slice4 still lacks the full strategy/source matrix, own P2 prefix/continuation,
+dependency closure and eligible ordinary two-recipient feed/gate lifecycle.
+
+Next concrete task: **Web Progress/history/statistics** through the existing
+Native owner/recovery/UI; Progress implementation was not started in this pass.
+Then project Game and account Game reading with ALL existing mechanics, remaining
+reading groups, Web editing and bidirectional sync. Full Web, ordinary/game
+projects, one engine, code reuse and pragmatic extensibility remain mandatory.
+
+Security gates remain ready=false, declarationAllowed=false, writerAuthorized=false.
+No main/VPS/deployment/registration/CI/worktree changes; no real user data.
+Task-owned PostgreSQL stopped after testing. All accepted previous/new changes,
+help, tests and documentation committed/pushed to origin/6.0 without force;
+final working tree checked clean. CI neither manually started nor polled.
+The older PARTIAL entry below is preserved as history and superseded by this one.
+
+
+## 2026-11-06 — Stage Map recovery (PARTIAL)
+
+Starting/HEAD `b1967b326008605108c7ff7ae72b8b630486f83c`, branch 6.0;
+initial tree clean. No commit/push. Stage 2/6, Slice 4/5 PARTIAL.
+
+Uncommitted implementation extends the existing Map preparation to authenticate
+Stage references through `requireContentStageDependency`, using genuine Metadata
+and Stage certificates. Map inbox accepts the codec-validated Stage entity ID;
+existing Map ledger/projection/CAS remains in use. The authenticated Map view
+carries stage_id; Vue selects the map for the selected Stage. The Native derived
+Note collision guard now distinguishes project and Stage scope. This is NOT yet
+accepted as a complete production Stage Map feature.
+
+Focused Vitest: 16 passed (Map preparation, Document preparation and Vue reader),
+including Stage proof success and missing/damaged Stage proof refusal. Typecheck,
+frontend build and quick acceptance passed. Rust not run: Native code unchanged.
+Actual Native SQLite → PostgreSQL/FastAPI → Chromium Stage Map, update, annotated
+projection, cross-Stage isolation, IndexedDB reopen and rollback are NOT RUN.
+The UI has not been accepted through the real Stage history. The existing project
+Map HTTP regression was not rerun. No blocker was closed; readiness stays 2/10.
+
+Important next step: extend `tests/test_web_map_http.py` and its Chromium driver
+using the actual two-Stage fixture from `tests/test_web_document_http.py`, create
+and publish an annotated S1 Map through Native Map writer, confirm its Stage
+proof, verify S2 isolation and S1 update/reopen, plus corrupt-proof and rollback.
+Fix any integration errors before claiming PASS; run the requested tests and only
+then commit/push. In particular verify selection when the project has only a
+Stage Map, and annotation identity collisions between scopes. Do not represent
+this owner-level test as HTTP or full browser acceptance.
+
+Dirty files: BrowserCloudProjectRead.vue and its spec, contentStageDependency.ts,
+mapApply.ts, mapPrepare.ts and its spec, mapRecords.ts, replayStorage.ts, this
+checkpoint and roadmap. All changes are preserved. No CI, VPS, main, extra worktree,
+registration or browser capability PUT. Gates remain ready=false,
+declarationAllowed=false, writerAuthorized=false; no ACK has been issued by
+these tests. Nine reading groups remain, because Stage Map is not yet accepted.
+Full Web, ordinary/game projects, all game mechanics, Web editing, two-way sync,
+one engine and pragmatic reuse remain mandatory owner requirements.
+
+
 ## 2026-11-06 — Project Map Web reader + ревизия прогресса (LOCAL COMPLETE)
 
 Starting SHA `01bedc8b1f77ac25c284d61ae3763832d1fddb40`, branch `6.0`, исходное

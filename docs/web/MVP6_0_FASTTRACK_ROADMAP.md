@@ -1,5 +1,35 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 06.11.2026 — Stage Map LOCAL COMPLETE
+
+Native Stage Map genesis + annotations + Desktop update → PostgreSQL16/FastAPI →
+Chromium/Vue/restart accepted. S1 Map is absent in S2; Stage/Map proofs, ciphertext,
+CAS/rollback and retained Stage selection are checked. The existing project Map
+regression passes. One Map owner/engine and v8 schema serve both scopes.
+
+Stage Map is complete. **9 remaining groups** from the audit remain9 because
+Map group3 also included delete/Resolution before this task; only that remainder
+is still open. This is an explicit recount, not an added requirement or a claim
+that Stage Map did not progress. See updated audit row3. Readiness2/10 measures
+full Note claim separately; stage2/6, Slice4/5 remain PARTIAL.
+
+Next user result: **Progress/history/statistics in Web**. Following priorities:
+project Game, account Game, all existing game mechanics, remaining reading,
+Web editing and bidirectional unified sync. Full product scope and all false
+security gates remain unchanged. No new technical sub-stage, writer grant,
+browser capability declaration, ACK or public launch is implied.
+
+## 06.11.2026 — Stage Map (PARTIAL, не принято)
+
+Расширены существующие Map preparation и Vue для Stage scope с проверкой Stage
+proof. 16 профильных Vitest, typecheck, build и quick acceptance прошли.
+Настоящие Native SQLite → PostgreSQL/FastAPI → Chromium, update, переключение
+Stage, annotations, restart и rollback ещё не проверены. Следующая задача —
+завершить именно этот сквозной сценарий и устранить обнаруженные ошибки.
+Число оставшихся функциональных групп чтения остаётся **9**, readiness — **2/10**;
+этап 2/6 и Slice 4/5 PARTIAL. Все требования полного Web и игрового режима,
+двусторонняя синхронизация и security gates сохранены.
+
 ## 06.11.2026 — Project Map reader и актуальная матрица прогресса
 
 **Project Map create/одна Desktop update → HTTP → Vue → restart: LOCAL COMPLETE.**

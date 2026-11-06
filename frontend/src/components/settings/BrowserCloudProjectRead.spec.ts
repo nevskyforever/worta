@@ -159,7 +159,7 @@ it('opens a verified project Map in secure read-only mode even when Stages exist
   const session = { status: 'unlocked', onRevoked: (callback: () => void) => { revoke = callback; return () => {} },
     readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
     readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [{ id: 's', name: 'Stage' }], notes: [], documents: [],
-      maps: [{ project_id: 'project', event_id: 'event', data: { nodeData: { id: 'root', topic: 'Verified map', children: [] } }, annotations: {} }] }),
+      maps: [{ project_id: 'project', event_id: 'event', stage_id: null, data: { nodeData: { id: 'root', topic: 'Verified map', children: [] } }, annotations: {} }] }),
   } as unknown as BrowserCloudAccountSession
   const mapRenderer = defineComponent({ props: { map: { type: Object, required: true }, secureReadOnly: Boolean, persist: Function, importXMind: Function },
     template: '<div data-testid="map-renderer">{{ map.data.nodeData.topic }}</div>' })

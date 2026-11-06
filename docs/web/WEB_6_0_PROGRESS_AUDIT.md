@@ -81,7 +81,7 @@ Slice 5 не заявляются. Технические Slice и шесть п
 | --- | --- | --- |
 | 1 | Оставшиеся изменения структуры | Удаление Stage через Native owner корректно убирает этап в Web; выбор и зависимые данные сохраняют действующий контракт. CREATE/rename/order уже приняты. |
 | 2 | Полное представление Document | Форматирование действующего Tiptap JSON видно в Web; поздний новый Document после unlock и допустимые delete/Resolution histories применяются owner, а не блокируют проект. Текущий continuation preflight требует revision≥2, поэтому поздний genesis также остаётся конкретным пробелом. Plain text/create/linear updates обоих scopes уже приняты. |
-| 3 | Оставшиеся Map histories | Stage Map открывается с настоящей Stage dependency; delete/Resolution Native Map обновляет проверенное представление. Project create/one linear update принят здесь. |
+| 3 | Оставшиеся Map histories | Stage Map create/update, annotations, Stage proof и restart теперь приняты вместе с project Map. Остаются ранее перечисленные delete/Resolution Native Map histories; группа пока не закрыта. |
 | 4 | Свойства и связи Notes | Проверенные checklist/tags/annotations и Map-derived Notes доступны пользователю. Сейчас основной recovery UI показывает заголовок и body. |
 | 5 | Прогресс, история и статистика | Codec11/Progress owner подключён к реальному чтению и существующим панелям; новая запись Desktop обновляет данные и производные показатели. |
 | 6 | Состояние игры проекта | Project Game owner отдаёт UI все существующие механики/состояния проекта, без потери их данных после update/reopen. Это обязательный продуктовый scope. |

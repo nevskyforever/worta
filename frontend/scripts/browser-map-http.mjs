@@ -8,7 +8,8 @@ const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const backend = process.argv[3], profile = process.argv[4]
 let vite, context
 const forbidden = [], recovery = []
-let fault = false
+let fault = false, selectedStage = false
+const initialCursor=fixture.items.length
 try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } }); await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
@@ -64,6 +65,15 @@ try {
   }
   const read = async (panel, expected) => {
     await panel.locator('[data-testid="cloud-notes-open"]').click()
+    if(fixture.stageId){
+      await panel.locator('[data-testid="cloud-stage-list"]').waitFor()
+      if(!selectedStage){
+        await panel.locator('[data-stage-id="S2"]').click()
+        assert.equal(await panel.locator('[data-testid="cloud-map-read"]').count(),0)
+        await panel.locator('[data-stage-id="S1"]').click();selectedStage=true
+      }
+      assert.equal(await panel.locator('[data-stage-id="S1"]').getAttribute('aria-pressed'),'true')
+    }
     await Promise.race([
       panel.locator('[data-testid="cloud-map-read"]').waitFor(),
       panel.locator('[role="alert"]').waitFor().then(async()=>{throw Error('map recovery refused: '+await panel.locator('[role="alert"]').getAttribute('data-read-code'))}),
@@ -71,6 +81,7 @@ try {
     const frame=panel.frameLocator('[data-testid="cloud-map-read"] iframe')
     await frame.getByText(expected.data.nodeData.topic,{exact:true}).waitFor()
     assert.equal(await frame.locator('[contenteditable="true"]').count(),0)
+    for(const annotation of Object.values(expected.annotations)) assert.ok((await panel.locator('[data-testid="cloud-map-annotations"]').textContent()).includes(annotation.title))
   }
   const snapshot = page => page.evaluate(async () => {
     const q = indexedDB.open('worta-web-replay', 8)
@@ -84,8 +95,8 @@ try {
   let panel=await loginAndOpen(page);await read(panel,fixture.map)
   const first=await snapshot(page)
   assert.deepEqual(first.inbox.map(row=>JSON.parse(row.wire_item)),fixture.items)
-  assert.equal(first.inbox[1].state,'map_proven');assert.equal(first.mapLedger.length,1);assert.equal(first.mapProjection.length,1)
-  assert.equal(first.replayManifest[0].applied_cursor,2);assert.equal(first.cursors[0].ack_cursor,0)
+  assert.equal(first.inbox[initialCursor-1].state,'map_proven');assert.equal(first.mapLedger.length,1);assert.equal(first.mapProjection.length,1)
+  assert.equal(first.replayManifest[0].applied_cursor,initialCursor);assert.equal(first.cursors[0].ack_cursor,0)
   assert.ok(!JSON.stringify(first).includes(fixture.map.data.nodeData.topic))
   await read(panel,fixture.map);assert.deepEqual(await snapshot(page),first)
   const input=createInterface({input:process.stdin}),updateLine=new Promise(ok=>input.once('line',ok))
@@ -101,18 +112,18 @@ try {
       return add.call(this,value,...args)
     }
     IDBObjectStore.prototype.put=function(value,...args){const r=put.call(this,value,...args);if(this.name==='mapProjection'&&value.head_event_id===eventId){window.mapAborted=true;r.addEventListener('success',()=>this.transaction.abort(),{once:true})}return r}
-  },update.items[2].event.event_id)
+  },update.items[initialCursor].event.event_id)
   await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
   const abort=await page.evaluate(()=>{IDBObjectStore.prototype.add=window.mapAdd;IDBObjectStore.prototype.put=window.mapPut;return {fired:window.mapAborted,before:window.mapBefore}})
   assert.equal(abort.fired,true);assert.deepEqual(await snapshot(page),abort.before)
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.map)
   const accepted=await snapshot(page)
   assert.deepEqual(accepted.inbox.map(row=>JSON.parse(row.wire_item)),update.items)
-  assert.equal(accepted.inbox[2].state,'map_proven');assert.equal(accepted.mapLedger.length,2);assert.equal(accepted.mapProjection.length,1)
+  assert.equal(accepted.inbox[initialCursor].state,'map_proven');assert.equal(accepted.mapLedger.length,2);assert.equal(accepted.mapProjection.length,1)
   assert.deepEqual(accepted.replayManifest[0].source_seeds,first.replayManifest[0].source_seeds)
   assert.deepEqual(accepted.projectBindings,first.projectBindings)
-  assert.deepEqual(accepted.mapLedger.find(row=>row.event_id===update.items[2].event.event_id).previous_projection,first.mapProjection[0])
-  assert.equal(accepted.cursors[0].ack_cursor,0);assert.equal(accepted.replayManifest[0].applied_cursor,3)
+  assert.deepEqual(accepted.mapLedger.find(row=>row.event_id===update.items[initialCursor].event.event_id).previous_projection,first.mapProjection[0])
+  assert.equal(accepted.cursors[0].ack_cursor,0);assert.equal(accepted.replayManifest[0].applied_cursor,initialCursor+1)
   // Independent test assertion compares the encrypted persisted snapshot with
   // the Native owner snapshot; this key is never injected into project opening.
   const projection=await page.evaluate(async({row,key})=>{
@@ -129,6 +140,14 @@ try {
   await read(panel,update.map);assert.deepEqual(await snapshot(page),accepted)
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.map)
   assert.deepEqual(await snapshot(page),accepted)
+  if(fixture.stageId){
+    const stage=accepted.inbox.find(row=>row.state==='stage_proven'&&JSON.parse(row.wire_item).event.entity_id==='S1')
+    const replace=async row=>page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay',8),db=await new Promise(ok=>q.onsuccess=()=>ok(q.result));await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},row)
+    const bad=structuredClone(stage);bad.stage_proof.wire_digest='0'.repeat(64);await replace(bad)
+    await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
+    assert.equal(await panel.locator('[data-testid="cloud-map-read"]').count(),0)
+    await replace(stage);await read(panel,update.map);assert.deepEqual(await snapshot(page),accepted)
+  }
   await page.evaluate(async()=>{
     const q=indexedDB.open('worta-web-replay',8),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='map_proven');row.map_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()

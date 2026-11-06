@@ -74,9 +74,11 @@ function documentText(node: Record<string, unknown>): string {
 }
 const selectedDocument = ref<string | null>(null)
 const stageDocuments = computed(() => recovery.value?.documents?.filter(document => document.stage_id === selectedStage.value) ?? [])
+const selectedMap = computed(() => recovery.value?.maps?.find(map => map.project_id === props.projectId && map.stage_id === selectedStage.value))
+const mapAnnotations = computed(() => Object.entries(selectedMap.value?.annotations ?? {}).map(([node, value]) => ({ node, ...(value as { title: string; tags: string[]; checklist: { id: string; text: string; checked: boolean }[] }) })))
 const projectMap = computed<MindMapResponse | null>(() => {
-  const value = selectedStage.value === null && recovery.value?.maps?.find(map => map.project_id === props.projectId)
-  return value ? { project_id: props.projectId, stage_id: null, name: recovery.value!.project.name, data: value.data as JsonObject,
+  const value = selectedMap.value
+  return value ? { project_id: props.projectId, stage_id: selectedStage.value, name: recovery.value!.project.name, data: value.data as JsonObject,
     combined: false, read_only: true, has_empty_completed_stage_map: false } : null
 })
 const refuseMapWrite = async (): Promise<never> => { throw new Error('read_only') }
@@ -136,7 +138,7 @@ async function openRecovery(): Promise<void> {
       recovery.value = value
       const remembered = hadRecovery ? priorSelection : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
-        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId) ? null : value.stages[0]?.id ?? null
+        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
       selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
       rememberStage()
     }
@@ -180,7 +182,11 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
       </section>
       <section v-if="projectMap" data-testid="cloud-map-read">
         <h4>{{ t('Карта') }}</h4>
-        <MindMapEditor :key="recovery.maps?.[0]?.event_id" :map="projectMap" secure-read-only :persist="refuseMapWrite" :import-x-mind="refuseMapWrite" />
+        <MindMapEditor :key="recovery.maps?.find(map => map.stage_id === selectedStage)?.event_id" :map="projectMap" secure-read-only :persist="refuseMapWrite" :import-x-mind="refuseMapWrite" />
+        <ul data-testid="cloud-map-annotations"><li v-for="annotation in mapAnnotations" :key="annotation.node">
+          <strong>{{ annotation.title }}</strong><span v-for="tag in annotation.tags" :key="tag"> {{ tag }}</span>
+          <ul><li v-for="item in annotation.checklist" :key="item.id">{{ item.checked ? '☑' : '☐' }} {{ item.text }}</li></ul>
+        </li></ul>
       </section>
       <h4>{{ recoveryLabels[locale.language].heading }}</h4>
       <section v-for="note in recovery.notes.filter(note => note.stage_id === selectedStage)" :key="note.id">

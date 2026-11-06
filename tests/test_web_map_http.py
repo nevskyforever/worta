@@ -26,7 +26,8 @@ from nfprogress.core.sqlite.connection import register_remote_apply_authorizatio
 from test_cloud_c18_map_acceptance import maps, change, emit as emit_map, receive as receive_map
 from test_cloud_c18_map_gate import map_capabilities
 
-def test_native_project_map_http_read_update_restart(cloud_client, tmp_path):
+@pytest.mark.parametrize("stage_scoped", [False, True], ids=["project", "stage"])
+def test_native_project_map_http_read_update_restart(cloud_client, tmp_path, stage_scoped):
     client, engine = cloud_client
     user = str(create_user(engine))
     token = login(client).json()['access_token']
@@ -57,9 +58,29 @@ def test_native_project_map_http_read_update_restart(cloud_client, tmp_path):
     assert client.put('/api/v3/sync/encrypted/note-reader-capabilities', headers=headers,
                       json=capabilities(device)).status_code == 204
     assert client.put('/api/v3/sync/encrypted/map-reader-capabilities', headers=headers, json=map_capabilities(device)).status_code == 204
+    stage_id = 'S1' if stage_scoped else None
+    cursor = 5 if stage_scoped else 2
+    if stage_scoped:
+        from test_cloud_c18_structural_cross_runtime import structural
+        from test_cloud_c18_structural_integration import publish_pending, pull_structure
+        stage = json.loads((ROOT / 'frontend/src/cloud/__fixtures__/stageCodecV1.json').read_text())['event']['stage']
+        with sqlite3.connect(db) as connection:
+            register_remote_apply_authorization_guard(connection)
+            for position, sid in enumerate(('S2', 'S1')):
+                details = dict(stage, name=f'Stage {sid}', work_method='app')
+                connection.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)', (sid, PROJECT_ID, details['name'], details['goal'], int(details['infinite']), details['unit'], details['status'], details['created_at'], json.dumps(details)))
+                connection.execute('INSERT INTO stage_order VALUES(?,?,?)', (sid, PROJECT_ID, position))
+        structural(tmp_path, db, identity, user, 'begin')
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, key)) == 2
+        pull_structure(client, tmp_path, token, db, identity, user, key)
+        assert len(publish_pending(client, tmp_path, token, db, identity, user, key)) == 1
+        pull_structure(client, tmp_path, token, db, identity, user, key)
     data = json.loads((ROOT / 'frontend/src/cloud/__fixtures__/mapCodecV1.json').read_text())['examples'][2]['event']['map']['data']
     data['nodeData']['topic'] = 'Проектная карта Native'
-    assert change(tmp_path, db, identity, user, None, data) is True
+    assert change(tmp_path, db, identity, user, stage_id, data) is True
+    with sqlite3.connect(db) as connection:
+        note_id = connection.execute("SELECT id FROM notes WHERE stage_id IS ? AND json_extract(payload_json,'$.source_type')='mindmap'", (stage_id,)).fetchone()[0]
+    maps(tmp_path, db, identity, user, 'note_edit', note_id=note_id, patch={'title': 'Проверенная аннотация карты', 'tags': ['map-tag'], 'checklist': [{'id': 'check', 'text': 'Проверенная задача', 'checked': True}]})
     maps(tmp_path, db, identity, user, 'begin')
     pending = maps(tmp_path, db, identity, user, 'pending')
     assert len(pending) == 1 and pending[0]['event']['header']['operation'] == 'create'
@@ -68,21 +89,21 @@ def test_native_project_map_http_read_update_restart(cloud_client, tmp_path):
     sent = emit_map(client, tmp_path, token, db, identity, user, key)
     assert receive_map(client, tmp_path, token, db, identity, user, key) == ['applied']
     with sqlite3.connect(db) as connection:
-        assert json.loads(connection.execute("SELECT snapshot_json FROM cloud_map_projection WHERE entity_id='project-map'").fetchone()[0]) == expected
+        assert json.loads(connection.execute("SELECT snapshot_json FROM cloud_map_projection WHERE project_id='project-1'").fetchone()[0]) == expected
     def history(cursor):
         response = client.get('/api/v3/recovery/encrypted/history', headers=headers,
             params={'since': 0, 'limit': 100, 'expected_cursor': cursor, 'expected_epoch': 2})
         assert response.status_code == 200, response.text
         return response.json()['items']
-    items = history(2)
+    items = history(cursor)
     assert items[-1]['object'] == sent[0]['items'][0]['object']
     assert client.get('/api/v3/recovery/encrypted/history').status_code == 401
     create_user(engine, username='Foreign', email='foreign-map@example.test')
     foreign = login(client, username='Foreign').json()['access_token']
-    denied = client.get('/api/v3/recovery/encrypted/history', headers=_headers(foreign), params={'since': 0, 'limit': 100, 'expected_cursor': 2, 'expected_epoch': 2})
+    denied = client.get('/api/v3/recovery/encrypted/history', headers=_headers(foreign), params={'since': 0, 'limit': 100, 'expected_cursor': cursor, 'expected_epoch': 2})
     assert denied.status_code == 409
     fixture = tmp_path / 'map-http.json'
-    fixture.write_text(json.dumps({'key': key, 'project': PROJECT_ID, 'map': expected, 'items': items}))
+    fixture.write_text(json.dumps({'key': key, 'project': PROJECT_ID, 'map': expected, 'items': items, 'stageId': stage_id}))
     fixture.chmod(0o600)
     api_socket = socket.socket(); api_socket.bind(('127.0.0.1', 0)); port = api_socket.getsockname()[1]
     server = uvicorn.Server(uvicorn.Config(client.app, lifespan='off', access_log=False, log_level='warning'))
@@ -97,7 +118,7 @@ def test_native_project_map_http_read_update_restart(cloud_client, tmp_path):
                 stdout, stderr = process.communicate(timeout=10); raise AssertionError(stdout + stderr)
             assert json.loads(line)['phase'] == 'ready_for_update', line
             updated = json.loads(json.dumps(data)); updated['nodeData']['topic'] = 'Обновлённая карта Desktop'
-            assert change(tmp_path, db, identity, user, None, updated) is True
+            assert change(tmp_path, db, identity, user, stage_id, updated) is True
             pending = maps(tmp_path, db, identity, user, 'pending')
             assert len(pending) == 1 and pending[0]['event']['header']['revision'] == 2
             assert pending[0]['event']['header']['parents'] == [items[-1]['event']['event_id']]
@@ -105,8 +126,8 @@ def test_native_project_map_http_read_update_restart(cloud_client, tmp_path):
             sent_update = emit_map(client, tmp_path, token, db, identity, user, key)
             assert receive_map(client, tmp_path, token, db, identity, user, key) == ['applied']
             with sqlite3.connect(db) as connection:
-                assert json.loads(connection.execute("SELECT snapshot_json FROM cloud_map_projection WHERE entity_id='project-map'").fetchone()[0]) == expected_update
-            latest = history(3); assert latest[:2] == items
+                assert json.loads(connection.execute("SELECT snapshot_json FROM cloud_map_projection WHERE project_id='project-1'").fetchone()[0]) == expected_update
+            latest = history(cursor + 1); assert latest[:cursor] == items
             assert latest[-1]['object'] == sent_update[0]['items'][0]['object']
             stdout, stderr = process.communicate(json.dumps({'items': latest, 'map': expected_update}) + '\n', timeout=180)
             assert process.returncode == 0, stdout + stderr

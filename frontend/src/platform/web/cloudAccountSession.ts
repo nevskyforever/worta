@@ -168,6 +168,7 @@ export class BrowserCloudAccountSession {
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
         project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps,
       }))
+      if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (result.notes.some(note => note.stage_id !== null && !stages.some(stage => stage.id === note.stage_id))
         || result.documents.some(document => document.stage_id !== null && !stages.some(stage => stage.id === document.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (!current() || !replaySame(snapshot, await storage.read())) throw new BrowserCloudReadError('unsupported_history')
