@@ -157,7 +157,7 @@ try {
     window.fetch = async (...args) => {
       const response = await original(...args), url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href)
       if (url.pathname === '/api/v2/sync/encrypted/capabilities' && ++modes === 3) {
-        const open = indexedDB.open('worta-web-replay', 7); await new Promise(resolve => { open.onsuccess = resolve })
+        const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve })
         const db = open.result, tx = db.transaction('replayManifest', 'readwrite'), store = tx.objectStore('replayManifest'), read = store.getAll()
         read.onsuccess = () => store.put({ ...read.result[0], generation: crypto.randomUUID() })
         await new Promise(resolve => { tx.oncomplete = resolve }); db.close()
@@ -169,7 +169,7 @@ try {
   })
   assert.equal(stale, 'stale_authority')
   const raced = await cache(page); assert.deepEqual(raced.rows.ownerHeads, []); assert.deepEqual(raced.rows.projectBindings, []); assert.deepEqual(raced.rows.inbox, migrated.rows.inbox)
-  await page.evaluate(async row => { const open = indexedDB.open('worta-web-replay', 7); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result, tx = db.transaction('replayManifest', 'readwrite'); tx.objectStore('replayManifest').put(row); await new Promise(resolve => { tx.oncomplete = resolve }); db.close() }, migrated.rows.replayManifest[0])
+  await page.evaluate(async row => { const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result, tx = db.transaction('replayManifest', 'readwrite'); tx.objectStore('replayManifest').put(row); await new Promise(resolve => { tx.oncomplete = resolve }); db.close() }, migrated.rows.replayManifest[0])
   assert.deepEqual(await cache(page), migrated); checks.push('complete-inventory-generation-cas-after-fresh-server-check')
   // Abort/key/account context cannot publish a late result, even after a read response.
   for (const kind of ['cancel', 'lock', 'logout', 'account']) {
@@ -248,14 +248,14 @@ try {
   checks.push('full-chromium-restart-server-and-aead-proof-reauthentication-no-rewrite')
   // Matching forged head/inbox proof DTOs are still not authentication.
   await page.evaluate(async () => {
-    const open = indexedDB.open('worta-web-replay', 7); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
+    const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
     const tx = db.transaction(['ownerHeads', 'inbox'], 'readwrite'), heads = tx.objectStore('ownerHeads').getAll(), rows = tx.objectStore('inbox').getAll()
     heads.onsuccess = () => { const head = heads.result[0]; head.history[0].wire_digest = '0'.repeat(64); tx.objectStore('ownerHeads').put(head) }
     rows.onsuccess = () => { for (const row of rows.result) if (row.applied_proof.event_id === heads.result[0].history[0].event_id) { row.applied_proof.wire_digest = '0'.repeat(64); tx.objectStore('inbox').put(row) } }
     await new Promise(resolve => { tx.oncomplete = resolve }); db.close()
   })
   const forged = await cache(page); assert.equal((await apply(page)).error, 'metadata_proof_reauthentication_failed'); assert.deepEqual(await cache(page), forged)
-  await page.evaluate(async rows => { const open = indexedDB.open('worta-web-replay', 7); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result, tx = db.transaction(['ownerHeads', 'inbox'], 'readwrite'); for (const name of ['ownerHeads', 'inbox']) for (const row of rows[name]) tx.objectStore(name).put(row); await new Promise(resolve => { tx.oncomplete = resolve }); db.close() }, complete.rows)
+  await page.evaluate(async rows => { const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result, tx = db.transaction(['ownerHeads', 'inbox'], 'readwrite'); for (const name of ['ownerHeads', 'inbox']) for (const row of rows[name]) tx.objectStore(name).put(row); await new Promise(resolve => { tx.oncomplete = resolve }); db.close() }, complete.rows)
   checks.push('matching-forged-proofs-fail-real-aead-reauthentication')
   const receipt = await page.evaluate(async () => { try { return await receiver.receiveCloudAccountHistory(new AbortController().signal) } catch (e) { return e.code } })
   assert.equal(receipt, 'metadata_owner_state_present'); assert.deepEqual(await cache(page), complete); checks.push('receipt-only-never-lies-about-owner-proofs')

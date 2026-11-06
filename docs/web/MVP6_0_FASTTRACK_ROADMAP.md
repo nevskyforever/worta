@@ -1,5 +1,68 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 06.11.2026 — Project Map reader и актуальная матрица прогресса
+
+**Project Map create/одна Desktop update → HTTP → Vue → restart: LOCAL COMPLETE.**
+Codec9 применяет существующий recoverV10/ownerPort: source, ledger, зашифрованная
+projection, proof и manifest/CAS согласованы. Native SQLite snapshot сравнивается
+с расшифрованной browser projection. MindMapEditor работает read-only с безопасной
+копией для показа; исходные данные/annotations не изменяются. Stage/combined Map,
+Map delete/Resolution и editing пока не приняты. Сервер, gates и browser capability
+не изменены. Подробности приёмки — в checkpoint.
+
+### Фактический продуктовый результат
+
+Уже приняты login/unlock; Metadata; project/plain и Stage/plain/html Content;
+Stage create/rename/order и UI выбора; project/Stage Document text и Desktop
+updates, batch, две настоящие HTTP-страницы/resume; project Map create/update;
+сохранность ciphertext/proofs/CAS, rollback и повторная аутентификация после
+restart. Это значительный прогресс **продуктового этапа 2/6**, даже когда Note
+qualification остаётся2/10. Создание/редактирование Web не включалось.
+
+Осталось **9 функциональных групп чтения** (не 9 новых технических Slice):
+
+| № | До полного чтения этапа 2 | Что уже готово в этой группе |
+| --- | --- | --- |
+| 1 | Удаление Stage и соответствующее обновление структуры | CREATE, rename, StageOrder, выбор/переключение |
+| 2 | Форматирование/позднее создание Document; допустимые delete/Resolution histories | Текст обоих scopes, линейные single/batch updates |
+| 3 | Stage Map, допустимые Map delete/Resolution histories | Project Map create + одна update |
+| 4 | Полные свойства/связи Notes и Map-derived annotations в UI | Заголовок, body, plain и безопасный HTML |
+| 5 | Progress owner → история/статистика/показатели | Native Codec11/runtime, существующие панели |
+| 6 | Project Game owner → все существующие игровые представления проекта | Native Game/core, Vue game panels |
+| 7 | Account Game owner → все существующие игровые представления аккаунта | Cabinet/shop/rhythm/баффы/награды и другие механики Desktop |
+| 8 | Account catalog folders/order/membership/project order | Bootstrap catalog и открытие выбранного проекта |
+| 9 | Проверенные encrypted covers/Metadata2/blob | Native форматы и серверные encrypted routes |
+
+Также нужны сквозные условия: совместное чтение полных mixed histories
+(сейчас Map/Document + Note Resolution отвергаются), пользовательский маршрут
+для двух существующих проектов, реалистичный объём сверх текущих 200 событий
+или обоснованный и принятый продуктовый предел с сохранением resource limits.
+Старые указания «нет Stage create», «нет successor», «нет HTTP recovery» и «одна
+страница» в исторических разделах ниже не являются актуальным списком задач.
+
+### Технические показатели не подменяют продуктовые
+
+[Полная ревизия всех 10 критериев](WEB_6_0_PROGRESS_AUDIT.md) сопоставляет каждый
+с кодом, принятой частью, точным остатком, актуальностью и этапом. Два закрыты,
+восемь остаются: это frozen Note ordinary1/Resolution2 reader claim, **не счётчик
+всех Web-функций**. Нового доказательства полного оставшегося критерия пока нет;
+security gates остаются false. Recovery-only чтение не требует объявлять
+неподдерживаемую обычную reader capability или writer/ACK readiness.
+
+Slice 4/5 формально остаётся PARTIAL: нужны остальные strategy/source поколения,
+own P2 prefix/продолжение, полный dependency реестр, eligible ordinary feed на
+двух получателях и gate/lifecycle qualification. При этом функции полного чтения
+из Slice 5 уже частично реализованы; это учтено, но формальный переход 4→5 и
+закрытие Slice 5 не объявлены. Writer-specific критерии этапа 3 не добавляются
+задним числом в приёмку безопасного Recovery GET этапа 2.
+
+**Следующие 3 продуктовые задачи:** Stage Map; Progress/history/stats;
+project/account Game reading. Остальные строки таблицы остаются в этапе2.
+**Следующий продуктовый этап 3/6:** создание и редактирование в Web с проверенным
+server confirmation и Web→Server→Desktop, затем обмен в обе стороны. Полная
+WORTA Web, обычные проекты, все игровые механики и единый sync engine остаются
+обязательными целями; read-only не является конечным продуктом.
+
 ## 2026-11-06 — General recovery pagination and Document batch reading
 
 The existing encrypted Recovery GET/receiver/recoverV10/ownerPort now receives

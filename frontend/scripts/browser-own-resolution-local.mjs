@@ -65,7 +65,7 @@ try{
  assert.deepEqual(await page.evaluate(()=>adapter.store.read()),applied)
  for(const kind of ['proof','author','group','receipt','ciphertext','parent_proof']){
   assert.equal(await page.evaluate(async kind=>{
-    const q=indexedDB.open('worta-web-replay', 7);await new Promise((resolve,reject)=>{q.onsuccess=resolve;q.onerror=()=>reject(q.error)});const db=q.result
+    const q=indexedDB.open('worta-web-replay', 8);await new Promise((resolve,reject)=>{q.onsuccess=resolve;q.onerror=()=>reject(q.error)});const db=q.result
     const snapshot=()=>new Promise((resolve,reject)=>{const tx=db.transaction([...db.objectStoreNames]),v={};let n=0;for(const name of db.objectStoreNames){const r=tx.objectStore(name).getAll();r.onsuccess=()=>{v[name]=r.result;if(++n===db.objectStoreNames.length)resolve(v)}};tx.onabort=()=>reject(tx.error)})
     const before=await snapshot(),name=kind==='receipt'?'receipts':['author','group'].includes(kind)?'legacyNoteHistory':'inbox'
     const row=structuredClone(before[name].find(r=>kind==='receipt'?r.record_version===1:['author','group'].includes(kind)?r.record_kind==='resolution':r.server_sequence===(kind==='parent_proof'?3:5)))

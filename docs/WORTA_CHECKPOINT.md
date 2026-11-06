@@ -1,5 +1,124 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — Project Map Web reader + ревизия прогресса (LOCAL COMPLETE)
+
+Starting SHA `01bedc8b1f77ac25c284d61ae3763832d1fddb40`, branch `6.0`, исходное
+рабочее дерево чистое. Final SHA — commit, содержащий эту запись; точный hash
+дан в итоговом отчёте (git log). Задача Map reader и ревизия прогресса завершены
+локально; продуктовый этап 2/6 и технический Slice 4/5 остаются PARTIAL. История
+checkpoint и решения владельца 05.11.2026 сохранены.
+
+### Реализовано
+
+* Peer project Map (Codec9) create и линейный update через настоящий encrypted
+  Recovery GET, source/bootstrap, receiver, recoverV10 и существующий ownerPort.
+  mapPrepare/mapApply/mapRecords следуют Native map_sync/map_codec контракту:
+  descriptor/account/project/bootstrap/Metadata, полная текущая parent-цепочка,
+  revision/generation, точный nonce/ciphertext. Чужая/повреждённая история,
+  собственный Map, Stage/combined scope, delete/Resolution пока отклоняются.
+* В одной replay-транзакции/CAS фиксируются Map ledger, encrypted projection,
+  inbox12/map_proven proof и applied manifest coverage. Projection содержит
+  ровно Native cloud_map_projection.snapshot_json (`data` и `annotations`).
+  SHA digests сами по себе не являются authority: повторное открытие заново
+  аутентифицирует исходный Codec9, dependencies, ledger и decrypted projection.
+  Историческая encrypted projection сохраняется в следующем ledger для проверки
+  прежнего proof. Native правило Note identity collision также сохраняется:
+  обычный Content или другой project/node не может присвоить Map-owned Note.
+  Исходный import/binding/source seed и ciphertext не заменяются.
+* Replay IndexedDB **v8** добавляет два Map owner store: независимые key spaces
+  нужны для Map/Document identity и доказательств; иной sync engine/repository/
+  offline outbox не создаётся. Полный Snapshot/CAS/inventory учитывает Map.
+  v7→v8 и исторический v6→v8 выполняются атомарно с сохранением существующих
+  настоящих encrypted Document/source/proofs. Прерывание upgrade сохраняет v7,
+  retry/reopen корректны, старый pinned reader безопасно отказывает. Тестовые
+  драйверы чтения существующей БД обновлены на v8; future-schema refusal — v9.
+* Vue использует существующий MindMapEditor в принудительном read-only режиме.
+  Проектная карта доступна при выборе «Проект»; наличие карты учитывается при
+  первоначальном выборе, даже если существуют Stage. При Desktop update карта
+  обновляется, ошибка/отзыв сессии убирают представление. Для показа используется
+  отдельная копия: активные link labels экранируются, внешние ресурсы/custom CSS
+  не загружаются. Оригинальный Map и annotations остаются полными и неизменными
+  в encrypted authority. Это не полный Map editing/derived-Note UI.
+* Добавлена справка чтения карты. Генератор запущен с проверкой TLS через системный
+  CA bundle; сертификаты/E2EE/gates не отключались. Новые title/HTML строки есть
+  во всех 6 языках: ровно 2 ключа на язык, существующие переводы не изменены.
+
+### Приёмка и проверки
+
+* **Native Rust/SQLite → production push → изолированный PostgreSQL 16/FastAPI →
+  Recovery GET → Chromium/Vue: PASS (1 test)**. Реальные login/passphrase unlock,
+  Map genesis с настоящими Map-owned Note annotations, одна следующая Native
+  update, оригинальные server sequence/wire,
+  idempotent redelivery, reopen и повторная аутентификация. Native SQLite
+  snapshot сравнен с ожидаемым событием и decrypted browser projection.
+* HTTP чужого аккаунта/без auth отклонён; изменённый ciphertext не меняет ранее
+  принятую базу. Настоящая Map projection transaction прервана: полный snapshot
+  равен состоянию до commit; после restart retry применяет update. Повреждённый
+  durable Map proof блокирует показ. Нет duplicate ledger/current projection,
+  ложного owner outcome или ACK. Браузер не регистрируется как sync device и
+  не делает capability PUT; сервер сохраняет только реальный Desktop device,
+  last_ack_sequence=0. Native-only синтетические capability declarations — в
+  ранее разрешённом владельцем изолированном scope с подтверждённой поддержкой.
+* **Document migration/owner regression: PASS (1 Native/Chromium test)**,
+  включая populated v6→v8, populated Document v7→v8, aborted upgrade preserving
+  all original rows, retry/reopen, old-reader VersionError, Document apply,
+  rollback/duplicate/corrupt-proof и повторную криптографическую проверку.
+* **Replay storage Chromium: PASS, 17 scenarios**, включая tab writer contention,
+  CAS, inventory budget, quota/revocation rollback, original wire, profile restart,
+  account isolation, future/malformed schema refusal and legacy data preservation.
+* Focused Vitest: 165 tests (receiver/source/recovery/readiness, Document/Map
+  preparation, Vue reader, safe display/bridge): **165 PASS**. Первичная ошибка
+  типизации boolean prop в UI stub и выбора ledger по UUID-порядку в driver
+  исправлены; итоговый Map HTTP PASS за 16.61s, typecheck/build PASS. Rust: **12 PASS** (7 map_sync + 5 map_codec) из существующего local
+  compiled binary, Native-код не менялся; свежая cross-platform сборка не заявлена.
+  Help/localization: **30 PASS**; Python/driver syntax, typecheck/build/quick
+  проверены. Большой ранее принятый 102-update HTTP набор не повторялся: schema
+  compatibility покрыта прицельным populated Document тестом, Map HTTP — реальный.
+
+### Уточнённый прогресс и границы
+
+[Ревизия всех 10 blockers](web/WEB_6_0_PROGRESS_AUDIT.md) — актуальный источник
+метрик вместе с новым верхним разделом roadmap. Исходные 10 — не функции Web,
+а полный Note ordinary1/Resolution2 reader claim. Закрыты два: tombstone
+resurrection и own Resolution author chain; **8 активны, 2/10 закрыты**. Описания
+отсутствующей пагинации/HTTP/Document/successor устарели; широкие acceptance claims
+не выполнены полностью, поэтому ещё один blocker не снят. Inspector runtime
+не менялся (только поясняющий комментарий), flags/gates не поднимались.
+
+Slice 4 нельзя формально закрыть: не все strategy/source successor ветви,
+own Content P2 prefix и продолжение, полный dependency реестр, eligible ordinary
+feed/two-recipient/gate/lifecycle приняты. Результат choose_version или Recovery
+GET не подменяет полный claim. Отдельный own Resolution concurrent тест не
+заявлен PASS; общий CAS — тот же принятый ownerPort, author-chain уже закрыт.
+Часть функций Slice 5 (полная read UI публикация) уже фактически реализована,
+но его полное завершение и формальный переход4→5 не объявляются.
+
+До конца **продуктового этапа 2** осталось 9 перечисленных в roadmap групп:
+оставшиеся Stage mutations; полное Document presentation/delete/Resolution;
+Stage/остальные Map histories; свойства/связи Notes; Progress/history/stats;
+project Game reading; account Game reading; canonical catalog; encrypted covers.
+Плюс mixed account history, два существующих проекта в пользовательском пути
+и реалистичный объём (текущий bound 200 событий/32 MiB сохранён). Own Web writer/P2
+и browser capability lifecycle не добавляются автоматически в read-only приёмку
+этапа 2; они обязательны перед соответствующим sync claim в этапе3.
+
+Следующие 3 задачи: Stage Map; Progress/history/stats; Game reading обоих scopes.
+После завершения чтения — **этап 3/6: Web create/edit и Web→Server→Desktop**.
+Полноценный Web, обычные проекты, все существующие игровые механики,
+двусторонний обмен, единый engine и прагматичная реализация остаются требованиями
+владельца. Исторический официальный процент не пересчитан и не является метрикой
+этой задачи. Публичный запуск/регистрация/большая инфраструктура сюда не добавлены.
+
+Security gates: **ready=false, declarationAllowed=false, writerAuthorized=false**.
+Не менялись main, VPS, серверный протокол, регистрация и deployment. Нет reader
+bypass, browser capability PUT или неподтверждённого ACK. Readiness/public release
+policy не меняется. Только синтетические тестовые данные; task-owned PostgreSQL
+остановлен после приёмки. Существующие изменения не удалялись, новые worktree
+не создавались. Принятые Map/schema/UI/tests/help и документы входят в один commit
+и push origin/6.0 без force, финальное рабочее дерево проверяется чистым. CI
+вручную не запускался и не опрашивался. Exact commit/hash — итоговый отчёт.
+
+
 ## 2026-11-06 — General encrypted Recovery GET pagination (LOCAL COMPLETE)
 
 Starting SHA `297da1d4f56a669eaa85ebb64aa5268eac80c09b`, branch `6.0`.

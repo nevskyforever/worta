@@ -31,7 +31,7 @@ try {
   if (fixture.stores) await page.evaluate(async f => {
     const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
     const initial = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true); await initial.close()
-    const open = indexedDB.open('worta-web-replay', 7)
+    const open = indexedDB.open('worta-web-replay', 8)
     await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
     const db = open.result, tx = db.transaction([...db.objectStoreNames], 'readwrite')
     for (const [name, rows] of Object.entries(f.stores)) for (const row of rows) tx.objectStore(name).put(row)
@@ -84,7 +84,7 @@ try {
         if (window.logoutBeforeCommit) await window.readerAuth.auth.logout()
         if (window.recoverySnapshotRace) {
           window.recoverySnapshotRace = false
-          const request = indexedDB.open('worta-web-replay', 7)
+          const request = indexedDB.open('worta-web-replay', 8)
           await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
           const db = request.result
           await new Promise((resolve, reject) => {
@@ -145,7 +145,7 @@ try {
     assert.equal(await page.evaluate(async f => {
       const { prepareBrowserRemoteProjectImport } = await import('/src/platform/web/projectBindings.ts')
       const foreign = prepareBrowserRemoteProjectImport(f.scope, { project_id: 'foreign-independent-project', bootstrap_id: crypto.randomUUID(), remote_state: 'active', remote_high_water: f.items.length })
-      const req = indexedDB.open('worta-web-replay', 7)
+      const req = indexedDB.open('worta-web-replay', 8)
       await new Promise((resolve, reject) => { req.onsuccess = resolve; req.onerror = () => reject(req.error) })
       const db = req.result
       const change = (op) => new Promise((resolve, reject) => { const tx = db.transaction('projectBindings', 'readwrite'); op(tx.objectStore('projectBindings')); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -172,7 +172,7 @@ try {
           const row = structuredClone((await adapter.store.read()).rows.find(value => value.server_sequence === 2))
           const damaged = structuredClone(row), wire = JSON.parse(damaged.wire_item)
           wire.event.server_sequence++; damaged.wire_item = JSON.stringify(wire)
-          const req = indexedDB.open('worta-web-replay', 7)
+          const req = indexedDB.open('worta-web-replay', 8)
           await new Promise((resolve, reject) => { req.onsuccess = resolve; req.onerror = () => reject(req.error) })
           const db = req.result
           const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -197,7 +197,7 @@ try {
         assert.deepEqual(raced.rows, before.rows); assert.deepEqual(raced.owners, before.owners)
         assert.equal(raced.manifest.applied_cursor, before.manifest.applied_cursor)
         await page.evaluate(async manifest => {
-          const request = indexedDB.open('worta-web-replay', 7)
+          const request = indexedDB.open('worta-web-replay', 8)
           await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
           const db = request.result
           await new Promise((resolve, reject) => { const tx = db.transaction('replayManifest', 'readwrite'); tx.objectStore('replayManifest').put(manifest); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) }); db.close()
@@ -210,7 +210,7 @@ try {
         assert.equal(await page.evaluate(async () => {
           const row = structuredClone((await adapter.store.read()).rows.find(value => value.state === 'stage_proven'))
           const damaged = structuredClone(row); damaged.stage_proof.outcome_digest = '0'.repeat(64)
-          const request = indexedDB.open('worta-web-replay', 7)
+          const request = indexedDB.open('worta-web-replay', 8)
           await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
           const db = request.result
           const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -402,7 +402,7 @@ try {
       assert.deepEqual(await page.evaluate(() => adapter.store.read()), successor)
       assert.equal(await page.evaluate(async () => {
         const state = await adapter.store.read(), original = state.checkpoint
-        const request = indexedDB.open('worta-web-replay', 7)
+        const request = indexedDB.open('worta-web-replay', 8)
         await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
         const db = request.result
         const put = row => new Promise((resolve, reject) => { const tx = db.transaction('cursors', 'readwrite'); tx.objectStore('cursors').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -505,7 +505,7 @@ try {
         const damaged = structuredClone(original)
         const proof = kind === 'stage' ? damaged.stage_proof : damaged.stage_order_proof
         proof.outcome_digest = '0'.repeat(64)
-        const request = indexedDB.open('worta-web-replay', 7)
+        const request = indexedDB.open('worta-web-replay', 8)
         await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
         const db = request.result
         const put = row => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -524,7 +524,7 @@ try {
       const original = structuredClone(eventId ? rows.find(row => row.event_id === eventId) : rows.at(-1)), damaged = structuredClone(original)
       if (kind === 'proof') (damaged.resolution_proof ?? damaged.content_note_proof).outcome_digest = '0'.repeat(64)
       else { const wire = JSON.parse(damaged.wire_item); wire.object.ciphertext = 'AA'; damaged.wire_item = JSON.stringify(wire) }
-      const request = indexedDB.open('worta-web-replay', 7)
+      const request = indexedDB.open('worta-web-replay', 8)
       await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
       const db = request.result
       const put = row => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -542,7 +542,7 @@ try {
       if (kind === 'resolution') damaged.evidence_envelope.ciphertext = 'AA'
       if (kind === 'group_transition') damaged.from_digest = '0'.repeat(64)
       if (kind === 'head') damaged.linear_head_event_id = crypto.randomUUID()
-      const request = indexedDB.open('worta-web-replay', 7)
+      const request = indexedDB.open('worta-web-replay', 8)
       await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
       const db = request.result
       const put = value => new Promise((resolve, reject) => { const tx = db.transaction('legacyNoteHistory', 'readwrite'); tx.objectStore('legacyNoteHistory').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })
@@ -599,7 +599,7 @@ try {
       assert.equal(await page.evaluate(async sequence => {
         const state = await adapter.store.read(), original = state.rows.find(r => r.server_sequence === sequence), damaged = structuredClone(original)
         damaged.resolution_proof.outcome_digest = '0'.repeat(64)
-        const request = indexedDB.open('worta-web-replay', 7)
+        const request = indexedDB.open('worta-web-replay', 8)
         await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
         const db = request.result
         const put = value => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(value); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })

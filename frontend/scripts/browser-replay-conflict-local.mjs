@@ -19,7 +19,7 @@ try {
   if (fixture.stores) await page.evaluate(async f => {
     const { openBrowserReplayStorage } = await import('/src/platform/web/replayStorage.ts')
     const initial = await openBrowserReplayStorage(f.scope, new AbortController().signal, () => true); await initial.close()
-    const open = indexedDB.open('worta-web-replay', 7)
+    const open = indexedDB.open('worta-web-replay', 8)
     await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
     const db = open.result, tx = db.transaction([...db.objectStoreNames], 'readwrite')
     for (const [name, rows] of Object.entries(f.stores)) for (const row of rows) tx.objectStore(name).put(row)
@@ -109,7 +109,7 @@ try {
       const original = structuredClone((await adapter.store.read()).rows.at(-1)), damaged = structuredClone(original)
       if (kind === 'proof') damaged.content_note_conflict_proof.outcome_digest = '0'.repeat(64)
       else { const wire = JSON.parse(damaged.wire_item); wire.object.ciphertext = 'AA'; damaged.wire_item = JSON.stringify(wire) }
-      const request = indexedDB.open('worta-web-replay', 7)
+      const request = indexedDB.open('worta-web-replay', 8)
       await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
       const db = request.result
       const put = row => new Promise((resolve, reject) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })

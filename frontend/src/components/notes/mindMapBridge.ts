@@ -1,5 +1,21 @@
 import type { JsonObject, JsonValue } from '@/types/notes'
 
+/** Display copy only. Authenticated source/proofs retain the original map.
+ * The bundled renderer uses HTML for link labels and allows external resources.
+ * Cloud read-only maps expose neither active labels nor remote resources. */
+export function safeCloudMapDisplay(data: JsonObject): JsonObject {
+  const copy = JSON.parse(JSON.stringify(data)) as JsonObject
+  const visit = (value: JsonValue): void => {
+    if (Array.isArray(value)) { value.forEach(visit); return }
+    if (!value || typeof value !== 'object') return
+    for (const key of ['hyperLink', 'image', 'style', 'theme', 'branchColor']) delete value[key]
+    if (typeof value.label === 'string') value.label = value.label.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+    Object.values(value).forEach(visit)
+  }
+  visit(copy)
+  return copy
+}
+
 export interface MindMapInitialization {
   data: JsonObject | null
   editorLabel: string

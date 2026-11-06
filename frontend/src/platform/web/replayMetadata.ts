@@ -1,3 +1,4 @@
+import { authenticateReplayMaps } from './mapApply'
 import { authenticateReplayDocuments } from './documentApply'
 import {BrowserContentNoteApply} from './contentNoteApply'
 import { BrowserV10Transport } from './v10Transport'
@@ -161,6 +162,8 @@ export async function reauthenticateReplayOwners(scope: BrowserSyncScope, snapsh
     certificates.set('stage_proven', stageSequences(await prepareStagePrefix(scope, inventory, amk, current, meta, true), scope, inventory))
     certificates.set('stage_order_proven', stageOrderSequences(await prepareStageOrderPrefix(scope, inventory, amk, current, meta, true), scope, inventory))
   }
+  await authenticateReplayMaps(scope, snapshot, amk, current)
+  certificates.set('map_proven', new Set(snapshot.rows.filter(row => row.state === 'map_proven').map(row => row.server_sequence)))
   await authenticateReplayDocuments(scope, snapshot, amk, current)
   certificates.set('document_proven', new Set(snapshot.rows.filter(row => row.state === 'document_proven').map(row => row.server_sequence)))
   let authenticated = 0

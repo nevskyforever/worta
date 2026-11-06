@@ -7,6 +7,7 @@ import { apiErrorMessage } from '@/api/client'
 import {presentStatus} from '@/diagnostics/presentation'
 import {
   mindMapBridge,
+  safeCloudMapDisplay,
   parseMindMapData,
   parseMindMapEvents,
   type MindMapInitialization,
@@ -15,6 +16,7 @@ import { useLocaleStore } from '@/stores/locale'
 import type { JsonObject, MindMapResponse, NotesScope, XMindImportResponse } from '@/types/notes'
 
 const props = defineProps<{
+  secureReadOnly?: boolean
   map: MindMapResponse
   persist: (data: JsonObject, scope: NotesScope, expectedHeads?: JsonObject) => Promise<MindMapResponse>
   importXMind: (file: File, scope: NotesScope) => Promise<XMindImportResponse>
@@ -55,7 +57,7 @@ const editorSource = computed(
 function initialPayload(): MindMapInitialization {
   return {
     data: props.map.data
-      ? (JSON.parse(JSON.stringify(props.map.data)) as JsonObject)
+      ? (props.secureReadOnly ? safeCloudMapDisplay(props.map.data) : JSON.parse(JSON.stringify(props.map.data)) as JsonObject)
       : null,
     editorLabel: t('Редактор карты'),
     emptyStageMapText: t('Карта не была создана при работе над источником.'),

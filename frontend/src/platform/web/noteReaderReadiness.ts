@@ -10,6 +10,9 @@ import {BrowserResolutionPrefix} from './resolutionPrefix'
 
 // Audited gaps under the frozen ordinary1/Resolution2 claim, NOT runtime grants.
 // Removing a blocker requires its own genuine producer/consumer acceptance.
+// Eight remain from the original ten criteria (resurrection and own Resolution
+// ancestry accepted). This is not a counter of completed Recovery GET/UI features.
+// See docs/web/WEB_6_0_PROGRESS_AUDIT.md for the exact remaining scope per item.
 // Own Resolution publication ancestry is covered by the production Native writer
 // → sealed outbox/receipt → Chromium planner/apply/self-echo acceptance.
 const blockers=Object.freeze([

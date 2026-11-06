@@ -56,7 +56,7 @@ export function inspectBrowserAckInventory(scope: BrowserSyncScope, cursor: Brow
       if(!h||!b||b.mode!=='import_remote'||b.phase!=='captured'||b.remote_state!=='active'||b.bootstrap_id!==p.bootstrap_id||!h.history.some(v=>immutableWireIdentity(v)===immutableWireIdentity(p)))corrupt()
       if(stageCertified.has(r.server_sequence))inventory.stage_applied_verified=(inventory.stage_applied_verified??0)+1;else inventory.stage_authority_only=(inventory.stage_authority_only??0)+1
     }
-    else if(r.state==='document_proven'){corrupt()} // Document apply does not grant ACK authority.
+    else if(r.state==='document_proven'||r.state==='map_proven'){corrupt()} // Document apply does not grant ACK authority.
     else {
       const proof = r.applied_proof, head = owners.find(h=>h.owner_kind==='project_metadata'&&h.owner_id===proof.project_id), binding = bindings.find(b=>b.project_id===proof.project_id)
       if (!head || !binding) corrupt()

@@ -39,7 +39,7 @@ async function login(page, username, register = false) {
 }
 async function cache(page) {
   return page.evaluate(async () => {
-    const open = indexedDB.open('worta-web-replay', 7)
+    const open = indexedDB.open('worta-web-replay', 8)
     await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
     const db = open.result, rows = {}
     try {

@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { expect, it, vi } from 'vitest'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
@@ -150,4 +151,26 @@ it('isolates documents by Stage and restores the account-scoped selection on rem
   reopened.unmount(); window.localStorage.removeItem(key)
   if (descriptor) Object.defineProperty(window, 'localStorage', descriptor)
   else Reflect.deleteProperty(window, 'localStorage')
+})
+
+it('opens a verified project Map in secure read-only mode even when Stages exist', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  let revoke = () => {}
+  const session = { status: 'unlocked', onRevoked: (callback: () => void) => { revoke = callback; return () => {} },
+    readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
+    readRecoveryProject: vi.fn().mockResolvedValue({ project: { name: 'Project' }, stages: [{ id: 's', name: 'Stage' }], notes: [], documents: [],
+      maps: [{ project_id: 'project', event_id: 'event', data: { nodeData: { id: 'root', topic: 'Verified map', children: [] } }, annotations: {} }] }),
+  } as unknown as BrowserCloudAccountSession
+  const mapRenderer = defineComponent({ props: { map: { type: Object, required: true }, secureReadOnly: Boolean, persist: Function, importXMind: Function },
+    template: '<div data-testid="map-renderer">{{ map.data.nodeData.topic }}</div>' })
+  const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project' }, global: { plugins: [pinia], stubs: { MindMapEditor: mapRenderer } } })
+  await flushPromises(); await wrapper.get('[data-testid="cloud-notes-open"]').trigger('click'); await flushPromises()
+  expect(wrapper.get('[data-testid="cloud-project-notes-select"]').attributes('aria-pressed')).toBe('true')
+  const renderer = wrapper.findComponent(mapRenderer)
+  expect(renderer.props('secureReadOnly')).toBe(true)
+  expect(renderer.props('map')).toMatchObject({ project_id: 'project', stage_id: null, read_only: true })
+  expect(wrapper.text()).toContain('Verified map')
+  await expect(renderer.props('persist')!()).rejects.toThrow('read_only')
+  revoke(); await flushPromises()
+  expect(wrapper.find('[data-testid="cloud-map-read"]').exists()).toBe(false)
 })

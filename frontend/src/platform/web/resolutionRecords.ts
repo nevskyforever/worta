@@ -1,3 +1,4 @@
+import { validateMapInbox } from './mapRecords'
 import { validateDocumentInbox, type DocumentInbox } from './documentRecords'
 import type { NoteSyncResolutionV2Header, NoteSyncResolutionV2 } from '@/cloud/noteSyncResolutionV2Codec'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
@@ -164,6 +165,7 @@ export function readFutureHistoryRecord(value:unknown,s:BrowserSyncScope):Future
   return validateNoteHistoryRecord(value,s)
 }
 export function readFutureInboxRecord(value:unknown,s:BrowserSyncScope):FutureInbox {
+  if ((value as {record_version?:number})?.record_version === 12) return validateMapInbox(value, s)
   if ((value as {record_version?:number})?.record_version===11) return validateDocumentInbox(value,s)
   return (value as {record_version?:number})?.record_version===10?validateResolutionInbox10(value,s):validateBrowserInboxRecord(value,s)
 }

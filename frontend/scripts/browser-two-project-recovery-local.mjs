@@ -53,7 +53,7 @@ try {
     const a = (await store.read()).bindings.find(binding => binding.project_id === 'isolation-A')
     const b = (await store.read()).bindings.find(binding => binding.project_id === 'isolation-B')
     if (!a || !b || a.bootstrap_id === b.bootstrap_id) throw Error('missing_independent_bindings')
-    const request = indexedDB.open('worta-web-replay', 7)
+    const request = indexedDB.open('worta-web-replay', 8)
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     const change = action => new Promise((resolve, reject) => { const tx = db.transaction('projectBindings', 'readwrite'); action(tx.objectStore('projectBindings')); tx.oncomplete = resolve; tx.onabort = () => reject(tx.error) })

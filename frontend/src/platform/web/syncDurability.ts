@@ -1,3 +1,4 @@
+import { validateMapInbox, type MapInbox } from './mapRecords'
 import { validateDocumentInbox, type DocumentInbox } from './documentRecords'
 import {validateContentReceipt2,contentBaseReceipt,validateContentSelfEchoProof2,type BrowserContentSelfEchoProof2,type BrowserAnyUploadReceipt} from './contentAuthorityRecords'
 import {validateContentNoteConflictProof,type BrowserContentNoteConflictProof} from './contentNoteRecords'
@@ -32,7 +33,7 @@ export interface BrowserStageInboxRecord extends Omit<BrowserReceivedInboxRecord
 export interface BrowserContentNoteConflictInboxRecord extends Omit<BrowserReceivedInboxRecord,'record_version'|'state'> {record_version:8;state:'content_note_conflict_preserved';content_note_conflict_proof:BrowserContentNoteConflictProof}
 export interface BrowserContentNoteInboxRecord extends Omit<BrowserReceivedInboxRecord,'record_version'|'state'> {record_version:7;state:'content_note_proven';content_note_proof:BrowserContentNoteProof}
 export interface BrowserContentSelfEchoInboxRecord extends Omit<BrowserReceivedInboxRecord,'record_version'|'state'> {record_version:9;state:'content_note_self_echo_proven';content_note_self_echo_proof:BrowserContentSelfEchoProof2}
-export type BrowserInboxRecord = DocumentInbox | BrowserContentSelfEchoInboxRecord | BrowserContentNoteConflictInboxRecord | BrowserContentNoteInboxRecord | BrowserStageOrderInboxRecord | BrowserStageInboxRecord | BrowserReceivedInboxRecord | BrowserAppliedInboxRecord | BrowserNoteInboxRecord | BrowserNoteConflictInboxRecord
+export type BrowserInboxRecord = MapInbox | DocumentInbox | BrowserContentSelfEchoInboxRecord | BrowserContentNoteConflictInboxRecord | BrowserContentNoteInboxRecord | BrowserStageOrderInboxRecord | BrowserStageInboxRecord | BrowserReceivedInboxRecord | BrowserAppliedInboxRecord | BrowserNoteInboxRecord | BrowserNoteConflictInboxRecord
 export interface BrowserUploadReceipt {
   record_version: 1; account_id: string; device_id: string; event_id: string
   protocol_version: 2 | 3; server_sequence: number; duplicate: boolean
@@ -239,6 +240,7 @@ export function validateBrowserV3SyncState(scopes: BrowserSyncScope[], outbound:
 }
 
 export function validateBrowserInboxRecord(value: unknown, scope: BrowserSyncScope): BrowserInboxRecord {
+  if ((value as {record_version?:number})?.record_version === 12) return validateMapInbox(value, scope)
   if ((value as {record_version?:number})?.record_version === 11) return validateDocumentInbox(value, scope)
 
   if((value as {record_version?:number})?.record_version===9||(value as {state?:string})?.state==='content_note_self_echo_proven'){
@@ -259,7 +261,7 @@ export function validateBrowserInboxRecord(value: unknown, scope: BrowserSyncSco
   const stage=(value as BrowserInboxRecord)?.state==='stage_proven'
   const applied = (value as BrowserInboxRecord)?.state === 'applied', note = (value as BrowserInboxRecord)?.state === 'note_proven', conflict=(value as BrowserInboxRecord)?.state==='note_conflict_preserved'
   if (!exact(value, ['record_version','account_id','device_id','event_id','server_sequence','protocol_version','state','wire_item', ...(applied ? ['applied_proof'] : note ? ['note_proof'] : conflict ? ['note_conflict_proof'] : stage ? ['stage_proof'] : order ? ['stage_order_proof'] : content ? ['content_note_proof'] : contentConflict ? ['content_note_conflict_proof'] : [])])) failure()
-  const row = value as Exclude<BrowserInboxRecord,BrowserContentSelfEchoInboxRecord|DocumentInbox>
+  const row = value as Exclude<BrowserInboxRecord,BrowserContentSelfEchoInboxRecord|DocumentInbox|MapInbox>
   if (row.record_version !== (applied ? 2 : note ? 3 : conflict ? 4 : stage ? 5 : order ? 6 : content ? 7 : contentConflict ? 8 : 1) || row.account_id !== scope.accountId || row.device_id !== scope.deviceId || !['received','applied','note_proven','note_conflict_preserved','stage_proven','stage_order_proven','content_note_proven','content_note_conflict_preserved'].includes(row.state) || !safe(row.server_sequence, 1)) failure()
   const item = wireJSON(row.wire_item, true) as WireItem
   validatePage({ protocol_version: row.protocol_version, encrypted_sync_version: row.protocol_version, items: [item], next_cursor: row.server_sequence, has_more: false }, row.server_sequence - 1, scope.canonicalUserId)

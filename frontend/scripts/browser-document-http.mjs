@@ -95,7 +95,7 @@ try {
     assert.equal(await text.locator('script,iframe,img,a').count(), 0)
   }
   const snapshot = page => page.evaluate(async () => {
-    const q = indexedDB.open('worta-web-replay', 7)
+    const q = indexedDB.open('worta-web-replay', 8)
     const db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
     try { return await new Promise((ok, no) => {
       const tx = db.transaction([...db.objectStoreNames]), rows = {}
@@ -168,7 +168,7 @@ try {
   // A damaged durable owner proof must clear the UI instead of showing cached text.
   const original = first.inbox[documentIndex]
   const replaceProof = async row => page.evaluate(async row => {
-    const q = indexedDB.open('worta-web-replay', 7), db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
+    const q = indexedDB.open('worta-web-replay', 8), db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
     try { await new Promise((ok, no) => { const tx = db.transaction('inbox', 'readwrite'); tx.objectStore('inbox').put(row); tx.oncomplete = ok; tx.onabort = no }) } finally { db.close() }
   }, row)
   if(fixture.stageId){

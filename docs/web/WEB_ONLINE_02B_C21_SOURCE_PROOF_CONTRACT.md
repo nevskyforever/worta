@@ -1311,3 +1311,55 @@ ordinary/P2 proven_prefix, create an ACK, advance a server ACK cursor or declare
 browser reader/writer capability. Prefix authority remains limited to the
 existing proven owner contract. Readiness/release/security gates stay unchanged.
 Acceptance results and precise event/page counts are recorded in the checkpoint.
+
+### Project Map browser owner and progress reconciliation — 2026-11-06
+
+The existing Codec9 Native owner supplies full map snapshots and causal parents.
+Native `map_sync::apply` joins account/event/server sequence/descriptor/exact
+nonce+ciphertext, authenticates Metadata/bootstrap dependencies, requires parent
+revision+1 and the full current tips, then atomically stores apply ledger and
+`cloud_map_projection.snapshot_json`. The browser adapter implements the same
+accepted **peer, project-scoped, linear create/update** subset. It rejects own,
+Stage, delete, Resolution and unknown histories; none becomes a synthetic apply.
+
+`mapPrepare/mapApply/mapRecords` use the existing canonical reader and ownerPort,
+not another replay engine. Reauthentication opens the original AEAD Codec9 frame,
+checks complete descriptor and scope, live Metadata dependency, captured import,
+causal parent, revision/generation and unchanged project scope. Inventory joins
+every Map outcome to its exact source/ledger/current-or-archived encrypted
+projection. Browser Map proof1/inbox12 binds SHA256 digests of the complete
+wire ledger and encrypted projection; digests alone never authorize a record.
+Every read authenticates the source and decrypts the projection again, comparing
+canonical `{map,event_id,server_sequence}`. The stored `map` is exactly the Native
+owner snapshot (`data` plus `annotations`), not a substitute document or a Note
+proof. The Native derived-Note identity collision rule is retained against
+ordinary Notes and other project/node owners. Map-derived annotations stay in
+this Map authority; no separate Content
+owner proof is fabricated for derived Notes.
+
+Replay DB v8 adds only Map ledger/projection stores. It atomically validates and
+preserves prior v7 Document/source/proofs (and historical layouts), and extends
+full snapshot CAS/coverage with Map state. Source, ledger, encrypted projection,
+inbox outcome and manifest are one ownerPort transition after pinned paginated
+server verification. Existing import proof/seed remains unchanged. Aborted
+versionchange retains v7 exactly, retry succeeds, old reader refuses v8, and
+repeated reopen does not rewrite accepted data. This is the existing encrypted
+recovery cache, not an offline Web repository or a new outbox. No change to the
+server protocol, reader gates or ordinary capability lifecycle.
+
+The read-only Vue MindMapEditor receives a display copy only: active link labels
+are escaped and external images/links/custom CSS are excluded. Canonical data,
+including annotations, remains unchanged in encrypted projection/source. Native
+project Map create and one update are accepted over real PostgreSQL16/FastAPI /
+Chromium login/unlock; exact source and Native SQLite projection, proof refusal,
+actual transaction abort/retry, duplicate delivery and reopen are checked.
+Stage/combined Maps, editing and complete Map conflict/delete flows are not
+qualified by this subset. No Map ACK/capability is granted.
+
+The [06.11.2026 progress audit](WEB_6_0_PROGRESS_AUDIT.md) supersedes historical
+claims that no HTTP recovery, pagination, successor or Document reader exists.
+The original ten Note ordinary1/Resolution2 criteria now have two accepted and
+eight active items; they are not a counter of all completed Web functions.
+Specific remaining cases, nine product reading groups and the distinct gates
+for stage2, Slice4 and later Web writing are enumerated there. No readiness
+criterion is removed just because this separate Map reading path passes.

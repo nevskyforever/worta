@@ -1,3 +1,4 @@
+import type { BrowserProjectMap } from './mapApply'
 import type { PortableDocument } from '@/cloud/documentCodec'
 import { readReplayStages, type ReplayStageView } from './replayStageView'
 import { replaySame } from './replayRecords'
@@ -134,7 +135,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[] }> {
     this.assertWeb()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -162,9 +163,10 @@ export class BrowserCloudAccountSession {
       const source = await local.readSnapshot(scope, projectId)
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
+      const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
       const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps,
       }))
       if (result.notes.some(note => note.stage_id !== null && !stages.some(stage => stage.id === note.stage_id))
         || result.documents.some(document => document.stage_id !== null && !stages.some(stage => stage.id === document.stage_id))) throw new BrowserCloudReadError('unsupported_history')

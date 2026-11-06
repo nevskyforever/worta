@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MindMapEditor from '@/components/notes/MindMapEditor.vue'
+import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
@@ -72,6 +74,12 @@ function documentText(node: Record<string, unknown>): string {
 }
 const selectedDocument = ref<string | null>(null)
 const stageDocuments = computed(() => recovery.value?.documents?.filter(document => document.stage_id === selectedStage.value) ?? [])
+const projectMap = computed<MindMapResponse | null>(() => {
+  const value = selectedStage.value === null && recovery.value?.maps?.find(map => map.project_id === props.projectId)
+  return value ? { project_id: props.projectId, stage_id: null, name: recovery.value!.project.name, data: value.data as JsonObject,
+    combined: false, read_only: true, has_empty_completed_stage_map: false } : null
+})
+const refuseMapWrite = async (): Promise<never> => { throw new Error('read_only') }
 const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value))
 const selectedStage = ref<string | null>(null)
 // UI preference only: opaque account/project/Stage IDs, never text or keys.
@@ -128,7 +136,7 @@ async function openRecovery(): Promise<void> {
       recovery.value = value
       const remembered = hadRecovery ? priorSelection : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
-        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) ? null : value.stages[0]?.id ?? null
+        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId) ? null : value.stages[0]?.id ?? null
       selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
       rememberStage()
     }
@@ -169,6 +177,10 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
       <section v-if="activeDocument" data-testid="cloud-document-read">
         <h5>{{ activeDocument.title }}</h5>
         <p data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
+      </section>
+      <section v-if="projectMap" data-testid="cloud-map-read">
+        <h4>{{ t('Карта') }}</h4>
+        <MindMapEditor :key="recovery.maps?.[0]?.event_id" :map="projectMap" secure-read-only :persist="refuseMapWrite" :import-x-mind="refuseMapWrite" />
       </section>
       <h4>{{ recoveryLabels[locale.language].heading }}</h4>
       <section v-for="note in recovery.notes.filter(note => note.stage_id === selectedStage)" :key="note.id">

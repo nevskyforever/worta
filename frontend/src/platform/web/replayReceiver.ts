@@ -1,3 +1,5 @@
+import { prepareMapEvent } from './mapPrepare'
+import { authenticateReplayMaps, mapPreparationInventory } from './mapApply'
 import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
 import { prepareDocumentEvent, inspectPreparedDocumentGenesis } from './documentPrepare'
 import { readReplayStages } from './replayStageView'
@@ -50,14 +52,14 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
   }
   // This is receipt validation, never an owner outcome. Dependencies/proofs are
   // checked by the existing owners only after all pages have been received.
-  const authenticateDocumentWires = (items: ReturnType<typeof prepareReplayPage>['page']['items']) => lease.use(async amk => {
-    for (const item of items) if ((item.event as V3Descriptor).entity_type === 'document') {
+  const authenticateCanonicalWires = (items: ReturnType<typeof prepareReplayPage>['page']['items']) => lease.use(async amk => {
+    for (const item of items) if (['document', 'map'].includes((item.event as V3Descriptor).entity_type)) {
       const event = item.event as V3Descriptor
       const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
       const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
       try {
         await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
-          entityId: event.entity_id, entityType: 'document', eventId: event.event_id }, { ...object, nonce, ciphertext })
+          entityId: event.entity_id, entityType: event.entity_type, eventId: event.event_id }, { ...object, nonce, ciphertext })
       } finally { nonce.fill(0); ciphertext.fill(0) }
       check()
     }
@@ -108,7 +110,7 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           // Re-pin an interrupted receive/apply only after comparing ALL retained
           // wire above. Keep the prior proofs/import and replay the unproven rows;
           // a pending parent must not be mistaken for an applied dependency.
-          await authenticateDocumentWires(page.items)
+          await authenticateCanonicalWires(page.items)
         } else await lease.use(async amk => {
           const heads = new Map<string, { event_id: string; revision: number }>()
           for (const row of previous.rows) {
@@ -119,6 +121,12 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
             if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'map' && event.operation === 'event') {
+              const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
+              await authenticateReplayMaps(scope, previous, amk, current)
+              await prepareMapEvent(scope, { server_sequence: event.server_sequence!, wire_item: JSON.stringify(item) }, mapPreparationInventory(previous), amk, current)
+              continue
+            }
             if (event.entity_type === 'document' && event.operation === 'event') {
               const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
               const inventory = documentPreparationInventory(previous)
@@ -258,9 +266,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           if (!row || !replaySame(JSON.parse(row.wire_item), item)) fail('retained_wire_mismatch')
         }
       } else if (page.items.length) {
-        // Reject damaged Document ciphertext before retaining a new page. Owners
+        // Reject damaged Document/Map ciphertext before retaining a new page. Owners
         // still authenticate dependencies and issue proofs only after reception.
-        if (input.delivery === 'recovery') await authenticateDocumentWires(page.items)
+        if (input.delivery === 'recovery') await authenticateCanonicalWires(page.items)
         check(); snapshot = await storage.commitPage(snapshot, since, raw); check()
       }
       since = page.next_cursor; more = page.has_more
