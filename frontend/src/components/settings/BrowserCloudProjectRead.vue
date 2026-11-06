@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
@@ -138,7 +139,7 @@ async function openRecovery(): Promise<void> {
       recovery.value = value
       const remembered = hadRecovery ? priorSelection : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
-        ? remembered! : value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
+        ? remembered! : value.progress?.some(progress => progress.stage_id === null) || value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
       selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
       rememberStage()
     }
@@ -172,6 +173,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
+      <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
       <section v-if="stageDocuments.length" data-testid="cloud-document-list">
         <h4>{{ documentLabels[locale.language] }}</h4>
         <button v-for="document in stageDocuments" :key="document.id" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>

@@ -84,7 +84,7 @@ try {
     for(const annotation of Object.values(expected.annotations)) assert.ok((await panel.locator('[data-testid="cloud-map-annotations"]').textContent()).includes(annotation.title))
   }
   const snapshot = page => page.evaluate(async () => {
-    const q = indexedDB.open('worta-web-replay', 8)
+    const q = indexedDB.open('worta-web-replay', 9)
     const db = await new Promise((ok, no) => { q.onsuccess = () => ok(q.result); q.onerror = () => no(q.error) })
     try { return await new Promise((ok, no) => {
       const tx = db.transaction([...db.objectStoreNames]), rows = {}
@@ -99,6 +99,33 @@ try {
   assert.equal(first.replayManifest[0].applied_cursor,initialCursor);assert.equal(first.cursors[0].ack_cursor,0)
   assert.ok(!JSON.stringify(first).includes(fixture.map.data.nodeData.topic))
   await read(panel,fixture.map);assert.deepEqual(await snapshot(page),first)
+
+  if (!fixture.stageId) {
+  await context.close(); page=await launch()
+  await page.evaluate(async () => {
+    const req=q=>new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=()=>no(q.error)})
+    const db=await req(indexedDB.open('worta-web-replay')),saved=[]
+    for(const name of db.objectStoreNames){if(name.startsWith('progress'))continue;const st=db.transaction(name).objectStore(name);saved.push({name,keyPath:st.keyPath,indexes:[...st.indexNames].map(n=>{const i=st.index(n);return{name:n,keyPath:i.keyPath,unique:i.unique}}),rows:await req(st.getAll())})}
+    db.close();await req(indexedDB.deleteDatabase('worta-web-replay'))
+    const old=indexedDB.open('worta-web-replay',8);old.onupgradeneeded=()=>{for(const entry of saved){const st=old.result.createObjectStore(entry.name,{keyPath:entry.keyPath});for(const i of entry.indexes)st.createIndex(i.name,i.keyPath,{unique:i.unique});for(const row of entry.rows)st.put(row)}}
+    ;(await req(old)).close()
+    const create=IDBDatabase.prototype.createObjectStore
+    IDBDatabase.prototype.createObjectStore=function(name,...args){if(name==='progressProjection')throw new DOMException('test interrupted upgrade','AbortError');return create.call(this,name,...args)}
+    let rejected=false
+    const i=saved.find(e=>e.name==='identities').rows[0]
+    try{const {openBrowserReplayStorage}=await import('/src/platform/web/replayStorage.ts');await openBrowserReplayStorage({accountId:i.local_account_id,canonicalUserId:i.canonical_user_id,deviceId:i.device_id},new AbortController().signal,()=>true)}catch{rejected=true}finally{IDBDatabase.prototype.createObjectStore=create}
+    assertMigration(rejected,'migration abort not exercised')
+    const unchanged=await req(indexedDB.open('worta-web-replay',8))
+    assertMigration(unchanged.version===8&&!unchanged.objectStoreNames.contains('progressLedger'),'partial migration')
+    for(const entry of saved){const rows=await req(unchanged.transaction(entry.name).objectStore(entry.name).getAll());assertMigration(JSON.stringify(rows)===JSON.stringify(entry.rows),'migration changed prior data')}
+    unchanged.close()
+    function assertMigration(value,message){if(!value)throw Error(message)}
+  })
+  panel=await loginAndOpen(page);await read(panel,fixture.map)
+  assert.deepEqual(await snapshot(page),first)
+  assert.equal(await page.evaluate(()=>new Promise(resolve=>{const q=indexedDB.open('worta-web-replay',8);q.onerror=()=>resolve(q.error.name);q.onsuccess=()=>{q.result.close();resolve('incorrectly_opened')}})),'VersionError')
+  }
+
   const input=createInterface({input:process.stdin}),updateLine=new Promise(ok=>input.once('line',ok))
   console.log(JSON.stringify({phase:'ready_for_update'}))
   const update=JSON.parse(await updateLine);input.close()
@@ -129,7 +156,7 @@ try {
   const projection=await page.evaluate(async({row,key})=>{
     const {decryptObjectBytes}=await import('/src/crypto/index.ts'),{decodeBase64Url}=await import('/src/api/base64url.ts')
     // Canonical account ID is already bound in persisted identity, never inferred from local alias.
-    const q=indexedDB.open('worta-web-replay',8),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
+    const q=indexedDB.open('worta-web-replay',9),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     const identity=await new Promise(ok=>{const r=db.transaction('identities').objectStore('identities').getAll();r.onsuccess=()=>ok(r.result[0])});db.close()
     const amk=Uint8Array.from(key),nonce=decodeBase64Url(row.envelope.nonce),ciphertext=decodeBase64Url(row.envelope.ciphertext)
     let bytes
@@ -142,14 +169,14 @@ try {
   assert.deepEqual(await snapshot(page),accepted)
   if(fixture.stageId){
     const stage=accepted.inbox.find(row=>row.state==='stage_proven'&&JSON.parse(row.wire_item).event.entity_id==='S1')
-    const replace=async row=>page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay',8),db=await new Promise(ok=>q.onsuccess=()=>ok(q.result));await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},row)
+    const replace=async row=>page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay',9),db=await new Promise(ok=>q.onsuccess=()=>ok(q.result));await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},row)
     const bad=structuredClone(stage);bad.stage_proof.wire_digest='0'.repeat(64);await replace(bad)
     await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
     assert.equal(await panel.locator('[data-testid="cloud-map-read"]').count(),0)
     await replace(stage);await read(panel,update.map);assert.deepEqual(await snapshot(page),accepted)
   }
   await page.evaluate(async()=>{
-    const q=indexedDB.open('worta-web-replay',8),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
+    const q=indexedDB.open('worta-web-replay',9),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='map_proven');row.map_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
   })
   await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()

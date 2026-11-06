@@ -1,5 +1,109 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — Web Progress/history/statistics (LOCAL COMPLETE, linear histories)
+
+Starting SHA `67aa288445d32acfa722062d2b0f22ffdadba225`, branch `6.0`; initial
+working tree clean. Final SHA is the commit containing this entry; its exact
+hash is reported in the task result (`git log -1` identifies it). No previous
+checkpoint/owner decisions were removed.
+
+Implemented actual Codec11 Progress reading through existing Recovery GET →
+BrowserV10Recovery → replayStorage.ownerPort, not a second sync engine.
+`progressPrepare/Apply/Records` implement the Native `progress_sync::Chain` rules
+for complete genesis (up to the existing 256 captured facts) and linear append.
+Validate canonical AEAD/Codec11 frame, descriptor identity/sequence/time/device,
+bootstrap and original import binding, authenticated Metadata, genuine Stage
+reference coverage, action unit, current causal parent/revision/generation,
+fixed-micro-symbol arithmetic, unique entry IDs and Native migration count/total.
+Stage reference checks reuse the Content/Document/Map verifier. The Progress
+chain type is shared with the existing Desktop runtime. Native rounding for
+cross-unit display is retained, including Rust ties-even for author lists.
+
+Replay schema is now **v9**, with additive `progressLedger/progressProjection`
+stores. Inbox13 records retain original encrypted wire and a ledger/projection
+certificate, whose digests alone never authorize reading: reopening re-decrypts
+all original sources, validates dependencies/ancestry and recomputes the Native
+chain and encrypted projection. Historical projections are retained encrypted
+inside append-only ledger rows. The full ReplaySnapshot/CAS includes Progress.
+Existing ownerPort rechecks server anchor and every immutable wire before
+atomic ledger/projection/inbox proof/manifest coverage write; session/key lifetime
+and scope checks remain mandatory. Progress entry collisions across scopes refuse.
+Migration is atomic, retaining original ciphertext, seeds, proofs and import
+binding; incompatible older readers fail closed. Existing inspection scripts
+now open the current database without pinning inspection to v8. Explicit
+historical migration fixtures retain their original versions.
+
+Vue displays only authenticated Progress: total, finite/unlimited writing goal,
+percentage/remaining, dated ordered facts and timeline/statistics (entry count,
+active days and averages). Uses existing `calculatePureStatistics`, goal helpers,
+unit factors/localization; no independent statistics engine. Frozen writing_day
+is used, not the importing browser's timezone to relabel historical facts.
+Stage selection uses each Stage's verified settings/history. Root aggregate is
+only derived when every necessary Stage chain is authenticated. Missing Stage
+Progress never becomes a fabricated zero. No plaintext projection is persisted.
+Reading does not emit game rewards or mutate Game. Help updated in all six
+languages through the normal generator; no dependency or protocol change.
+
+**Actual local acceptance:** Native SQLite → production push → isolated
+PostgreSQL16/FastAPI → Recovery GET → Chromium login/unlock:
+**4 PASS in98.36s**, including project Progress and Stage Progress and both Map
+regressions. Progress fixture has three real manual actions 100→250→300, then a
+fourth 475 after Web has opened. Checks Native SQLite totals, goals, percentage,
+remaining, fact IDs/order, active days and exact decrypted Native chain;
+original ciphertext/receipts/seeds/bindings, actual owner outcomes/manifest,
+redelivery without duplicates, fresh browser profile connection after restart,
+full reauthentication, genuine projection transaction abort/full snapshot
+rollback and retry, damaged ciphertext and damaged durable proof refusal.
+Project history grows5→6 server events; Stage history9→10, with two independent
+Stage scopes and real structural proofs. Only Native Desktop is a server sync
+device, its ACK remains0; browser capability PUT/device registration/ACK absent.
+Native capability declarations use only the previously owner-authorized
+synthetic Desktop/isolated server scope, never browser/production accounts.
+
+**Other checks:** 141 Vitest PASS (10 focused files including existing Desktop
+Progress runtime, structural/recovery, Document/Map, Vue and pure statistics).
+4 existing Native Rust Progress tests PASS using the maintained local native
+bridge/test binary; Native source unchanged, no cross-platform/fresh Cargo build
+claim. Typecheck, frontend build and maintained quick acceptance PASS.
+30 help/localization tests PASS. Separate Document owner/IndexedDB regression
+PASS (1 test): populated v6/v7 histories migrate, reauthenticate, abort/retry and
+old-reader refusal. Browser schema migration script PASS. Populated Map v8→v9
+abort, unchanged old database, retry, data preservation/reopen and old-reader
+refusal are exercised inside the real HTTP Map regression. Driver/Python syntax
+and `git diff --check` pass. No CI was manually started or polled.
+
+Acceptance limits: **linear complete genesis/append only**. Partial migration
+batches (`migrate`), select/rebase/correct/tombstone/adopt_local/conflicting tips
+are not claimed as supported; they fail closed without displaying an unverified
+history. These remain in the existing full strategy/source matrix, not new
+technical Slices. Daily planning/settings-specific streaks/freezes and Game
+statistics are not invented from Progress facts. No ordinary reader capability,
+ACK or server cursor authorization is derived from local manifest coverage;
+Progress is outside the existing qualified ACK/proven_prefix family set.
+
+Readiness remains **2/10 Note blockers closed**, stage **2/6**, technical
+Slice **4/5 PARTIAL**. The audit's basic Progress/history/statistics user result
+is now accepted, leaving **8 functional reading groups** (Stage deletion; rich/
+late/delete/Resolution Document; remaining Map delete/Resolution; Note properties;
+project Game; account Game; canonical catalog; encrypted covers). Advanced/mixed
+history qualification and the 200-event bound remain existing cross-cutting
+limits. Slice4 still lacks full strategy/source dispatch, own P2 prefix/
+continuation, dependency closure and eligible ordinary two-recipient gate/feed
+lifecycle. Full Web and full Progress history support are not declared ready.
+
+Security gates unchanged: `ready=false`, `declarationAllowed=false`,
+`writerAuthorized=false`. No main/VPS/deployment/registration/real user data or
+additional worktrees. Accepted implementation, tests and docs committed and
+pushed without force to origin/6.0; final tree checked clean. Task-owned local
+PostgreSQL is stopped after acceptance; unrelated Docker data is untouched.
+
+**Next concrete user task:** project Game reading through its existing Native
+owner and the same recovery/UI, preserving all existing mechanics. Then account
+Game, remaining reading, Web editing and bidirectional sync. Owner decisions
+from05.11.2026 remain binding: full ordinary/game Web, all game mechanics, one
+sync engine, code reuse, simple safe implementation and future extensibility.
+
+
 ## 2026-11-06 — Stage Map reading/update (LOCAL COMPLETE)
 
 Starting SHA `b1967b326008605108c7ff7ae72b8b630486f83c`, branch6.0.

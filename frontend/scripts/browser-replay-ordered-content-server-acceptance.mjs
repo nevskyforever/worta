@@ -50,7 +50,7 @@ const attempt = (page, method) => page.evaluate(async method => {
   catch (error) { return { error: error.code ?? error.message } }
 }, method)
 const cache = page => page.evaluate(async () => {
-  const request = indexedDB.open('worta-web-replay', 8)
+  const request = indexedDB.open('worta-web-replay')
   await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
   const db = request.result, rows = {}
   try { await new Promise((resolve, reject) => {
@@ -61,7 +61,7 @@ const cache = page => page.evaluate(async () => {
 })
 async function putInbox(page, row) {
   await page.evaluate(async row => {
-    const request = indexedDB.open('worta-web-replay', 8)
+    const request = indexedDB.open('worta-web-replay')
     await new Promise((resolve, reject) => { request.onsuccess = resolve; request.onerror = () => reject(request.error) })
     const db = request.result
     try { await new Promise((resolve, reject) => {

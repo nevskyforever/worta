@@ -41,7 +41,7 @@ const apply = page => page.evaluate(async () => {
   catch (error) { return { error: error.code ?? error.message } }
 })
 const cache = page => page.evaluate(async () => {
-  const open = indexedDB.open('worta-web-replay', 8)
+  const open = indexedDB.open('worta-web-replay')
   await new Promise((resolve, reject) => { open.onsuccess = resolve; open.onerror = () => reject(open.error) })
   const db = open.result, rows = {}
   try {

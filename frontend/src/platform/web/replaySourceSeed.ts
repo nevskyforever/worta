@@ -1,3 +1,4 @@
+import { authenticateReplayProgress } from './progressApply'
 import { authenticateReplayMaps } from './mapApply'
 import { authenticateReplayDocuments } from './documentApply'
 import { cloudProjectsApi } from '@/api/cloudProjects'
@@ -44,18 +45,19 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
   if (!remote || remote.state !== 'active' || !remote.bootstrap_id || !remote.origin_device_id
     || remote.origin_device_id === scope.deviceId || remote.initial_event_count === null
     || remote.initial_max_server_sequence === null) throw new BrowserReplayError('source_seed_ineligible')
+  await authenticateReplayProgress(scope, snapshot, amk, current)
   await authenticateReplayMaps(scope, snapshot, amk, current)
   await authenticateReplayDocuments(scope, snapshot, amk, current)
   const noteOwners = new Map<string, string>(), metadataRows: ReplaySnapshot['rows'] = [], initial: ReplaySnapshot['rows'] = []
   for (const row of snapshot.rows) {
     if (!current()) fail('session_closed')
     const event = JSON.parse(row.wire_item).event as V3Descriptor
-    if (event.entity_type === 'document' || event.entity_type === 'map') {
+    if (['document', 'map', 'progress'].includes(event.entity_type)) {
       // Seeding imports Metadata only. A later peer Document genesis remains
       // received until the Document owner authenticates and applies it. Persisted
       // outcomes were freshly authenticated above, never trusted by state alone.
       if (event.project_id !== projectId || row.server_sequence <= remote.initial_max_server_sequence
-        || !['received', event.entity_type === 'map' ? 'map_proven' : 'document_proven'].includes(row.state) || event.operation !== 'event' || !Number.isSafeInteger(event.revision) || event.revision < 1
+        || !['received', event.entity_type === 'progress' ? 'progress_proven' : event.entity_type === 'map' ? 'map_proven' : 'document_proven'].includes(row.state) || event.operation !== 'event' || !Number.isSafeInteger(event.revision) || event.revision < 1
         || event.deleted_at !== null || event.device_id === scope.deviceId) fail('source_seed_unsupported_family')
       continue
     }

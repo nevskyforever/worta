@@ -1,3 +1,5 @@
+import { commitProgressEvent, authenticateReplayProgress, progressPreparationInventory } from './progressApply'
+import { prepareProgressEvent, inspectPreparedProgressEvent } from './progressPrepare'
 import { commitMapEvent, authenticateReplayMaps, mapPreparationInventory } from './mapApply'
 import { prepareMapEvent, inspectPreparedMapEvent } from './mapPrepare'
 import { commitDocumentEvent, authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
@@ -30,7 +32,7 @@ import { REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame, replayUuid,
 import type { ReplaySourceSeedReference } from './replayRecords'
 
 export const REPLAY_DATABASE_NAME = 'worta-web-replay'
-export const REPLAY_DATABASE_VERSION = 8
+export const REPLAY_DATABASE_VERSION = 9
 type Schema = readonly [string, string | string[], ReadonlyArray<readonly [string, string | string[], boolean]>]
 const previousSchema: readonly Schema[] = [
   ['identities', 'canonical_user_id', [['local_account_id', 'local_account_id', true], ['device_id', 'device_id', true]]],
@@ -56,7 +58,12 @@ const mapSchema: readonly Schema[] = [
   ['mapProjection', ['account_id', 'project_id', 'entity_id'], []],
 ]
 const v7Schema = [...previousSchema, ...documentSchema]
-const schema = [...v7Schema, ...mapSchema]
+const v8Schema = [...v7Schema, ...mapSchema]
+const progressSchema: readonly Schema[] = [
+  ['progressLedger', ['account_id', 'event_id'], [['sequence', ['account_id', 'server_sequence'], true]]],
+  ['progressProjection', ['account_id', 'project_id', 'entity_id'], []],
+]
+const schema = [...v8Schema, ...progressSchema]
 const names = schema.map(([name]) => name)
 function fail(): never { throw new BrowserPersistenceError('corrupt_record') }
 const range = (account: string) => IDBKeyRange.bound([account], [account, []])
@@ -89,14 +96,14 @@ function openDatabase(signal: AbortSignal, current: () => boolean): Promise<IDBD
     request.onerror = () => stop(request.error)
     request.onupgradeneeded = event => {
       try {
-        if (failed || signal.aborted || !current() || ![0, 1, 2, 3, 4, 5, 6, 7].includes(event.oldVersion)) throw new BrowserPersistenceError('unsupported_version')
+        if (failed || signal.aborted || !current() || ![0, 1, 2, 3, 4, 5, 6, 7, 8].includes(event.oldVersion)) throw new BrowserPersistenceError('unsupported_version')
         if (event.oldVersion !== 0) {
-          validateSchema(request.result, request.transaction!, event.oldVersion === 7 ? v7Schema : previousSchema)
-          for (const [name, keyPath, indexes] of (event.oldVersion === 7 ? mapSchema : [...documentSchema, ...mapSchema])) {
+          validateSchema(request.result, request.transaction!, event.oldVersion === 8 ? v8Schema : event.oldVersion === 7 ? v7Schema : previousSchema)
+          for (const [name, keyPath, indexes] of (event.oldVersion === 8 ? progressSchema : event.oldVersion === 7 ? [...mapSchema, ...progressSchema] : [...documentSchema, ...mapSchema, ...progressSchema])) {
             const store = request.result.createObjectStore(name, { keyPath })
             for (const [index, path, unique] of indexes) store.createIndex(index, path, { unique })
           }
-          migrateReplay(request.transaction!, (event.oldVersion === 7 ? v7Schema : previousSchema).map(([name]) => name), () => { if (signal.aborted || !current()) throw new BrowserPersistenceError('closed') }, stop, Math.min(event.oldVersion, 6) as 1 | 2 | 3 | 4 | 5 | 6)
+          migrateReplay(request.transaction!, (event.oldVersion === 8 ? v8Schema : event.oldVersion === 7 ? v7Schema : previousSchema).map(([name]) => name), () => { if (signal.aborted || !current()) throw new BrowserPersistenceError('closed') }, stop, Math.min(event.oldVersion, 6) as 1 | 2 | 3 | 4 | 5 | 6)
           return
         }
         for (const [name, keyPath, indexes] of schema) {
@@ -394,10 +401,19 @@ class BrowserReplayStorage {
       return await new BrowserV10Recovery(readonly, new BrowserLocalAuthority(readonly), current, ownerTransaction, validatePrefix, () => ownerTransaction(0), {
         authenticate: () => this.authenticateDocuments(auth, bindings, keys),
         apply: sequence => this.applyDocumentEvent(sequence, auth, bindings, keys),
-      }, { authenticate: () => this.authenticateMaps(auth, bindings, keys), apply: sequence => this.applyMapEvent(sequence, auth, bindings, keys) })
+      }, { authenticate: () => this.authenticateMaps(auth, bindings, keys), apply: sequence => this.applyMapEvent(sequence, auth, bindings, keys) }, { authenticate: () => this.authenticateProgress(auth, bindings, keys), apply: sequence => this.applyProgressEvent(sequence, auth, bindings, keys) })
         .bind(auth, bindings, keys, device).run(this.scope, { maxEvents: 1 })
     } finally { unAuth(); unKey() }
   }
+  async authenticateProgress(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+    const snapshot=await this.read(),{context}=await bindings.ensureForCurrentUser(this.scope.accountId),lease=keys.leaseForAccount(this.scope.accountId)
+    const current=()=>{try{this.check();return auth.isCurrent(context)&&!!lease?.isCurrent()}catch{return false}}
+    if(!lease||lease.localAccountId!==this.scope.accountId||context.userId!==this.scope.canonicalUserId||lease.canonicalUserId!==context.userId||lease.authEpoch!==context.authEpoch||!current())throw new BrowserPersistenceError('closed')
+    const progress=await lease.use(amk=>authenticateReplayProgress(this.scope,snapshot,amk,current))
+    if(!current()||!replaySame(snapshot,await this.read()))throw new BrowserPersistenceError('stale_authority')
+    return progress
+  }
+
   async authenticateMaps(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
     const snapshot=await this.read(),{context}=await bindings.ensureForCurrentUser(this.scope.accountId),lease=keys.leaseForAccount(this.scope.accountId)
     const current=()=>{try{this.check();return auth.isCurrent(context)&&!!lease?.isCurrent()}catch{return false}}
@@ -458,6 +474,44 @@ class BrowserReplayStorage {
     } finally { unAuth();unKey() }
   }
 
+  private async applyProgressEvent(sequence:number, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
+    const stop=()=>{void this.close()},unAuth=auth.onInvalidated(stop),unKey=keys.onInvalidated(stop)
+    try {
+    await this.authenticateProgress(auth,bindings,keys)
+    const expected=await this.read(),manifest=expected.manifest,row=expected.rows.find(row=>row.server_sequence===sequence)
+    if(!manifest||manifest.phase!=='received'||!row)throw new BrowserPersistenceError('stale_cursor')
+    if(row.state==='progress_proven')return 'already_applied' as const
+    if(row.state!=='received'||sequence!==manifest.applied_cursor!+1)throw new BrowserPersistenceError('stale_cursor')
+    const {context}=await bindings.ensureForCurrentUser(this.scope.accountId),lease=keys.leaseForAccount(this.scope.accountId)
+    const current=()=>{try{this.check();return auth.isCurrent(context)&&!!lease?.isCurrent()}catch{return false}}
+    if(!lease||!current())throw new BrowserPersistenceError('closed')
+    const server=async()=>{
+      if(!current())throw new BrowserPersistenceError('closed')
+      const registry=await auth.authorized(token=>cloudProjectsApi.listBootstraps(token,this.signal)),mode=await auth.authorized(token=>encryptedSyncV2Api.capabilities(token,this.signal))
+      if(!replaySame(replayAnchor(registry.value,mode.value),manifest.anchor))throw new BrowserPersistenceError('stale_authority')
+      let since=0,more=true
+      while(more){
+        const raw=await auth.authorized(token=>encryptedSyncV3Api.recoveryRaw(token,since,REPLAY_LIMITS.page,manifest.anchor.registry.current_cursor,manifest.anchor.transport.cutover_epoch,this.signal))
+        const page=prepareReplayPage(raw.value,since,this.scope,manifest.anchor).page
+        if(page.items.some((value,index)=>!expected.rows[since+index]||!replaySame(value,JSON.parse(expected.rows[since+index]!.wire_item))))throw new BrowserPersistenceError('stale_authority')
+        if(page.has_more&&page.next_cursor<=since)throw new BrowserPersistenceError('stale_authority')
+        since=page.next_cursor;more=page.has_more
+      }
+      if(since!==expected.rows.length)throw new BrowserPersistenceError('stale_authority')
+      if(!current())throw new BrowserPersistenceError('closed')
+    }
+    return await lease.use(async amk=>{
+      const inventory=progressPreparationInventory(expected),token=await prepareProgressEvent(this.scope,row,inventory,amk,current)
+      const plan = inspectPreparedProgressEvent(token, this.scope, inventory)
+      const other = (await authenticateReplayProgress(this.scope, expected, amk, current))
+        .filter(value => value.project_id !== plan.event.header.project_id || value.stage_id !== plan.event.header.stage_id)
+      const ids = new Set(other.flatMap(value => value.entries.map(entry => entry.entry_id)))
+      if (plan.projection.entries.some(entry => ids.has(entry.entry_id))) throw new BrowserPersistenceError('conflicting_record')
+      return commitProgressEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
+        (tx,done,abort)=>readStageInventory(tx,this.scope,done,abort))
+    })
+    } finally { unAuth();unKey() }
+  }
   private async applyMapEvent(sequence:number, auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding, keys: RuntimeKeyContext) {
     const stop=()=>{void this.close()},unAuth=auth.onInvalidated(stop),unKey=keys.onInvalidated(stop)
     try {
@@ -643,7 +697,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateProgress' | 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)

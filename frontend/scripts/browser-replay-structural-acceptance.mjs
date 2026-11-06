@@ -132,7 +132,7 @@ try {
     window.fetch = async (...args) => {
       const response = await original(...args), url = new URL(args[0] instanceof Request ? args[0].url : String(args[0]), location.href)
       if (url.pathname === '/api/v2/sync/encrypted/capabilities' && ++modes === 4) {
-        const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
+        const open = indexedDB.open('worta-web-replay'); await new Promise(resolve => { open.onsuccess = resolve }); const db = open.result
         const tx = db.transaction(['ownerHeads', 'inbox'], 'readwrite'), heads = tx.objectStore('ownerHeads').getAll(), rows = tx.objectStore('inbox').getAll()
         heads.onsuccess = () => { const h = heads.result.find(head => head.owner_kind === 'stage'); window.repairHead = structuredClone(h); h.history[0].wire_digest = '0'.repeat(64); tx.objectStore('ownerHeads').put(h) }
         rows.onsuccess = () => { const row = rows.result.find(row => row.event_id === repairHead.history[0].event_id); window.repairRow = structuredClone(row); row.stage_proof.wire_digest = '0'.repeat(64); tx.objectStore('inbox').put(row) }
@@ -185,7 +185,7 @@ try {
     let db
     try {
       await keys.unlockWithPassphrase(identity.local_account_id, 'encryption-password')
-      const open = indexedDB.open('worta-web-replay', 8); await new Promise(resolve => { open.onsuccess = resolve }); db = open.result
+      const open = indexedDB.open('worta-web-replay'); await new Promise(resolve => { open.onsuccess = resolve }); db = open.result
       const scope = { canonicalUserId: context.userId, accountId: identity.local_account_id, deviceId: identity.device_id }
       const current = () => auth.isCurrent(context) && !!keys.leaseForAccount(scope.accountId)?.isCurrent()
       const transaction = (input, _stores, mode, schedule) => {

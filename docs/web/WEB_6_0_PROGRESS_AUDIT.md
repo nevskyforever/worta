@@ -16,7 +16,7 @@ capabilities или security gates эта ревизия не вводит.
 blockers. Дополнительный `local_prefix_blocked` зависит от проверяемой истории
 и не является одиннадцатым постоянным критерием.
 
-Recovery GET, Content/Stage/Document/Map чтение, пагинация и UI — принятые функции
+Recovery GET, Content/Stage/Document/Map/линейный Progress чтение, пагинация и UI — принятые функции
 продукта. Их успех не объявляет recovery-only профиль обычным sync-устройством
 и не доказывает полный Note claim. Старые формулировки «нет HTTP recovery»,
 «не применяется successor», «нет нескольких страниц» и «нет документов» устарели.
@@ -73,8 +73,8 @@ Slice 5 не заявляются. Технические Slice и шесть п
 добавлять в его критерии автоматически. Важны полное безопасное чтение
 поддерживаемых Native данных, новые Desktop revisions и reopen.
 
-Осталось **9 явно перечисленных функциональных групп чтения**. Это единицы
-учёта roadmap, а не 9 новых технических этапов и не оценка процента готовности.
+Осталось **8 явно перечисленных функциональных групп чтения**. Это единицы
+учёта roadmap, а не 8 новых технических этапов и не оценка процента готовности.
 Для каждой требуется свой обычный Native→HTTP→Vue→restart сценарий.
 
 | № | Незавершённая функция | Наблюдаемый критерий завершения |
@@ -83,11 +83,10 @@ Slice 5 не заявляются. Технические Slice и шесть п
 | 2 | Полное представление Document | Форматирование действующего Tiptap JSON видно в Web; поздний новый Document после unlock и допустимые delete/Resolution histories применяются owner, а не блокируют проект. Текущий continuation preflight требует revision≥2, поэтому поздний genesis также остаётся конкретным пробелом. Plain text/create/linear updates обоих scopes уже приняты. |
 | 3 | Оставшиеся Map histories | Stage Map create/update, annotations, Stage proof и restart теперь приняты вместе с project Map. Остаются ранее перечисленные delete/Resolution Native Map histories; группа пока не закрыта. |
 | 4 | Свойства и связи Notes | Проверенные checklist/tags/annotations и Map-derived Notes доступны пользователю. Сейчас основной recovery UI показывает заголовок и body. |
-| 5 | Прогресс, история и статистика | Codec11/Progress owner подключён к реальному чтению и существующим панелям; новая запись Desktop обновляет данные и производные показатели. |
-| 6 | Состояние игры проекта | Project Game owner отдаёт UI все существующие механики/состояния проекта, без потери их данных после update/reopen. Это обязательный продуктовый scope. |
-| 7 | Состояние игры аккаунта | Account Game owner подключён к cabinet/shop/rhythm/баффам/наградам и другим уже существующим панелям чтения; игровые действия/запись относятся к этапам 3–4. |
-| 8 | Полный облачный каталог | Canonical folders/order/membership и project order показываются через владельцев account history. Bootstrap project list не заменяет эти данные. |
-| 9 | Зашифрованные обложки | Metadata2/cover references и encrypted blob проверяются, отображаются и обновляются без раскрытия ключа серверу. |
+| 5 | Состояние игры проекта | Project Game owner отдаёт UI все существующие механики/состояния проекта, без потери их данных после update/reopen. Это обязательный продуктовый scope. |
+| 6 | Состояние игры аккаунта | Account Game owner подключён к cabinet/shop/rhythm/баффам/наградам и другим уже существующим панелям чтения; игровые действия/запись относятся к этапам 3–4. |
+| 7 | Полный облачный каталог | Canonical folders/order/membership и project order показываются через владельцев account history. Bootstrap project list не заменяет эти данные. |
+| 8 | Зашифрованные обложки | Metadata2/cover references и encrypted blob проверяются, отображаются и обновляются без раскрытия ключа серверу. |
 
 Дополнительно остаются **сквозные условия чтения**, а не новые UI функции:
 совместное открытие полного mixed account history (сейчас Map/Document вместе с
@@ -97,8 +96,15 @@ Note Resolution блокируются `hasResolution`); автоматичес�
 продуктовый предел. Без этих проверок нельзя объявлять «полное чтение» всего
 аккаунта. Безопасные ограничения не удалять ради счётчика.
 
-Следующие 3 продуктовые задачи: **Stage Map**, **Progress/history/stats**,
-**project/account Game reading**. Rich Document и оставшиеся строки не исключены
+Stage Map и базовое чтение Progress/history/stats приняты. Для Progress проверены
+project/Stage complete genesis + append, реальные HTTP updates, цели/история/
+статистика, rollback/proofs и restart; счётчик уменьшен9→8. Partial migration и
+конфликтные/correct/tombstone/select/rebase истории не объявлены поддерживаемыми:
+это остаток существующей полной source/strategy матрицы и mixed-history приёмки,
+а не новая функциональная группа или новый Slice.
+
+Следующие продуктовые задачи: **project Game reading**, **account Game reading**,
+затем оставшиеся группы чтения. Rich Document и оставшиеся строки не исключены
 из этапа 2. После полного чтения следующий продуктовый этап — **3/6, создание,
 редактирование и Web→Server→Desktop**, с проверенным server confirmation,
 собственным echo и обоими направлениями единого sync engine. Полная WORTA Web,

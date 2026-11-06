@@ -1,3 +1,4 @@
+import { presentProgress, type BrowserProgressView, type ProgressSettings } from './progressView'
 import type { BrowserProjectMap } from './mapApply'
 import type { PortableDocument } from '@/cloud/documentCodec'
 import { readReplayStages, type ReplayStageView } from './replayStageView'
@@ -135,7 +136,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[] }> {
     this.assertWeb()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -163,9 +164,22 @@ export class BrowserCloudAccountSession {
       const source = await local.readSnapshot(scope, projectId)
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
+      const progressChains = (await storage.authenticateProgress(this.auth, bindings, keys)).filter(value => value.project_id === projectId)
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
       const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
+        progress: progressChains.filter(chain => chain.stage_id !== null || !stages.length || stages.every(stage => progressChains.some(progress => progress.stage_id === stage.id))).map(chain => {
+          const settings = chain.stage_id === null ? value.project : stages.find(stage => stage.id === chain.stage_id)?.settings
+          if (!settings) throw new BrowserCloudReadError('unsupported_history')
+          // Native Progress projection uses Stage totals for a staged project.
+          // Do not invent totals for Stages whose Progress has not been imported.
+          const day = new Date().toLocaleDateString('en-CA')
+          const total = chain.stage_id === null && stages.length ? stages.reduce((sum, stage) => {
+            const progress = progressChains.find(progress => progress.stage_id === stage.id)!
+            return sum + presentProgress(progress, stage.settings!, day).total
+          }, 0) : undefined
+          return presentProgress(chain, settings as unknown as ProgressSettings, day, total)
+        }),
         project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps,
       }))
       if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')

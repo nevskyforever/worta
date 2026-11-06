@@ -11,7 +11,7 @@ import { BrowserReplayError } from './replayRecords'
 import type { ReplaySnapshot } from './replayInventory'
 import type { BrowserSyncScope } from './syncDurability'
 
-export interface ReplayStageView { id: string; name: string }
+export interface ReplayStageView { id: string; name: string; settings?: import('./progressView').ProgressSettings }
 
 /** Read names and order only from the exact owner-certified encrypted snapshot. */
 export async function readReplayStages(scope: BrowserSyncScope, snapshot: ReplaySnapshot, projectId: string,
@@ -46,7 +46,7 @@ export async function readReplayStages(scope: BrowserSyncScope, snapshot: Replay
     if (!head || head.tip_event_ids.length !== 1) throw new BrowserReplayError('unsupported_history')
     const event = await open(head.tip_event_ids[0]!)
     if (!event.stage) throw new BrowserReplayError('unsupported_history')
-    result.push({ id, name: event.stage.name })
+    result.push({ id, name: event.stage.name, settings: { unit: event.stage.unit as import('@/cloud/progressCodec').ProgressFact['unit'], goal: event.stage.goal, infinite: event.stage.infinite, created_at: event.stage.created_at } })
   }
   if (!current()) throw new BrowserReplayError('session_closed')
   return result

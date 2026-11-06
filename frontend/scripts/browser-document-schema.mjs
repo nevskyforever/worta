@@ -25,5 +25,5 @@ try{
   const reopened=await openBrowserReplayStorage(s,new AbortController().signal,()=>true),after=await reopened.read();await reopened.close()
   return{aborted,refused,abortedVersion,version,identity,ids,snapshot,after,oldRejected}
  },schema)
- assert.equal(r.aborted,true);assert.equal(r.refused,true);assert.equal(r.abortedVersion,6);assert.equal(r.version,7);assert.equal(r.oldRejected,true);assert.deepEqual(r.ids,[r.identity]);assert.deepEqual(r.snapshot,r.after);assert.deepEqual(r.snapshot.documents,{ledger:[],projections:[]});console.log('Document schema migration/reopen/abort/old-reader: PASS')
+ assert.equal(r.aborted,true);assert.equal(r.refused,true);assert.equal(r.abortedVersion,6);assert.equal(r.version,9);assert.equal(r.oldRejected,true);assert.deepEqual(r.ids,[r.identity]);assert.deepEqual(r.snapshot,r.after);assert.deepEqual(r.snapshot.documents,{ledger:[],projections:[]});console.log('Document schema migration/reopen/abort/old-reader: PASS')
 }finally{await browser?.close();await vite?.close()}

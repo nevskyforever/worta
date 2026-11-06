@@ -1,5 +1,32 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 06.11.2026 — Progress/history/statistics LOCAL COMPLETE (linear)
+
+Project and Stage Codec11 complete genesis/append now use the existing recovery,
+ownerPort, atomic replay CAS and encrypted projection. Real Native SQLite →
+PostgreSQL16/FastAPI → Chromium login/unlock, three facts plus a subsequent fourth
+Desktop action, history/goals/statistics, redelivery, rollback, corrupt proof/
+ciphertext refusal and restart are accepted. Statistics reuse existing pure
+Desktop calculations. No browser writer, capability PUT or ACK is granted.
+Replay v9 adds only Progress stores; populated v8 Map and v6/v7 Document migration,
+abort/retry, ciphertext/proof preservation and old-reader refusal pass.
+
+4 HTTP/Chromium tests, 141 focused Vitest, 4 existing Rust tests, 30 help/localization,
+Document migration regression, typecheck/build/quick acceptance PASS. See the
+latest checkpoint for exact scope/results and source paths. Complete linear
+capture and append are accepted; partial migration/conflict/correct/delete/
+selection histories remain unsupported and fail closed under the existing full
+source/strategy matrix. No unverified game/streak/daily-planning values are shown.
+
+**8 basic reading groups remain**, down from9 after this Progress user result.
+Note readiness remains2/10, stage2/6 and Slice4/5 PARTIAL. Cross-cutting mixed/
+advanced histories and resource limits remain distinct from this UI function
+counter. Next task: **project Game reading**, then account Game with ALL existing
+mechanics, remaining full reading, Web editing and bidirectional unified sync.
+Full Web/ordinary+game/code reuse/pragmatic extensibility remain mandatory;
+ready/declarationAllowed/writerAuthorized stay false. No release policy change.
+
+
 ## 06.11.2026 — Stage Map LOCAL COMPLETE
 
 Native Stage Map genesis + annotations + Desktop update → PostgreSQL16/FastAPI →

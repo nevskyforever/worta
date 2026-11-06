@@ -9,10 +9,10 @@ import {diagnostics} from '@/diagnostics/service'
 import {ProjectMetadataMigrationRuntime} from './projectMetadataMigrationRuntime'
 import {NOTE_READER_SUPPORT} from './contentNoteRuntime'
 import {unframeProgressEvent,type ProgressEvent} from './progressCodec'
-import type {ProgressFact} from './progressCodec'
+import type {ProgressChain} from './progressTransition'
+export type {ProgressChain} from './progressTransition'
 import {canonicalizeSyncTimestamp} from './syncTimestamp'
 import type {MetadataScope} from '@/infrastructure/sqlite/projectMetadataMigrationRepository'
-export interface ProgressChain {base_total:string;entries:ProgressFact[]}
 export interface ProgressOwnerView {entity_id:string;stage_id:string|null;state:string;blocker:string|null;tips:string[];versions:Array<{event_id:string;chain:ProgressChain}>;local:unknown}
 export interface ProgressApplyResult {blocked:string[];hasRemainingWork:boolean;listed:number;applied:number;conflicts:number}
 export interface ProgressAuthorityView {owners:ProgressOwnerView[]}

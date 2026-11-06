@@ -16,7 +16,7 @@ export function validateBrowserV5State(scopes: BrowserSyncScope[], stores: unkno
   // Detached received views validate legacy transport invariants without erasing applied state/proof.
   validateBrowserV3SyncState(scopes, outbound, inbox.map(row => {
     if (row.state === 'received') return structuredClone(row)
-    if (row.state === 'note_proven'||row.state==='note_conflict_preserved'||row.state==='stage_proven'||row.state==='stage_order_proven'||row.state==='content_note_proven'||row.state==='content_note_conflict_preserved'||row.state==='content_note_self_echo_proven'||row.state==='document_proven'||row.state==='map_proven') return bad()
+    if (row.state === 'note_proven'||row.state==='note_conflict_preserved'||row.state==='stage_proven'||row.state==='stage_order_proven'||row.state==='content_note_proven'||row.state==='content_note_conflict_preserved'||row.state==='content_note_self_echo_proven'||row.state==='document_proven'||row.state==='map_proven'||row.state==='progress_proven') return bad()
     const { applied_proof: _proof, ...received } = row
     return { ...received, record_version: 1, state: 'received' }
   }), cursors, receipts)

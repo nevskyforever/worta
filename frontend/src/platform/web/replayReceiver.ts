@@ -53,7 +53,7 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
   // This is receipt validation, never an owner outcome. Dependencies/proofs are
   // checked by the existing owners only after all pages have been received.
   const authenticateCanonicalWires = (items: ReturnType<typeof prepareReplayPage>['page']['items']) => lease.use(async amk => {
-    for (const item of items) if (['document', 'map'].includes((item.event as V3Descriptor).entity_type)) {
+    for (const item of items) if (['document', 'map', 'progress'].includes((item.event as V3Descriptor).entity_type)) {
       const event = item.event as V3Descriptor
       const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
       const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
@@ -121,6 +121,10 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
             if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if (event.entity_type === 'progress' && event.operation === 'event') {
+              await authenticateCanonicalWires([item])
+              continue
+            }
             if (event.entity_type === 'map' && event.operation === 'event') {
               const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
               await authenticateReplayMaps(scope, previous, amk, current)

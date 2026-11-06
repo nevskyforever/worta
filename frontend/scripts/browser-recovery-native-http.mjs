@@ -69,13 +69,13 @@ try{
  }
  await context.close();page=await launch();const reopened=await execute(page);assert.deepEqual(reopened.state,first.state);assert.deepEqual(reopened.notes,first.notes)
  const original=first.state.rows.at(-1)
- await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay', 8);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const damaged=structuredClone(row),wire=JSON.parse(damaged.wire_item);wire.object.ciphertext=(wire.object.ciphertext[0]==='A'?'B':'A')+wire.object.ciphertext.slice(1);damaged.wire_item=JSON.stringify(wire);await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(damaged);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
+ await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay');await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const damaged=structuredClone(row),wire=JSON.parse(damaged.wire_item);wire.object.ciphertext=(wire.object.ciphertext[0]==='A'?'B':'A')+wire.object.ciphertext.slice(1);damaged.wire_item=JSON.stringify(wire);await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(damaged);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
  await assert.rejects(()=>execute(page))
- await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay', 8);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
+ await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay');await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
  assert.deepEqual((await execute(page)).state,first.state)
- await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay', 8);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const damaged=structuredClone(row);damaged.content_note_proof.outcome_digest='0'.repeat(64);await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(damaged);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
+ await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay');await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;const damaged=structuredClone(row);damaged.content_note_proof.outcome_digest='0'.repeat(64);await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(damaged);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
  await assert.rejects(()=>execute(page))
- await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay', 8);await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
+ await page.evaluate(async row=>{const q=indexedDB.open('worta-web-replay');await new Promise((ok,no)=>{q.onsuccess=ok;q.onerror=no});const db=q.result;await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite');tx.objectStore('inbox').put(row);tx.oncomplete=ok;tx.onabort=no});db.close()},original)
  assert.deepEqual((await execute(page)).state,first.state)
  // Provision the isolated account with the Desktop's actual key through the
  // standard wrapped-key API, then exercise the real Web login/unlock runtime.
@@ -98,7 +98,7 @@ try{
   await panel.locator('[data-testid="cloud-notes-open"]').waitFor({state:'visible'})
   await page.waitForFunction(()=>!document.querySelector('[data-testid="cloud-notes-open"]').disabled)
   await page.evaluate(async sequence=>{
-   const snapshot=()=>new Promise((ok,no)=>{const q=indexedDB.open('worta-web-replay', 8);q.onerror=no;q.onsuccess=()=>{const db=q.result,tx=db.transaction([...db.objectStoreNames]),all={};for(const name of db.objectStoreNames){const r=tx.objectStore(name).getAll();r.onsuccess=()=>{all[name]=r.result}}tx.oncomplete=()=>{db.close();ok(all)};tx.onabort=no}})
+   const snapshot=()=>new Promise((ok,no)=>{const q=indexedDB.open('worta-web-replay');q.onerror=no;q.onsuccess=()=>{const db=q.result,tx=db.transaction([...db.objectStoreNames]),all={};for(const name of db.objectStoreNames){const r=tx.objectStore(name).getAll();r.onsuccess=()=>{all[name]=r.result}}tx.oncomplete=()=>{db.close();ok(all)};tx.onabort=no}})
    window.beforeExtension=await snapshot();window.readReplaySnapshot=snapshot;window.originalPut=IDBObjectStore.prototype.put;window.extensionAborted=false;window.extensionSequence=sequence
   },fixture.sequence)
   const initial=await page.evaluate(()=>window.beforeExtension)
