@@ -8,6 +8,24 @@
 и реальные тесты/ограничения production-кода. Новые этапы, release policy,
 capabilities или security gates эта ревизия не вводит.
 
+## 06.11.2026 — Account Game: balances/inventory LOCAL COMPLETE (bounded)
+
+Native SQLite → production push → PostgreSQL16/FastAPI → Chromium login/unlock
+подтвердил balances, inventory buy2 → sell1, linked writing/completion rewards,
+точное равенство обеих зашифрованных projections с Native, redelivery и restart.
+Оба законных порядка project action/account reward приняты: received Game window
+проверяется в порядке зависимостей и атомарно применяется тем же ownerPort/CAS.
+Нет временных proofs, отдельного Game storage/engine, ACK или browser PUT.
+Текущая schema v10 и proof format сохраняются. Проектная награда и account-баланс
+остаются разными областями. Web не запускает reward consumer при чтении.
+
+**Осталось 7 групп**, а не6: группа5 включает все реальные account-механики,
+а не только принятые balances/inventory. Stage Game HTTP, конфликтные/расширенные
+histories и ожидание source через промежуточный owner другой семьи не приняты.
+Это прежние границы существующей матрицы, не новые release blockers. Note2/10,
+этап2/6, Slice4/5 PARTIAL, все три security gates false. Полный Web/все игровые
+механики/создание-редактирование/двусторонний единый sync остаются целью владельца.
+
 ## Почему число 2/10 не отражает количество сделанных функций
 
 Это **десять исходных критериев полного Note ordinary1/Resolution2 reader claim**,
@@ -83,7 +101,7 @@ Slice 5 не заявляются. Технические Slice и шесть п
 | 2 | Полное представление Document | Форматирование действующего Tiptap JSON видно в Web; поздний новый Document после unlock и допустимые delete/Resolution histories применяются owner, а не блокируют проект. Текущий continuation preflight требует revision≥2, поэтому поздний genesis также остаётся конкретным пробелом. Plain text/create/linear updates обоих scopes уже приняты. |
 | 3 | Оставшиеся Map histories | Stage Map create/update, annotations, Stage proof и restart теперь приняты вместе с project Map. Остаются ранее перечисленные delete/Resolution Native Map histories; группа пока не закрыта. |
 | 4 | Свойства и связи Notes | Проверенные checklist/tags/annotations и Map-derived Notes доступны пользователю. Сейчас основной recovery UI показывает заголовок и body. |
-| 5 | Состояние игры аккаунта | Account Game owner подключён к cabinet/shop/rhythm/баффам/наградам и другим уже существующим панелям чтения; игровые действия/запись относятся к этапам 3–4. |
+| 5 | Состояние игры аккаунта | Частично принято: отдельные account-балансы/уровень/здоровье/вдохновение/навыки/коэффициенты/global streak и read-only inventory; Native buy/sell + связанные награды обновляются через HTTP, оба порядка G/R приняты. Остаются global_streak/freeze action updates, compensation/Resolution/adoption, cabinet/rhythm/баффы и другие реальные панели/механики. Игровые действия/запись Web относятся к этапам 3–4. |
 | 6 | Полный облачный каталог | Canonical folders/order/membership и project order показываются через владельцев account history. Bootstrap project list не заменяет эти данные. |
 | 7 | Зашифрованные обложки | Metadata2/cover references и encrypted blob проверяются, отображаются и обновляются без раскрытия ключа серверу. |
 
@@ -112,7 +130,7 @@ UI не принят. Обратный допустимый порядок R-bef
 не новый Slice и не разрешение обходить префикс/proofs. Все игровые механики
 остаются обязательной целью полного Web.
 
-Следующая продуктовая задача: **account Game reading**, затем остальные группы
+Следующая продуктовая задача: **Account Game global_streak/freeze updates** через существующий owner, затем остальные группы
 чтения. Rich Document и оставшиеся строки не исключены
 из этапа 2. После полного чтения следующий продуктовый этап — **3/6, создание,
 редактирование и Web→Server→Desktop**, с проверенным server confirmation,

@@ -24,7 +24,7 @@ try {
       if (url.pathname === '/api/v3/recovery/encrypted/history') recovery.push(url.search)
       if (fault && url.pathname === '/api/v3/recovery/encrypted/history') {
         const response=await route.fetch({url:backend+url.pathname+url.search}),body=await response.json()
-        const item=body.items.findLast(item=>item.event.entity_type==='project_game')
+        const item=body.items.findLast(item=>item.event.entity_type==='account_game')
         if(item){const raw=item.object.ciphertext;item.object.ciphertext=(raw[0]==='A'?'B':'A')+raw.slice(1)}
         return route.fulfill({response,json:body})
       }
@@ -69,6 +69,19 @@ try {
       panel.locator('[data-testid="cloud-project-game"]').waitFor(),
       panel.locator('[role="alert"]').waitFor().then(async()=>{throw Error('game recovery refused: '+await panel.locator('[role="alert"]').getAttribute('data-read-code'))}),
     ])
+    const account=expected.projections.account
+    const accountPanel=panel.locator('[data-testid="cloud-account-game"]')
+    const formatted=await page.evaluate(async a=>{const {useLocaleStore}=await import('/src/stores/locale.ts');const locale=useLocaleStore();return {coins:locale.formatNumber(Number(a.coins),2),experience:locale.formatNumber(Number(a.experience),2)}},account)
+    assert.equal(await accountPanel.locator('[data-testid="cloud-game-coins"]').textContent(),formatted.coins)
+    assert.equal(await accountPanel.locator('[data-testid="cloud-game-experience"]').textContent(),formatted.experience)
+    assert.equal(await accountPanel.locator('[data-testid="cloud-game-level"]').textContent(),String(account.level))
+    const items=accountPanel.locator('[data-testid="cloud-game-inventory"]')
+    assert.equal(await items.locator('button').count(),0)
+    for(const item of account.inventory){
+      await items.locator('select').selectOption(item.category)
+      const card=items.locator('.item-card').filter({hasText:item.item_id})
+      assert.equal(await card.count(),1);assert.equal(await card.locator('.count-badge').textContent(),`×${item.count}`)
+    }
     const state=expected.projections[JSON.stringify([fixture.project,null])]
     assert.equal(await panel.locator('[data-testid="cloud-game-completion"]').textContent(),state.completion_claimed?'☑':'☐')
     assert.equal(await panel.locator('[data-testid="cloud-game-freezes"]').textContent(),String(state.streak.freezes))
@@ -88,7 +101,7 @@ try {
   let panel=await loginAndOpen(page);await read(panel,fixture.expected)
   const first=await snapshot(page)
   assert.deepEqual(first.inbox.map(row=>JSON.parse(row.wire_item)),fixture.items)
-  assert.equal(first.inbox[initialCursor-1].state,'game_proven');assert.equal(first.gameLedger.length,4);assert.equal(first.gameProjection.length,2)
+  assert.equal(first.inbox[initialCursor-1].state,'game_proven');assert.equal(first.gameLedger.length,fixture.items.filter(i=>['project_game','account_game'].includes(i.event.entity_type)).length);assert.equal(first.gameProjection.length,2)
   assert.equal(first.replayManifest[0].applied_cursor,initialCursor);assert.equal(first.cursors[0].ack_cursor,0)
   assert.ok(!JSON.stringify(first.gameProjection).includes('base_total'))
   await read(panel,fixture.expected);assert.deepEqual(await snapshot(page),first)
@@ -96,7 +109,7 @@ try {
   console.log(JSON.stringify({phase:'ready_for_update'}))
   const update=JSON.parse(await updateLine);input.close()
   fault=true;await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor();fault=false
-  assert.deepEqual(await snapshot(page),first);assert.equal(await panel.locator('[data-testid="cloud-project-game"]').count(),0)
+  assert.deepEqual(await snapshot(page),first);assert.equal(await panel.locator('[data-testid="cloud-project-game"]').count(),0);assert.equal(await panel.locator('[data-testid="cloud-account-game"]').count(),0)
   await page.evaluate(async()=>{
     const {BrowserCloudAccountSession}=await import('/src/platform/web/cloudAccountSession.ts'),read=BrowserCloudAccountSession.prototype.readRecoveryProject
     BrowserCloudAccountSession.prototype.readRecoveryProject=async function(...args){try{return await read.apply(this,args)}catch(error){window.gameRecoveryError=error.stack;throw error}}
@@ -105,20 +118,20 @@ try {
   })
   await page.evaluate(eventId=>{
     const add=IDBObjectStore.prototype.add,put=IDBObjectStore.prototype.put
-    window.mapAdd=add;window.mapPut=put;window.mapAborted=false
+    window.mapAdd=add;window.mapPut=put;window.mapAborted=false;window.gameCapturedTransactions=new WeakSet()
     IDBObjectStore.prototype.add=function(value,...args){
-      if(this.name==='gameLedger'&&value.event_id===eventId){const before={};window.mapBefore=before;for(const name of this.transaction.objectStoreNames){const r=this.transaction.objectStore(name).getAll();r.onsuccess=()=>{before[name]=r.result}}}
+      if(this.name==='gameLedger'&&!window.gameCapturedTransactions.has(this.transaction)){window.gameCapturedTransactions.add(this.transaction);const before={};window.mapBefore=before;for(const name of this.transaction.objectStoreNames){const r=this.transaction.objectStore(name).getAll();r.onsuccess=()=>{before[name]=r.result}}}
       return add.call(this,value,...args)
     }
     IDBObjectStore.prototype.put=function(value,...args){const r=put.call(this,value,...args);if(this.name==='gameProjection'&&value.head_event_id===eventId){window.mapAborted=true;r.addEventListener('success',()=>this.transaction.abort(),{once:true})}return r}
-  },update.items.findLast(value=>value.event.entity_type==='project_game').event.event_id)
+  },update.items.findLast(value=>value.event.entity_type==='account_game').event.event_id)
   await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
   const abort=await page.evaluate(()=>{IDBObjectStore.prototype.add=window.mapAdd;IDBObjectStore.prototype.put=window.mapPut;return {fired:window.mapAborted,before:window.mapBefore}})
   assert.equal(abort.fired,true,'Game commit was not reached: '+await panel.locator('[role="alert"]').getAttribute('data-read-code')+' '+await page.evaluate(()=>window.gameRecoveryError));assert.deepEqual(await snapshot(page),abort.before)
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.expected)
   const accepted=await snapshot(page)
   assert.deepEqual(accepted.inbox.map(row=>JSON.parse(row.wire_item)),update.items)
-  assert.equal(accepted.inbox.find(row=>row.event_id===update.items.findLast(value=>value.event.entity_type==='project_game').event.event_id).state,'game_proven');assert.equal(accepted.gameLedger.length,6);assert.equal(accepted.gameProjection.length,2)
+  assert.equal(accepted.inbox.find(row=>row.event_id===update.items.findLast(value=>value.event.entity_type==='project_game').event.event_id).state,'game_proven');assert.equal(accepted.gameLedger.length,update.items.filter(i=>['project_game','account_game'].includes(i.event.entity_type)).length);assert.equal(accepted.gameProjection.length,2)
   assert.deepEqual(accepted.replayManifest[0].source_seeds,first.replayManifest[0].source_seeds)
   assert.deepEqual(accepted.projectBindings,first.projectBindings)
   assert.deepEqual(accepted.gameLedger.find(row=>row.event_id===update.items.findLast(value=>value.event.entity_type==='project_game').event.event_id).previous_projection,first.gameProjection.find(value=>value.project_id===fixture.project))
@@ -144,10 +157,10 @@ try {
   assert.deepEqual(await snapshot(page),accepted)
   await page.evaluate(async()=>{
     const q=indexedDB.open('worta-web-replay'),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
-    await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='game_proven');row.game_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
+    await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='game_proven'&&JSON.parse(r.wire_item).event.scope==='account');row.game_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
   })
   await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
-  assert.equal(await panel.locator('[data-testid="cloud-project-game"]').count(),0)
+  assert.equal(await panel.locator('[data-testid="cloud-project-game"]').count(),0);assert.equal(await panel.locator('[data-testid="cloud-account-game"]').count(),0)
   assert.deepEqual(forbidden,[]);assert.ok(recovery.length>0)
-  console.log(JSON.stringify({pass:true,gameRead:true,gameUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true}))
+  console.log(JSON.stringify({pass:true,accountRead:true,inventoryBuySell:true,accountFirst:fixture.accountFirst,gameRead:true,gameUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true}))
 } finally { await context?.close();await vite?.close() }

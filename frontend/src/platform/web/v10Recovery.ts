@@ -56,7 +56,7 @@ export class BrowserV10Recovery {
   private readonly documentOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
   private readonly mapOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
   private readonly progressOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>},
-  private readonly gameOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'>}){}
+  private readonly gameOwner?:{authenticate:()=>Promise<unknown>;apply:(sequence:number)=>Promise<'applied'|'already_applied'|import('./gameApply').GameCommitResult>}){}
  /** Separate dormant manual slice; the historical bind below is unchanged. */
  bindMixedSources(auth:NormalUserAuthRuntime,bindings:AuthoritativeAccountBinding,keys:RuntimeKeyContext,device:VerifiedBrowserDevice){return bindMixedV10Recovery(this.transaction,this.local,this.profileCurrent,auth,bindings,keys,device)}
  /** Explicit bounded .18 route; historical K/G/Q bindings keep their contracts. */
@@ -126,15 +126,17 @@ export class BrowserV10Recovery {
       }
      }
      if(!row)break
-     if(result.applied.length===max){result.blocker={sequence:row.server_sequence,kind:'budget_exhausted',retryable:true};break}
+     if(result.applied.length>=max){result.blocker={sequence:row.server_sequence,kind:'budget_exhausted',retryable:true};break}
      const block=(kind:RecoveryBlocker['kind'],retryable=false)=>{result.blocker={sequence:row.server_sequence,kind,retryable}}
      const wire=JSON.parse(row.wire_item),e=wire.event
      const own=e.device_id===s.deviceId
      if(['project_game','account_game'].includes(e.entity_type)){
       if(!this.gameOwner||own||hasResolution(v)){block('unsupported_route');break}
+      // A dependency-closed Game window is one atomic owner operation; the
+      // budget cannot expose a reward without its later genuine source proof.
       const outcome=await step(this.gameOwner.apply(row.server_sequence))
-      if(outcome!=='applied')fail('stale_source')
-      result.applied.push({sequence:row.server_sequence,route:'game',status:'applied'})
+      if(outcome!=='applied'&&(typeof outcome!=='object'||outcome.status!=='applied'))fail('stale_source')
+      for(const sequence of typeof outcome==='object'?outcome.game_sequences:[row.server_sequence])result.applied.push({sequence,route:'game',status:'applied'})
       continue
      }
      if(e.entity_type==='progress'){

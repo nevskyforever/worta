@@ -1,5 +1,132 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — Account Game Web balances/inventory (LOCAL COMPLETE, bounded route)
+
+**Stage 2/6 — full Web reading; technical Slice4/5 PARTIAL.** Starting SHA
+`771d9ce0bf870ee54913b6a773c8d724d3966008`, branch `6.0`, initial worktree clean.
+Final SHA: the commit containing this entry (`git log -1`; exact full SHA is in
+the task result). All prior history and the owner's05.11.2026 decisions remain:
+full ordinary/game Web, all existing game mechanics, Web creation/editing,
+bidirectional unified sync, reuse existing code, pragmatic extensible delivery.
+This is NOT a return to a read-only final product or a public-release claim.
+
+**Implemented:** `cloudAccountSession` exposes only the reauthenticated account
+owner state, separately from project Game. `BrowserAccountGameRead` shows actual
+coins/XP/level, health/max, inspiration, available skill points/skills, frozen
+coefficients and retained global streak. It reuses StreakBadge and the existing
+InventoryShopPanel with a new optional readOnly mode (Desktop behavior unchanged).
+Canonical item/category IDs/counts come from the authenticated account projection;
+item labels preserve source data, without inventing catalog descriptions/prices
+or unsupported account fields. Buy/use/sell controls are absent in Web.
+Existing six-language labels and localized number formatting are retained;
+account help was updated/regenerated/exported for all five non-Russian languages.
+No existing catalog translation changed; exactly one new help article key/language.
+
+`gameProjectTransition` admits Native inventory buy/sell with the exact frozen
+`game_sync.rs` rules: parent count, signed price*quantity debit/credit, canonical
+inventory ordering/removal, bounded fixed-point balance and typed post-state
+validation. No new economy/game action or reward consumer. Account genesis and
+linked writing/completion reward already used the actual Native rule; this task
+connects their balances to UI and verifies sequential inventory changes.
+
+**Legal reverse wire order:** Native `game_transport` pending publication and
+`game_sync` permit account reward R before source project action G. Native retains
+R as waiting until G is applied. Browser previously required G's earlier sequence,
+while strict replay inventory prohibits a later durable proof above a missing
+coverage position. The existing Game adapter now prepares a contiguous received
+**Game-only, dependency-closed window** in causal order using the SAME existing
+prepared event plans. `gameApply` uses ONE ownerPort transaction: original received
+source outcomes + real per-event ledger/proof + encrypted projections/archived
+parents + manifest through the window's final sequence. Nothing is temporarily
+made proven; no cursor assignment, fabricated proof, second engine or new store.
+Duplicate old single-event write implementation was replaced by that one adapter.
+
+Full Snapshot/CAS, server snapshot+immutable-wire check and auth/session/key checks
+remain in the existing replayStorage.ownerPort. Transition validation permits only
+that contiguous window, preserves all unrelated state and original wire/ledger,
+requires exact previous encrypted snapshots and one final projection per owner,
+and checks complete coverage. Recovery records every actual applied sequence;
+maxEvents is a boundary BETWEEN atomic owner operations and cannot split this
+bounded Game commit. Existing total event/byte limits remain unchanged.
+Reauthentication recursively resolves real reward sources regardless of their
+wire position and recomputes both account/project snapshots from original AEAD
+frames and dependencies. No IndexedDB migration is necessary: **v10**, inbox14,
+per-event proof layout and project/account crypto formats are unchanged.
+
+**Final real HTTP acceptance: 4 PASS in123.55s.** Two parameterized Account Game
+cases use opposite G/R production push orders, plus the existing project/Stage
+Progress HTTP regressions. Actual Native Rust/SQLite writers create/capture the
+project/account genesis, Progress manual100, writing reward, purchase2 micro-health
+potions, then completion + Metadata + paired reward and sale1. History grows
+**8→12 real server sequences**, Game ledgers5→8, two distinct owner projections.
+The PostgreSQL16 container is isolated/task-owned; FastAPI runs real authenticated
+HTTP. Browser provisions wrapped keys once through its API, then actual Vue login
+and passphrase unlock/open receives no directly injected AMK/binding. It displays
+Native coin/XP/level and item count2→1, and keeps the project claim/reward UI.
+Both decrypted persisted account AND project projections exactly match SQLite.
+
+Each Game HTTP case checks full immutable encrypted source, preserved import
+binding/seeds, correct applied coverage, redelivery with byte-identical snapshots,
+actual IDB abort on the LAST ACCOUNT projection write (after the project's real
+outcome in the same transaction), full pre-transaction snapshot equality, profile
+close/reopen and successful retry, final reopen and complete reauthentication.
+Damaged account ciphertext from HTTP preserves prior complete state and hides
+unverified UI; damaged durable account proof refuses both account/project display.
+ACK remains0 and browser device registration/capability PUT/ACK requests are
+forbidden/observed absent. Synthetic Native-only capabilities PUT uses the already
+qualified real Desktop declarations; no browser readiness is declared. This is
+local server-to-browser acceptance for the stated route, not production/VPS or
+full Game acceptance. No actual concurrent Game race was added: the SAME full CAS
+previously accepted by real replay competition is retained; stale prepared source
+checks and owner transition regressions pass, without claiming a new race test.
+
+**Other final checks:** 272 Vitest PASS/12 files; 2 pre-existing opt-in peer-Content
+conflict Chromium tests NOT RUN (WORTA_CONFLICT_CHROMIUM unset), not counted as PASS
+and unrelated to the accepted real Game HTTP cases. Includes account UI in six
+languages, readOnly inventory/unchanged Desktop controls, buy/sell mismatch/debit
+refusal, source/auth/sequence guards, receiver/structure/ordinary/mixed recovery.
+15 existing Native `game_sync::tests` PASS via the unchanged built Native bridge;
+Native code was not changed or rebuilt.30 help/localization tests PASS, changed
+Python syntax/imports, generated frontend content check, frontend typecheck/build
+PASS. Maintained quick acceptance is recorded below after its final run.
+Earlier development failures were test harness issues (locale assumption, Native
+waiting outcome, Vite HMR during editing); corrected and final HTTP rerun passed.
+A test accidentally invoked from repository root lacked Vue config; its task-created
+root .vite/.vitest caches were verified and removed. Canonical frontend node_modules,
+user data and other worktrees were preserved.
+
+**Limits/next:** Native global_streak/freeze account mutations, compensation,
+selection/adoption/conflict cases, cabinet/rhythm/buffs/quests and other actual
+account views/mechanics remain unqualified. Stage Game HTTP variants and reverse
+reward source separated by a non-Game owner window are not claimed supported;
+unsupported histories fail closed and never appear partially verified. Item
+catalog metadata/UI actions are not fabricated from opaque IDs. The base Account
+Game balances/inventory route is a finished independently accepted feature;
+full Game reader and Slice4 remain PARTIAL.
+
+**Counters:** Note readiness **2/10 closed**, 8 existing blockers OPEN; no blocker
+removed. **7 remaining basic Web reading groups**, unchanged because account group5
+already includes further actual mechanisms; its admitted balances/inventory subset
+is now accepted. These counts are separate from product stage2/6 and technical
+Slice4/5. **ready=false, declarationAllowed=false, writerAuthorized=false**; E2EE,
+reader/writer/server gates, protocol, ACK/release policy and registration unchanged.
+No main/VPS/deployment/user data/new worktree/CI start/poll. Before commit all task
+changes are intentional runtime/UI/tests/generated localization/docs; final state
+and commit/push/quick/container cleanup are recorded below. Next concrete task:
+**Native Account Game global_streak/freeze action updates through the same owner
+and real HTTP/Vue/restart, retaining balances/inventory and source dependencies.**
+
+Final task verification/housekeeping: maintained `local_acceptance.sh quick` PASS;
+frontend generated-content `--check`, changed Python compile and `git diff --check`
+PASS. Only task-owned PostgreSQL16 container/anonymous volume were label/image
+verified, stopped and removed after all HTTP tests completed; no other Docker
+resource or user profile touched. Runtime/UI/tests/help/contract/checkpoint/roadmap/
+audit are committed together as **Read account Game balances and inventory in Web**
+after successful local acceptance, with normal push to `origin/6.0` requested;
+final commit/push/clean-tree result is reported with its exact SHA in the task
+result. CI was neither started nor queried. No residual unverified production
+change is intentionally left outside the commit.
+
 ## 2026-11-06 — Project Game Web reading (LOCAL COMPLETE, admitted linear route)
 
 Starting SHA `92c53091d465f2bf528cdcfbb48fe4a1940bf555`, branch6.0;

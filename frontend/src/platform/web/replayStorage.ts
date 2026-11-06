@@ -1,5 +1,5 @@
-import { commitGameEvent, authenticateReplayGames } from './gameApply'
-import { prepareGameEvent } from './gamePrepare'
+import { commitGameBatch, authenticateReplayGames } from './gameApply'
+import { prepareGameBatch } from './gamePrepare'
 import { commitProgressEvent, authenticateReplayProgress, progressPreparationInventory } from './progressApply'
 import { prepareProgressEvent, inspectPreparedProgressEvent } from './progressPrepare'
 import { commitMapEvent, authenticateReplayMaps, mapPreparationInventory } from './mapApply'
@@ -518,8 +518,8 @@ class BrowserReplayStorage {
     }
     return await lease.use(async amk=>{
       await authenticateReplayGames(this.scope,expected,amk,current)
-      const inventory=expected,token=await prepareGameEvent(this.scope,row,expected,amk,current)
-      return commitGameEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
+      const tokens=await prepareGameBatch(this.scope,sequence,expected,amk,current)
+      return commitGameBatch(this.ownerPort().transaction(expected,sequence,server),this.scope,tokens,expected,amk,current,
         (tx,done,abort)=>this.load(tx,done,abort))
     })
     } finally { unAuth();unKey() }
@@ -621,12 +621,13 @@ class BrowserReplayStorage {
               this.check()
               if (mode === 'readonly') { result(value); return }
               const finish = (after: ReplaySnapshot) => {
-                try { assertReplayOwnerTransition(before, after, sequence, value && typeof value === 'object' && 'status' in value ? value.status : value); result(value) } catch (error) { abort(error) }
+                try { assertReplayOwnerTransition(before, after, sequence, value && typeof value === 'object' && 'game_sequences' in value ? value : value && typeof value === 'object' && 'status' in value ? value.status : value); result(value) } catch (error) { abort(error) }
               }
               if (value === 'applied' || value === 'conflict_preserved' || value==='self_echo_applied'|| value && typeof value === 'object' && 'status' in value && (value.status === 'applied'||value.status==='self_echo_applied')) {
                 const manifest = before.manifest!
                 if (manifest.revision === Number.MAX_SAFE_INTEGER) fail()
-                const row = tx.objectStore('inbox').get([this.scope.accountId, sequence])
+                const last=value&&typeof value==='object'&&'game_sequences' in value ? (value.game_sequences as number[]).at(-1)! : sequence
+                const row = tx.objectStore('inbox').get([this.scope.accountId, last])
                 row.onsuccess = () => { try { tx.objectStore('replayManifest').put(replayCoverage(manifest, row.result)); this.load(tx, finish, abort) } catch (error) { abort(error) } }
                 return
               }

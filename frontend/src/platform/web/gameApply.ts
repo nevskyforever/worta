@@ -7,75 +7,11 @@ import { canonical } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
 import { prepareGameEvent, inspectPreparedGameEvent, type PreparedGameEvent } from './gamePrepare'
 import type { ReplaySnapshot } from './replayInventory'
-import { validateBrowserInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
+import { type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
 import { joinGameRecords, gameDigest, type GameInbox, type GameLedger as GameGenesisLedger, type GameProjection } from './gameRecords'
 export type { GameLedger as GameGenesisLedger, GameProjection } from './gameRecords'
 const fail = (): never => { throw new BrowserPersistenceError('corrupt_record') }
-
-/** Transaction adapter; caller must supply the replay CAS transaction and its inventory reader. */
-export async function commitGameEvent(transaction: BrowserSyncTransaction, scope: BrowserSyncScope,
-  token: PreparedGameEvent, expected: ReplaySnapshot, amk: AccountMasterKey,
-  current: () => boolean, readInventory: (tx: IDBTransaction, done: (inventory: ReplaySnapshot) => void, abort: (error: unknown) => void) => void): Promise<'applied' | 'already_applied'> {
-  const plan = inspectPreparedGameEvent(token, scope, expected), h = plan.event.header
-  const ledger: GameGenesisLedger = { account_id: scope.accountId, device_id: scope.deviceId, project_id: gameProject(plan.event),
-    entity_id: gameOwner(plan.event), event_id: h.event_id, server_sequence: plan.serverSequence, outcome: 'applied', wire_item: plan.wireItem }
-  const bytes = new TextEncoder().encode(canonical({ chain: plan.projection, event_id: h.event_id, server_sequence: plan.serverSequence }))
-  let projection: GameProjection
-  try {
-    const sealed = h.scope === 'account'
-      ? await encryptAccountObject(amk, {userId:scope.canonicalUserId,scope:'account',entityId:gameOwner(plan.event),entityType:'account_game'}, bytes)
-      : await encryptObjectBytes(amk, { userId: scope.canonicalUserId, projectId: h.project_id, entityId: gameOwner(plan.event), entityType: 'project_game' }, bytes)
-    try { projection = { account_id: scope.accountId, device_id: scope.deviceId, project_id: gameProject(plan.event), entity_id: gameOwner(plan.event), head_event_id: h.event_id,
-      envelope: { crypto_version: sealed.crypto_version, aad_version: sealed.aad_version, nonce: encodeBase64Url(sealed.nonce), ciphertext: encodeBase64Url(sealed.ciphertext) } } }
-    finally { sealed.nonce.fill(0); sealed.ciphertext.fill(0) }
-  } finally { bytes.fill(0) }
-  // Read the authenticated parent projection through the same full replay CAS.
-  // It remains encrypted, byte-for-byte, inside the new append-only ledger row.
-  if (h.parents.length) {
-    ledger.previous_projection = await transaction(scope, ['gameProjection'], 'readonly', (tx, done, abort) => {
-      const read = tx.objectStore('gameProjection').get([scope.accountId, gameProject(plan.event), gameOwner(plan.event)])
-      read.onsuccess = () => { try { const previous = read.result as GameProjection | undefined
-        if (!previous || previous.head_event_id !== h.parents[0]) fail()
-        done(structuredClone(previous!))
-      } catch (error) { abort(error) } }
-    })
-  }
-  const proof = { record_version: 1 as const, owner_kind: 'game' as const, outcome: 'applied' as const, ledger_digest: await gameDigest(ledger), projection_digest: await gameDigest(projection) }
-  if (!current()) throw new BrowserPersistenceError('closed')
-  return transaction(scope, ['gameLedger', 'gameProjection', 'inbox', 'cursors', 'ownerHeads', 'projectBindings', 'outbox', 'receipts', 'legacyNoteHistory'], 'readwrite', (tx, result, abort) => {
-    readInventory(tx, inventory => {
-      try {
-        inspectPreparedGameEvent(token, scope, inventory)
-        if (!current()) throw new BrowserPersistenceError('closed')
-        const rows = inventory.rows.map(row => validateBrowserInboxRecord(row, scope))
-        const found = rows.find(row => row.server_sequence === plan.serverSequence)
-        const sourceRow = found?.state === 'received' ? found : undefined
-        if (!sourceRow || sourceRow.state !== 'received' || sourceRow.protocol_version !== 3
-          || sourceRow.event_id !== h.event_id || sourceRow.wire_item !== plan.wireItem) fail()
-        const ledgers = tx.objectStore('gameLedger'), projections = tx.objectStore('gameProjection')
-        const old = ledgers.get([scope.accountId, h.event_id]), source = projections.getAll(IDBKeyRange.bound([scope.accountId, gameProject(plan.event)], [scope.accountId, gameProject(plan.event), []]))
-        let loaded = 0
-        const finish = () => {
-          if (++loaded !== 2) return
-          try {
-            if (!current()) throw new BrowserPersistenceError('closed')
-            if (old.result) fail()
-            const selected = (source.result as GameProjection[]).filter(value => value.entity_id === gameOwner(plan.event))
-            if (plan.event.action.kind === 'genesis' ? selected.length !== 0
-              : selected.length !== 1 || canonical(selected[0]) !== canonical(ledger.previous_projection)) fail()
-            ledgers.add(ledger)
-            if (plan.event.action.kind === 'genesis') projections.add(projection)
-            else projections.put(projection)
-            tx.objectStore('inbox').put({ ...sourceRow!, record_version: 14, state: 'game_proven', game_proof: proof } satisfies GameInbox)
-            result('applied')
-          } catch (error) { abort(error) }
-        }
-        old.onsuccess = finish; source.onsuccess = finish
-      } catch (error) { abort(error) }
-    }, abort)
-  })
-}
 
 /** Verify encrypted projection against a freshly authenticated event token. */
 export async function authenticateGameProjection(scope: BrowserSyncScope, token: PreparedGameEvent,
@@ -120,4 +56,49 @@ export async function authenticateReplayGames(scope: BrowserSyncScope,
 }
 
 export interface BrowserProjectGame { event: GameEvent; state: GameState }
-export const commitGameGenesis = commitGameEvent
+
+export interface GameCommitResult { status:'applied';game_sequences:number[] }
+/** One Game-owner transaction for a dependency-closed received window. Source
+ * proofs are written before dependants inside the SAME IDB commit. Nothing is
+ * made applied, visible or ACK-qualified in an intermediate transaction. */
+export async function commitGameBatch(transaction:BrowserSyncTransaction,scope:BrowserSyncScope,tokens:PreparedGameEvent[],expected:ReplaySnapshot,amk:AccountMasterKey,current:()=>boolean,
+ readInventory:(tx:IDBTransaction,done:(v:ReplaySnapshot)=>void,abort:(error:unknown)=>void)=>void):Promise<GameCommitResult>{
+ if(!tokens.length)fail()
+ const plans=tokens.map(token=>inspectPreparedGameEvent(token,scope,expected))
+ const sequences=plans.map(plan=>plan.serverSequence).sort((a,b)=>a-b)
+ if(sequences.some((n,i)=>n!==expected.manifest!.applied_cursor!+i+1))fail()
+ const projections=new Map((expected.games?.projections??[]).map(value=>{const p=value as GameProjection;return [JSON.stringify([p.project_id,p.entity_id]),p]}))
+ const writes:{ledger:GameGenesisLedger;projection:GameProjection;proof:GameInbox['game_proof'];row:GameInbox}[]=[]
+ for(const plan of plans){
+  if(!current())throw new BrowserPersistenceError('closed')
+  const h=plan.event.header,key=JSON.stringify([gameProject(plan.event),gameOwner(plan.event)]),previous=projections.get(key)
+  if(plan.event.action.kind==='genesis'?!!previous:!previous||h.parents[0]!==previous.head_event_id)fail()
+  const ledger:GameGenesisLedger={account_id:scope.accountId,device_id:scope.deviceId,project_id:gameProject(plan.event),entity_id:gameOwner(plan.event),event_id:h.event_id,server_sequence:plan.serverSequence,outcome:'applied',wire_item:plan.wireItem,...(previous?{previous_projection:structuredClone(previous)}:{})}
+  const bytes=new TextEncoder().encode(canonical({chain:plan.projection,event_id:h.event_id,server_sequence:plan.serverSequence}))
+  let projection:GameProjection
+  try{
+   const sealed=h.scope==='account'
+    ?await encryptAccountObject(amk,{userId:scope.canonicalUserId,scope:'account',entityId:gameOwner(plan.event),entityType:'account_game'},bytes)
+    :await encryptObjectBytes(amk,{userId:scope.canonicalUserId,projectId:h.project_id,entityId:gameOwner(plan.event),entityType:'project_game'},bytes)
+   try{projection={account_id:scope.accountId,device_id:scope.deviceId,project_id:ledger.project_id,entity_id:ledger.entity_id,head_event_id:h.event_id,envelope:{crypto_version:sealed.crypto_version,aad_version:sealed.aad_version,nonce:encodeBase64Url(sealed.nonce),ciphertext:encodeBase64Url(sealed.ciphertext)}}}
+   finally{sealed.nonce.fill(0);sealed.ciphertext.fill(0)}
+  }finally{bytes.fill(0)}
+  const proof:GameInbox['game_proof']={record_version:1,owner_kind:'game',outcome:'applied',ledger_digest:await gameDigest(ledger),projection_digest:await gameDigest(projection!)}
+  const row=expected.rows.find(row=>row.server_sequence===plan.serverSequence)
+  if(!row||row.state!=='received'||row.event_id!==h.event_id||row.wire_item!==plan.wireItem)fail()
+  writes.push({ledger,projection:projection!,proof,row:{...row!,record_version:14,state:'game_proven',game_proof:proof} as GameInbox})
+  projections.set(key,projection!)
+ }
+ return transaction(scope,['gameLedger','gameProjection','inbox','replayManifest'],'readwrite',(tx,result,abort)=>{
+  readInventory(tx,inventory=>{try{
+   for(const token of tokens)inspectPreparedGameEvent(token,scope,inventory)
+   if(!current())throw new BrowserPersistenceError('closed')
+   for(const write of writes){
+    tx.objectStore('gameLedger').add(write.ledger)
+    tx.objectStore('gameProjection').put(write.projection)
+    tx.objectStore('inbox').put(write.row)
+   }
+   result({status:'applied',game_sequences:sequences})
+  }catch(error){abort(error)}},abort)
+ })
+}

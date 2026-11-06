@@ -163,3 +163,20 @@ describe('InventoryShopPanel', () => {
     expect(buyButton?.attributes('disabled')).toBeDefined()
   })
 })
+
+it('retains selectable authenticated inventory while hiding mutation controls in read-only mode', async () => {
+  const wrapper = mount(InventoryShopPanel, {
+    props: { inventory, shop, busy: false, view: 'inventory', canOpenCredit: false, readOnly: true },
+    global: { plugins: [createPinia()] },
+  })
+  expect(wrapper.findAll('.item-card')).toHaveLength(3)
+  expect(wrapper.findAll('button')).toHaveLength(0)
+  expect(wrapper.find('input').exists()).toBe(false)
+  await wrapper.get('select').setValue('Зелья')
+  expect(wrapper.findAll('.item-card')).toHaveLength(0)
+  expect(wrapper.emitted('buy')).toBeUndefined()
+  expect(wrapper.emitted('use')).toBeUndefined()
+  await wrapper.setProps({readOnly:false})
+  await wrapper.get('select').setValue('Предметы')
+  expect(wrapper.findAll('button').length).toBeGreaterThan(0)
+})

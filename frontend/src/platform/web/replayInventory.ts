@@ -1,4 +1,4 @@
-import { joinGameRecords } from './gameRecords'
+import { joinGameRecords, type GameLedger, type GameProjection } from './gameRecords'
 import { joinProgressRecords } from './progressRecords'
 import { joinMapRecords } from './mapRecords'
 import { joinDocumentRecords } from './documentRecords'
@@ -43,7 +43,45 @@ export function replayCoverage(manifest: ReplayManifest, row: FutureInbox) {
 export function replayAppliedProof(row: FutureInbox): BrowserMetadataProof | BrowserStageProof | BrowserStageOrderProof | undefined {
   return row.state === 'applied' ? row.applied_proof : row.state === 'stage_proven' ? row.stage_proof : row.state === 'stage_order_proven' ? row.stage_order_proof : undefined
 }
+function assertGameBatchTransition(before:ReplaySnapshot,after:ReplaySnapshot,sequence:number,value:{status:unknown;game_sequences:unknown}):void{
+ const list=value.game_sequences
+ if(value.status!=='applied'||!Array.isArray(list)||!list.length||list.length>REPLAY_LIMITS.events||sequence!==before.manifest!.applied_cursor!+1
+   ||list.some((n,i)=>!Number.isSafeInteger(n)||n!==sequence+i)||before.rows.length!==after.rows.length)fail()
+ const sequences=list as number[],old=before.games,next=after.games
+ if(!old||!next||next.ledger.length!==old.ledger.length+sequences.length)fail()
+ for(const [index,row] of after.rows.entries()){
+  const previous=before.rows[index]!
+  if(!sequences.includes(row.server_sequence)){if(!replaySame(row,previous))fail();continue}
+  if(previous.state!=='received'||row.state!=='game_proven')fail()
+  const {game_proof:_proof,...wire}=row
+  if(!replaySame({...wire,record_version:1,state:'received'},previous))fail()
+ }
+ if(old!.ledger.some(row=>!next!.ledger.some(value=>replaySame(row,value))))fail()
+ const added=next!.ledger.filter(value=>!old!.ledger.some(row=>replaySame(row,value))) as GameLedger[]
+ if(added.length!==sequences.length||added.some(row=>!sequences.includes(row.server_sequence)||after.rows[row.server_sequence-1]?.event_id!==row.event_id))fail()
+ const keys=new Set(added.map(row=>JSON.stringify([row.project_id,row.entity_id])))
+ const key=(row:unknown)=>{const r=row as {project_id:string;entity_id:string};return JSON.stringify([r.project_id,r.entity_id])}
+ if(!replaySame(old!.projections.filter(row=>!keys.has(key(row))),next!.projections.filter(row=>!keys.has(key(row)))))fail()
+ for(const k of keys){
+  const chain=added.filter(row=>key(row)===k).sort((a,b)=>a.server_sequence-b.server_sequence)
+  let previous=old!.projections.find(row=>key(row)===k) as GameProjection|undefined
+  for(const ledger of chain){
+   if(!replaySame(ledger.previous_projection,previous))fail()
+   const row=after.rows[ledger.server_sequence-1]!
+   if(row.state!=='game_proven')fail()
+   const matches=[...next!.projections,...(next!.ledger as GameLedger[]).flatMap(l=>l.previous_projection?[l.previous_projection]:[])].filter(p=>(p as GameProjection).head_event_id===ledger.event_id)
+   if(matches.length!==1)fail()
+   previous=matches[0] as GameProjection
+  }
+  const final=next!.projections.filter(row=>key(row)===k)
+  if(final.length!==1||!replaySame(final[0],previous))fail()
+ }
+ if(next!.projections.length!==old!.projections.length+[...keys].filter(k=>!old!.projections.some(row=>key(row)===k)).length)fail()
+ const last=after.rows[sequences.at(-1)!-1]!
+ if(!replaySame(after.manifest,replayCoverage(before.manifest!,last))||!replaySame({...after,manifest:before.manifest,rows:before.rows,games:before.games},before))fail()
+}
 export function assertReplayOwnerTransition(before: ReplaySnapshot, after: ReplaySnapshot, sequence: number, status: unknown): void {
+  if(status&&typeof status==='object'&&'game_sequences' in status){assertGameBatchTransition(before,after,sequence,status as {status:unknown;game_sequences:unknown});return}
   if (status === 'already_applied') { if (!replaySame(before, after)) fail(); return }
   if(after.rows[sequence-1]?.state!=='game_proven'&&!replaySame(before.games,after.games))fail()
   if(after.rows[sequence-1]?.state==='game_proven') {

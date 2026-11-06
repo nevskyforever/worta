@@ -28,7 +28,8 @@ from test_cloud_c18_game_gate import declaration
 from test_cloud_c15_headless_cross_runtime import _crypto_bridge
 from base64 import urlsafe_b64encode
 
-def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
+@pytest.mark.parametrize("account_first", [False, True], ids=["project-before-reward", "reward-before-project"])
+def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, account_first):
     client, engine = cloud_client
     user = str(create_user(engine))
     token = login(client).json()['access_token']
@@ -58,6 +59,7 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
     progress_support(client, headers, device)
     source = {'gamer': json.loads((ROOT/'frontend/src/cloud/__fixtures__/gameLegacyDefaultsV1.json').read_text()),
               'project_game_state': {f'project:{PROJECT_ID}': {'streaks':['2026-10-01','2026-10-02'], 'max_streak':4, 'streak_status':True}}}
+    source['gamer']['coins'] = 1000
     assert game(tmp_path, db, identity, user, 'init', source=source) is True
     assert client.put('/api/v3/sync/encrypted/game-reader-capabilities', headers=headers, json=declaration(device)).status_code == 204
     progress(tmp_path, db, identity, user, 'begin')
@@ -67,9 +69,9 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
         for item in command(tmp_path, db, identity, user, 'pending', sealed=False):
             sealed = _crypto_bridge(tmp_path, {'action':'game_seal','scope':item['event']['header']['scope'],'frame':item['frame'],'amk':key})
             command(tmp_path, db, identity, user, 'seal', event_id=item['event']['header']['event_id'], frame=item['frame'], nonce=sealed['nonce'], ciphertext=sealed['ciphertext'])
-        # A supported dependency-first publication order. Sequence is assigned
-        # by the real server, never fabricated or rewritten in the fixture.
-        rows = sorted(command(tmp_path, db, identity, user, 'pending', sealed=True), key=lambda item:item['event']['header']['scope']=='account')
+        # Both legitimate transport orders. Real Native frames and server-assigned
+        # sequences, with no modified ciphertext or fabricated dependency proof.
+        rows = sorted(command(tmp_path, db, identity, user, 'pending', sealed=True), key=lambda item:(item['event']['header']['scope']=='account') != account_first)
         for item in rows:
             h=item['event']['header'];account=h['scope']=='account'
             event={k:h[k] for k in ('event_id','entity_id','revision','updated_at')};event['deleted_at']=None
@@ -83,7 +85,8 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
             receipt=response.json()['results'][0]
             command(tmp_path,db,identity,user,'receipt',event_id=h['event_id'],server_sequence=receipt['server_sequence'],duplicate=False,now=h['updated_at'])
         outcomes=receive_mixed(client,tmp_path,token,db,identity,user,key)
-        assert all(value=='applied' for value in outcomes),outcomes
+        assert all(value in ('applied','waiting') for value in outcomes),outcomes
+        assert command(tmp_path,db,identity,user,'received',limit=32) == []
         return rows
     command(tmp_path,db,identity,user,'begin',now='2026-11-06T00:00:00.000000Z')
     assert len(publish_game())==2
@@ -93,6 +96,8 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
     assert game(tmp_path,db,identity,user,'process')['processed']==1
     emit_progress(client,tmp_path,token,db,identity,user,key)
     assert len(publish_game())==2
+    assert game(tmp_path,db,identity,user,'inventory',category='Зелья',item_id='Микро зелье здоровья',count=2,operation='buy') is not None
+    assert len(publish_game())==1
     def history():
         with sqlite3.connect(db) as connection:
             cursor=connection.execute('SELECT pull_cursor FROM cloud_sync_state').fetchone()[0]
@@ -104,8 +109,11 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
             chain=json.loads(connection.execute('SELECT snapshot_json FROM cloud_progress_projection').fetchone()[0])
             rows=connection.execute("SELECT canonical_frame FROM cloud_game_events WHERE scope='project' ORDER BY server_sequence").fetchall()
         return {'projections':dict(projections(db)), 'projectEvents':[json.loads(bytes(row[0])[20:]) for row in rows], 'progress':chain}
-    items=history();assert len(items)==7
-    fixture=tmp_path/'game-http.json';fixture.write_text(json.dumps({'key':key,'project':PROJECT_ID,'expected':expected(),'items':items}));fixture.chmod(0o600)
+    items=history();assert len(items)==8
+    source_seq=next(i['event']['server_sequence'] for i in items if i['event']['entity_type']=='project_game' and i['event']['revision']==2)
+    reward_seq=next(i['event']['server_sequence'] for i in items if i['event']['entity_type']=='account_game' and i['event']['revision']==2)
+    assert (reward_seq < source_seq) == account_first
+    fixture=tmp_path/'game-http.json';fixture.write_text(json.dumps({'key':key,'project':PROJECT_ID,'expected':expected(),'items':items,'accountFirst':account_first}));fixture.chmod(0o600)
     api_socket=socket.socket();api_socket.bind(('127.0.0.1',0));port=api_socket.getsockname()[1]
     server=uvicorn.Server(uvicorn.Config(client.app,lifespan='off',access_log=False,log_level='warning'))
     thread=threading.Thread(target=server.run,kwargs={'sockets':[api_socket]},daemon=True);thread.start()
@@ -121,6 +129,8 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path):
             assert game(tmp_path,db,identity,user,'process')['processed']==1
             publish(client,tmp_path,token,db,identity,user,key)
             assert len(publish_game())==2
+            assert game(tmp_path,db,identity,user,'inventory',category='Зелья',item_id='Микро зелье здоровья',count=1,operation='sell') is not None
+            assert len(publish_game())==1
             latest=history();assert latest[:len(items)]==items
             stdout,stderr=process.communicate(json.dumps({'items':latest,'expected':expected()})+'\n',timeout=180)
             assert process.returncode==0,stdout+stderr

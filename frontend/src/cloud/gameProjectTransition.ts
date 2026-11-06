@@ -58,6 +58,23 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
     }
     return fail()
   }
+  if(a.kind==='inventory'){
+    if(e.header.rule!=='native-game-v1'||!['buy','sell'].includes(a.operation))fail()
+    const account=state as AccountGameBase
+    const delta=progressMicros(a.unit_price)*BigInt(a.count)*(a.operation==='buy'?-1n:1n)
+    if(delta!==progressMicros(a.coins_delta))fail()
+    const position=account.inventory.findIndex(item=>item.category===a.category&&item.item_id===a.item_id)
+    if((position<0?0:account.inventory[position]!.count)!==a.before_count)fail()
+    if(position>=0)account.inventory.splice(position,1)
+    if(a.after_count!==0)account.inventory.push({category:a.category,item_id:a.item_id,count:a.after_count})
+    account.inventory.sort((left,right)=>{const a=`${left.category}\0${left.item_id}`,b=`${right.category}\0${right.item_id}`;return a<b?-1:a>b?1:0})
+    const coins=progressMicros(account.coins)+delta
+    if(coins<0n||coins>1000000000000000000n)fail()
+    account.coins=`${coins/1000000n}.${(coins%1000000n).toString().padStart(6,'0')}`
+    // Native revalidates every changed account snapshot as a typed genesis.
+    validateGameEvent({...e,version:1,header:{...e.header,parents:[],revision:1,rule:'legacy-game-v1'},action:{kind:'genesis',base:account}})
+    return account
+  }
   if(a.kind!=='reward'||!source||source.header.scope!=='project'||source.header.account_id!==e.header.account_id
     ||source.header.event_id!==a.project_action_id||source.header.project_id!==a.project_id||source.header.rule!==e.header.rule
     ||!('reward' in source.action)||canonical(source.action.reward)!==canonical(a.reward))fail()

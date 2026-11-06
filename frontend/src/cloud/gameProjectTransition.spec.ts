@@ -40,3 +40,26 @@ it('keeps Stage owner identity and stable action IDs scoped by actual source',as
  expect(await gameActionId(p.header.account_id,'writing',['p',null,'event','entry'])).toBe(a)
  expect(await gameActionId(p.header.account_id,'writing',['p','stage','event','entry'])).not.toBe(a)
 })
+it('uses Native inventory before/after counts, signed price and canonical post-state; never replays a debit',()=>{
+ const account=event('account-genesis') as AccountGameEvent
+ const before=transitionGame(account) as AccountGameBase
+ const buy=event('inventory-buy') as AccountGameEvent
+ if(buy.action.kind!=='inventory')throw Error('fixture')
+ const action=buy.action
+ action.before_count=before.inventory.find(i=>i.category===action.category&&i.item_id===action.item_id)?.count??0
+ buy.action.after_count=buy.action.before_count+buy.action.count
+ const next=transitionGame(buy,before) as AccountGameBase
+ expect(next.coins).toBe('225.000000')
+ expect(next.inventory.find(i=>i.item_id===action.item_id)?.count).toBe(buy.action.after_count)
+ expect(()=>transitionGame(buy,next)).toThrow('game_invalid_rule')
+ const sell=structuredClone(buy)
+ if(sell.action.kind!=='inventory')throw Error('fixture')
+ sell.action.operation='sell';sell.action.before_count=buy.action.after_count;sell.action.after_count=buy.action.before_count;sell.action.coins_delta='25.000000'
+ expect(transitionGame(sell,next)).toEqual(before)
+ const wrong=structuredClone(buy)
+ if(wrong.action.kind!=='inventory')throw Error('fixture')
+ wrong.action.coins_delta='-24.000000'
+ expect(()=>transitionGame(wrong,before)).toThrow('game_invalid_rule')
+ expect(()=>transitionGame(buy,{...before,coins:'0.000000'})).toThrow('game_invalid_rule')
+ expect(transitionGame(account)).toEqual(before)
+})

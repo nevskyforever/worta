@@ -21,11 +21,14 @@ export interface PreparedGameEvent { readonly gameToken: unique symbol }
 const prepared=new WeakMap<object,{scope:string;snapshot:string;current:()=>boolean;data:GamePlan}>()
 function reject():never{throw new BrowserPersistenceError('unsupported_local_source')}
 /** Native Game owner admission over the exact replay snapshot. Only complete
- * linear project genesis/writing/completion and required account genesis/reward. */
-export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,snapshot:ReplaySnapshot,amk:AccountMasterKey,current:()=>boolean,cache=new Map<number,PreparedGameEvent>()):Promise<PreparedGameEvent>{
+ * linear project genesis/writing/completion and account genesis/reward/inventory. */
+export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,snapshot:ReplaySnapshot,amk:AccountMasterKey,current:()=>boolean,cache=new Map<number,PreparedGameEvent>(),active=new Set<number>(),atomic:ReadonlySet<number>=new Set()):Promise<PreparedGameEvent>{
  if(!current())throw new BrowserPersistenceError('closed')
  const cached=cache.get(input.server_sequence)
  if(cached){if(inspectPreparedGameEvent(cached,scope,snapshot).wireItem!==input.wire_item)reject();return cached}
+ if(active.has(input.server_sequence))reject()
+ active.add(input.server_sequence)
+ try {
  const identity=immutableWireIdentity(snapshot),scopeId=immutableWireIdentity(scope),wire=JSON.parse(input.wire_item),d=wire.event
  const account=d.entity_type==='account_game'
  if(!Number.isSafeInteger(input.server_sequence)||input.server_sequence<1||d.server_sequence!==input.server_sequence||d.device_id===scope.deviceId
@@ -70,26 +73,59 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
     }finally{n.fill(0);c.fill(0)}
    }
   }
- }else if(!['genesis','reward'].includes(a.kind))reject()
+ }else if(!['genesis','reward','inventory'].includes(a.kind))reject()
  let previous:GamePlan|undefined,source:ProjectGameEvent|undefined
+ // Filter by durable owner key only to select candidates. Each candidate is
+ // independently decrypted and its actual owner identity checked below.
  for(const row of snapshot.rows){if(row.server_sequence>=input.server_sequence)break
-  if(row.state!=='game_proven')continue
-  const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache),scope,snapshot)
-  if(gameOwner(plan.event)===key)previous=plan
-  if(a.kind==='reward'&&plan.event.header.event_id===a.project_action_id&&plan.event.header.scope==='project')source=plan.event as ProjectGameEvent
+  if(row.state!=='game_proven'||!snapshot.games?.ledger.some(value=>{const l=value as {event_id:string;entity_id:string};return l.event_id===row.event_id&&l.entity_id===key}))continue
+  const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic),scope,snapshot)
+  if(gameOwner(plan.event)!==key)reject()
+  previous=plan
  }
  if(a.kind==='genesis'){if(previous||h.revision!==1||h.parents.length)reject()}
- else if(!previous||h.parents.length!==1||h.parents[0]!==previous.event.header.event_id||h.revision!==previous.event.header.revision+1)reject()
- if(a.kind==='reward'&&(!source||h.event_id!==await gameActionId(h.account_id,'reward',a.project_action_id)))reject()
+ else {
+  if(h.parents.length!==1)reject()
+  const parent=snapshot.rows.find(row=>row.event_id===h.parents[0]&&row.server_sequence<input.server_sequence)
+  if(!parent||!(parent.state==='game_proven'||parent.state==='received'&&atomic.has(parent.server_sequence)))reject()
+  const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,parent,snapshot,amk,current,cache,active,atomic),scope,snapshot)
+  if(gameOwner(plan.event)!==key||h.revision!==plan.event.header.revision+1||parent.state==='game_proven'&&previous?.event.header.event_id!==parent.event_id)reject()
+  previous=plan
+ }
+ if(a.kind==='reward'){
+  // Native permits account reward to precede project source on the wire. A
+  // received source is usable ONLY as a prepared member of this same atomic
+  // Game commit. Its genuine ledger/proof is written before the reward.
+  const row=snapshot.rows.find(row=>row.event_id===a.project_action_id&&(row.state==='game_proven'||row.state==='received'&&atomic.has(row.server_sequence)))
+  if(!row||JSON.parse(row.wire_item).event.entity_type!=='project_game')reject()
+  const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic),scope,snapshot)
+  if(plan.event.header.scope!=='project'||h.event_id!==await gameActionId(h.account_id,'reward',a.project_action_id))reject()
+  source=plan.event as ProjectGameEvent
+ }
  const projection=transitionGame(event,previous?.projection,source)
  if(!current())throw new BrowserPersistenceError('closed')
  if(identity!==immutableWireIdentity(snapshot))throw new BrowserPersistenceError('stale_source')
  const token=Object.freeze({}) as PreparedGameEvent
  prepared.set(token,{scope:scopeId,snapshot:identity,current,data:{event:structuredClone(event),projection,wireItem:input.wire_item,serverSequence:input.server_sequence}});cache.set(input.server_sequence,token);return token
+ } finally {active.delete(input.server_sequence)}
 }
 export function inspectPreparedGameEvent(token:PreparedGameEvent,scope:BrowserSyncScope,snapshot:ReplaySnapshot):GamePlan{
  const plan=prepared.get(token)
  if(!plan||!plan.current())throw new BrowserPersistenceError('closed')
  if(plan.scope!==immutableWireIdentity(scope)||plan.snapshot!==immutableWireIdentity(snapshot))throw new BrowserPersistenceError('stale_source')
  return structuredClone(plan.data)
+}
+
+/** Prepare one contiguous received Game window in actual dependency order,
+ * using the same owner plans, not provisional proofs or cursor assignments. */
+export async function prepareGameBatch(scope:BrowserSyncScope,sequence:number,snapshot:ReplaySnapshot,amk:AccountMasterKey,current:()=>boolean){
+ if(!snapshot.manifest||sequence!==snapshot.manifest.applied_cursor!+1)reject()
+ const atomic=new Set<number>(),cache=new Map<number,PreparedGameEvent>(),active=new Set<number>()
+ for(const row of snapshot.rows.filter(row=>row.server_sequence>=sequence)){
+  if(row.state!=='received'||!['project_game','account_game'].includes(JSON.parse(row.wire_item).event.entity_type))break
+  atomic.add(row.server_sequence)
+ }
+ if(!atomic.size)reject()
+ for(const row of snapshot.rows)if(atomic.has(row.server_sequence))await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic)
+ return [...cache.entries()].filter(([n])=>atomic.has(n)).map(([,token])=>token)
 }

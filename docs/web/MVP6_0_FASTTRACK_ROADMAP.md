@@ -1,5 +1,30 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 06.11.2026 — Account Game balances/inventory LOCAL COMPLETE
+
+Existing account owner is exposed separately from project Game: coins/XP/level,
+health/inspiration, skill points/skills, coefficients, retained global streak and
+canonical item counts. Existing inventory panel is reused in read-only mode;
+Desktop buy/sell mutations follow the frozen Native causal rules. No new gameplay,
+second sync engine, plaintext Game store, schema migration, browser capability or
+ACK. Unsupported account actions still refuse before presentation.
+
+Native production SQLite → real push → isolated PostgreSQL16/FastAPI → Chromium
+login/passphrase unlock accepts writing/completion reward + purchase2 + sale1,
+exact Native account/project snapshots, repeat delivery, restart, actual IDB
+abort/retry and corrupt account ciphertext/proof rejection. Both legal G→R and
+R→G orders are accepted via a dependency-closed Game transaction through existing
+ownerPort/full snapshot CAS, with unchanged per-event proofs and atomic coverage.
+The reverse order never persists a reward without its actual source outcome.
+
+**7 basic reading groups remain**: account group is advanced but includes further
+Native mechanics (global streak/freeze updates, compensation/selection/adoption,
+cabinet/rhythm/buffs and other existing views), so it is not silently removed.
+Stage2/6, Slice4/5 PARTIAL, Note2/10 unchanged. Next bounded task: **global_streak
+and freeze account updates** using the same Native owner and real HTTP acceptance.
+Full ordinary/game Web, all mechanics, creation/editing and bidirectional unified
+sync remain required. No VPS/deployment/registration/policy change; all gates false.
+
 ## 06.11.2026 — Project Game reader LOCAL COMPLETE (bounded linear route)
 
 Actual Native SQLite → production push → PostgreSQL16/FastAPI → Chromium login/

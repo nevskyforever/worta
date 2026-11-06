@@ -467,6 +467,28 @@ in a normal browser. AEAD/codecs alone never establish an applied outcome.
 | Account catalog — NATIVE | `cloud/accountObjectReader.ts`, `accountCatalogRuntime.ts`, Rust `account_catalog.rs`: folder/order/membership/project-order ancestry, folder/project coverage and present authority | `cloud_catalog_events`, `cloud_catalog_apply_ledger`, account inbox and catalog state | A real native apply owner exists; authentication-only probe deliberately returns no apply authority. Need browser equivalent using shared owner logic, including cross-family dependencies; cannot omit account events. |
 | Cover material — not composed in Web | Metadata cover reference, `projectCoverReference.ts`, `projectCoverCrypto.ts`, encrypted cover API and native cover repository | Existing native cover/reference authority; no accepted complete Web cover lifecycle | Reuse crypto/reference validation. Any referenced unavailable/unverified cover blocks the full-project claim until a browser owner is accepted. Do not drop it from Metadata. |
 
+06.11.2026 bounded Game composition: `gamePrepare`/`gameApply` now admit project
+complete genesis/writing/Native completion and account complete genesis/linked
+reward/Native buy-sell inventory. Game frame scopes, crypto versions and inbox14
+per-event digest/projection certificates are unchanged; every durable certificate
+is reauthenticated from AEAD frames, actual parents and Native effects on reopen.
+Account and project projections remain distinct encrypted owner records in replay
+v10. A contiguous, dependency-closed **Game-only** received window may be one
+ownerPort operation: decrypt/prepare real dependencies in topological order,
+write each real ledger/proof/projection and advance manifest coverage to its last
+sequence in the same IndexedDB transaction. A later project source can therefore
+authorize an earlier account reward only inside that shared atomic commit. There
+are no provisional successful proofs or manually moved cursors. Full Snapshot/CAS,
+server snapshot+immutable-wire recheck, archived parent projection preservation,
+session checks and fail-closed unsupported action/dependency rules still apply.
+Incomplete/non-Game dependency windows do not grant coverage or presentation.
+`maxEvents` is a soft boundary between atomic owner operations; it cannot split
+this bounded Game commit (total replay event/byte limits remain unchanged).
+Local prefix reconciliation retains its original qualification rules; Game read
+never manufactures an ACK or native/full-browser reader capability. Full account
+Game, Stage Game HTTP and arbitrary mixed/conflict/source histories are not
+qualified by the admitted linear route. See current checkpoint/audit for evidence.
+
 Native ledgers contain canonical frames/projections. Copying those plaintext SQL
 layouts to IndexedDB is forbidden. Future browser adapters must retain original
 AEAD wire and encrypt every content-bearing derived record using existing AMK

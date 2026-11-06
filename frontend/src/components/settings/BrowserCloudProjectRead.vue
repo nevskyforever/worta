@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrowserAccountGameRead from './BrowserAccountGameRead.vue'
 import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
@@ -174,6 +175,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
+      <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
       <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
       <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
       <section v-if="stageDocuments.length" data-testid="cloud-document-list">

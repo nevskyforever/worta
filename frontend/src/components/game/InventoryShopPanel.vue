@@ -9,6 +9,7 @@ const props = defineProps<{
   inventory: GameInventory
   shop: ShopCatalog
   busy: boolean
+  readOnly?: boolean
   view: 'inventory' | 'shop'
   canOpenCredit: boolean
   initialInventoryCategory?: string
@@ -125,7 +126,7 @@ function canPurchase(item: GameItem): boolean {
           </option>
         </select>
       </label>
-      <label>
+      <label v-if="!readOnly">
         <span>{{ t('Количество') }}</span>
         <input v-model.number="count" type="number" min="1" max="1000" step="1" />
       </label>
@@ -151,7 +152,7 @@ function canPurchase(item: GameItem): boolean {
         <p v-if="item.level && item.level > 1" class="meta">
           {{ t('Требуемый уровень') }}: {{ item.level }}
         </p>
-        <div class="button-row">
+        <div v-if="!readOnly" class="button-row">
           <button
             v-if="item.buy && (view === 'shop' || view === 'inventory')"
             class="nf-button"
