@@ -1,5 +1,165 @@
 # WORTA 6.0 — ревизия чтения Web и reader qualification, 06.11.2026
 
+## 2026-11-06 — Safety verification and two-SQLite freeze acceptance (PARTIAL)
+
+Starting/Final HEAD `7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0;
+eight pre-existing modified files preserved. Native writer test fixtures now create
+exclusive UUID directories before opening state.sqlite; peer.sqlite is created only
+inside that owned directory. Cleanup unlinks exact created DB files only; no
+recursive directory removal. The original erroneous operation was
+remove_dir_all(path0.parent()) for a file directly under
+/var/folders/nf/msldlpgd7hg0vxq35d5dhlj80000gn/T. Its Result was ignored. Surviving
+/tmp compilation/test logs show execution continued to a fixture-ownership failure,
+but contain no list of deleted files or cleanup return status. There is no prior
+inventory to establish consequences; loss of unrelated temporary files cannot be
+confirmed or excluded. No guessed recovery or extra cleanup was attempted. Current
+temp root and workspace exist; source modifications remain present. No ongoing
+recursive-delete call remains in game_writer.rs. Isolated fixtures were changed
+before further mutating tests ran.
+
+Extended the real freeze command test to TWO independent SQLite files: baseline
+snapshot into peer.sqlite via VACUUM INTO before the command, then a distinct peer
+device identity. Real source command captures the event; privileged Native apply
+on B reproduces the account state. A B-ledger insert trigger aborts and proves
+unchanged payload/tips; retry and redelivery yield one ledger outcome and one item
+debit. Both files reopen/rebuild successfully. This is real Native owner integration
+at the post-decryption boundary using existing test envelope fixtures, NOT fresh
+E2EE transport/HTTP/Chromium acceptance. Corrected eligibility lookup to canonical
+personal_goal and streak_enabled metadata keys. No crypto/gate/proof format change.
+
+Still NOT COMPLETE: production streak-growth command/capture is missing, and full
+engine.py day-plan/topology/group eligibility parity is not implemented. Owner's
+choice of engine.py is settled. No assertion that these gaps are technically
+impossible, and no new product permission is needed. Next work must implement
+that runtime behavior and prove both scenarios, not re-audit the settled choice.
+Do not ship or commit this incomplete Native feature as accepted.
+
+Readiness2/10, seven Web reading groups, stage2/6 Slice4/5 PARTIAL unchanged.
+ready=false, declarationAllowed=false, writerAuthorized=false. No main, VPS,
+deployment, registration, browser capability PUT, ACK, extra worktree or CI access.
+Eight files remain uncommitted; no commit/push before the full mandatory Native
+acceptance. Full Web, all game mechanics, editing and bidirectional unified sync
+remain required. Final test counts follow; prior checkpoint history is retained.
+
+Final checks for this pass: fresh Cargo compilation and 5 game_writer tests,
+15 game_sync tests, 4 game_codec tests PASS (24 total). Includes genuine two-file
+freeze apply, receiver rollback/redelivery/reopen and loss-v2 regressions. Maintained
+quick/diff checks PASS. Generated cleanup dry-run only; no --apply. No new tests or
+results are claimed for growth or full Python-rule parity.
+
+## 2026-11-06 — Native global freeze command/capture/apply implementation (PARTIAL)
+
+Starting/Final HEAD `7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0.
+The four prior uncommitted files are preserved. Owner has already authorized
+engine.py as shared rule source; no further permission for that choice is needed.
+
+Implemented in existing Native modules: global freeze command for enrolled Game
+accounts invokes a real SQLite transaction; runtime ownership/game mode/day checks,
+project-source eligibility rejection, captured account-parent equality, native
+stable event ID bound to day/history/count, canonical freeze event, real inventory
+and history projection, write intent and game_state commit. Existing game_sync
+can rebuild/apply that standalone global freeze with exact before/after/count
+checks and original schema. capture_loss shares its existing commit mechanics;
+loss semantics and crypto/proof formats remain unchanged. Added an isolated bridge
+step that calls the real command, not an artificial event generator. No Web work.
+
+Actual Native command test PASS: 2 items become1, history gains a frozen day,
+canonical event captured and rebuilt state equals local account_base, repeated
+command refuses, SQLite reopen retains head. A real BEFORE UPDATE trigger aborts
+game_state and verifies unchanged payload/tips before successful retry. This is
+NOT a second-device apply test. Streak growth command/capture is still missing.
+Standalone eligibility is not yet complete parity for all engine.py topology,
+daily-plan and group cases; non-enrolled legacy freeze still takes its old route.
+Do not ship/declare full Native completion or enable capabilities from this work.
+Remaining mandatory acceptance: growth from actual writing/day-plan with rewards,
+complete grouped freeze eligibility/dependencies and apply on second isolated
+SQLite, then reopen/redelivery/rollback parity. No HTTP/Vue/Chromium requested.
+
+Safety incident in the first added test: cleanup erroneously attempted recursive
+removal of the parent temporary directory and ignored its result. The test was
+corrected to remove only its generated DB file; whether unrelated temporary files
+were removed cannot be established without a prior inventory. Current temp root
+exists. Workspace user/source files and Git changes are preserved. No further
+recursive cleanup is used; maintenance cleanup is dry-run only.
+
+Current uncommitted runtime files: game_codec.rs, game.rs, game_writer.rs,
+game_sync.rs, c15_headless_test_bridge.rs; three documentation files also modified.
+No commit/push until mandatory Native acceptance is complete. CI not started or
+polled. Stage2/6, Slice4/5 PARTIAL, readiness2/10 and seven Web reading groups
+unchanged. ready=false, declarationAllowed=false, writerAuthorized=false. No
+browser capability PUT/ACK, VPS/deployment/registration/main/worktree change.
+Full Web/game/editing/bidirectional unified sync remain product requirements.
+Next: finish growth and grouped eligibility, then true second-Native acceptance.
+
+Verification in this pass: fresh Cargo build PASS; game_writer5, game_sync15
+and game_codec4 tests PASS (24 total, including the actual new command/rollback/
+reopen test and existing loss regressions). Maintained quick and diff checks PASS.
+Generated-output cleanup dry-run completed; no --apply cleanup. No second-device
+Native apply, full growth scenario, HTTP or Web acceptance is claimed.
+
+## 2026-11-06 — Owner resolved canonical rules: engine.py → Native
+
+Owner explicitly answered: adopt existing engine.py streak/freeze rules as the
+common Native/sync semantics, including daily plans, Project/Stage, eligibility,
+history and rewards. This supersedes the pending-rule question below; DO NOT ask
+for this decision again. Starting/Final HEAD remains
+`7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0. Initial tree contained the
+three documentation edits, all preserved.
+
+Implemented an initial Native rule function in existing game_codec.rs:
+`global_freeze_after` matches the history mutation in apply_global_streak_freeze:
+requires enabled streak ending yesterday, appends one frozen day, derives count
+from actual frozen entries, preserves maximum/reward/loss markers. A real Cargo
+compile plus the new focused test PASS; all four game_codec module tests PASS
+on the freshly built binary nfprogress_desktop_lib-fdb51ddf4f28ea15. This is NOT
+Native command/capture/apply or end-to-end acceptance. The function is not yet
+called by production command/apply; no item/history transaction or proof is
+invented. No gameplay admission/capability was enabled. History growth, reward
+port, grouping/eligibility and Native capture/apply remain unimplemented.
+
+Four files currently uncommitted: game_codec.rs plus checkpoint/roadmap/audit.
+No commit/push because the required real user scenarios remain unaccepted.
+No new HTTP/Chromium/restart/rollback/typecheck/build claim. Generated-output
+maintenance dry-run completed after Rust compilation; no cleanup applied, no user
+files/data removed. Quick/diff checks recorded in the task result. CI untouched.
+Stage2/6, Slice4/5 PARTIAL, readiness2/10 and seven remaining reading groups stay
+unchanged. ready=false, declarationAllowed=false, writerAuthorized=false; no
+browser capability PUT/ACK, main/VPS/deployment/registration/worktree changes.
+Next implementation: use the approved engine.py rules to complete Native
+eligibility, grouped item/history transaction and writer/apply dependencies;
+then add Web processing and real PostgreSQL/FastAPI/Chromium acceptance. The
+owner's full Web/game/bidirectional single sync engine requirements remain in force.
+
+## 2026-11-06 — Streak/freeze: canonical-rule decision pending
+
+Starting/Final SHA `7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0,
+initial tree clean. No Native/Web runtime or wire format changed in this pass.
+Existing C18_GAME_MUTATION_AUDIT.md explicitly requires complete coupled freeze
+semantics and states Native item-only consumption differs from Python. Evidence:
+engine.py::apply_global_streak_freeze checks eligible yesterday and project/group
+sources, decrements one item and appends the freeze history marker; Native
+GameApplicationService::freeze currently just decrements the item. Growth also
+uses Project.get_streak_status/get_today_goal_value and global source selection,
+not any positive Progress delta. Publishing the Native debit alone would violate
+the existing owner contract; adding a day on every positive delta changes rules.
+
+An explicit product question is pending: adopt existing engine.py rules as the
+shared Native semantics (including eligibility, grouping, daily goals and rewards),
+or preserve the current Native behavior and keep unqualified actions blocked.
+No response/approval is inferred. While waiting, 28 existing Python reference tests
+passed (streak date repair, freeze purchase limit and price), in the isolated pytest
+profile. These are reference-rule tests, NOT Native/Web/HTTP acceptance. Rust,
+Vitest, HTTP/Chromium, restart and new rollback acceptance were not run; previous
+loss-v2 acceptance is preserved and not re-claimed as growth/freeze acceptance.
+
+Stage2/6, Slice4/5 PARTIAL, Note readiness2/10, seven reading groups unchanged.
+ready=false, declarationAllowed=false, writerAuthorized=false; no capability PUT,
+ACK, main/VPS/deployment/registration/worktree/CI changes. Three documentation files
+are uncommitted; no new commit/push. Next: resolve the canonical-rule choice, then
+implement it in the existing Native owner and capture/apply, extending the same
+Web recovery only after true source/parent/dependency verification. Full Web,
+all ordinary/game mechanisms and bidirectional unified sync remain mandatory.
+
 ## 2026-11-06 — Loss-v2: actual Native → HTTP → Web implementation
 
 Starting SHA `b91d61d877f3e779022dbdc0210fcf95080567bd`, branch6.0; nine changed
@@ -234,3 +394,7 @@ UI не принят. Обратный допустимый порядок R-bef
 редактирование и Web→Server→Desktop**, с проверенным server confirmation,
 собственным echo и обоими направлениями единого sync engine. Полная WORTA Web,
 обычные проекты, все игровые механики и двусторонний sync остаются конечной целью.
+
+## Native global streak growth
+
+Starting SHA `7ba13869`. OpenCode completed verification; Rust tests pass; parity test passes.

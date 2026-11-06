@@ -363,7 +363,7 @@ pub fn process_pending_events(
                 &project_id,
             )?;
             let now:String=transaction.query_row("SELECT strftime('%Y-%m-%dT%H:%M:%S.000000Z','now')",[],|r|r.get(0)).map_err(|e|e.to_string())?;
-            crate::game_writer::capture_domain(&transaction,&event_id,&event_type,&project_id,stage_id.as_deref(),progress_id.as_deref(),delta.unwrap_or(0.0),&raw_state,&state,context,&now)?;
+            crate::game_writer::capture_domain(&transaction,&event_id,&event_type,&project_id,stage_id.as_deref(),progress_id.as_deref(),delta.unwrap_or(0.0),&raw_state,&mut state,context,&now)?;
             }
             transaction.execute(
                 "UPDATE game_state SET schema_version=?1,payload_json=?2,updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=1",
@@ -3762,7 +3762,53 @@ impl GameApplicationService {
         })
     }
 
+    /// The global command uses the engine.py eligibility and item/history
+    /// transaction. Project/group freezes retain their separate command route.
+    pub(crate) fn freeze_global_sqlite(connection:&mut Connection) -> GameResult<GameCommandResponse> {
+        Self::owner(connection)?;
+        process_pending_events(connection,100).map_err(GameError::Database)?;
+        if !Self::enabled(connection) {return Err(GameError::PrerequisiteMissing("Игровой режим отключён.".into()));}
+        let day=crate::streaks::logical_writing_day(connection).map_err(GameError::Database)?;
+        let now=Self::now(connection)?;
+        let tx=connection.transaction().map_err(|e|GameError::Database(e.to_string()))?;
+        let before=Self::load(&tx)?;
+        let yesterday=crate::streaks::date_days(&day).ok_or_else(||GameError::InvalidState("Некорректный писательский день.".into()))?-1;
+        // A standalone global freeze cannot replace an eligible project/group
+        // freeze. Consult actual SQLite owners, not caller-provided identities.
+        if let Some(owners)=before["project_game_state"].as_object(){
+            for (key,fields) in owners {
+                let parts:Vec<_>=key.split(':').collect();
+                let source=match parts.as_slice(){
+                    ["project",id]=>tx.query_row("SELECT status,payload_json FROM projects WHERE id=?1",[id],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional(),
+                    ["stage",project,id]=>tx.query_row("SELECT status,payload_json FROM stages WHERE id=?1 AND project_id=?2",params![id,project],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional(),
+                    _=>continue,
+                }.map_err(|e|GameError::Database(e.to_string()))?;
+                let Some((status,payload))=source else{continue};
+                if status=="завершен" {continue;}
+                let metadata:Value=serde_json::from_str(&payload).map_err(|e|GameError::Database(e.to_string()))?;
+                if metadata["infinite"]==true || metadata["streak_enabled"]==false || fields["streak_status"]=="Off" {continue;}
+                if metadata["deadline"].is_null() && metadata.get("personal_goal").or_else(||metadata.get("personal_goal_for_the_day")).and_then(Value::as_f64).unwrap_or(0.0)==0.0 {continue;}
+                let streak=crate::game_projection::streak_base(fields,false).map_err(GameError::Database)?;
+                let last=streak["history"].as_array().and_then(|v|v.last()).and_then(|v|v["day"].as_str()).and_then(crate::streaks::date_days);
+                if last==Some(yesterday){return Err(GameError::PrerequisiteMissing("Выберите проект для заморозки.".into()));}
+            }
+        }
+        let portable_now=format!("{}.000000Z",now.get(..19).ok_or_else(||GameError::InvalidState("Некорректный писательский день.".into()))?);
+        let after=crate::game_writer::capture_global_freeze(&tx,&before,&day,&portable_now).map_err(GameError::Database)?
+            .ok_or_else(||GameError::PrerequisiteMissing("Сначала опубликуйте игровой прогресс.".into()))?;
+        tx.execute("UPDATE game_state SET payload_json=?1,updated_at=?2 WHERE id=1",params![after.to_string(),now]).map_err(|e|GameError::Database(e.to_string()))?;
+        tx.commit().map_err(|e|GameError::Database(e.to_string()))?;
+        let state=project_state(&after,&now,&now,&day,true)?;
+        Ok(GameCommandResponse{ok:true,message:Some("Глобальный стрик заморожен!".into()),messages:vec!["Глобальный стрик заморожен!".into()],result:Some(json!({"target":"global","date":day})),state})
+    }
+
     pub fn freeze(request: FreezeRequest) -> GameResult<GameCommandResponse> {
+        if request.target=="global" {
+            let mut connection=crate::open_projects_database().map_err(GameError::Database)?;
+            let active:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_game_migrations WHERE owner_key='account')",[],|r|r.get(0)).map_err(|e|GameError::Database(e.to_string()))?;
+            if active {return Self::freeze_global_sqlite(&mut connection);}
+        }
+
         if request.target != "global" && request.target != "project" {
             return Err(GameError::Validation(
                 "Неизвестная цель заморозки стрика.".into(),

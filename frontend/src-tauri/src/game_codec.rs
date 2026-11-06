@@ -197,6 +197,28 @@ fn base(v: &Value) -> Result<()> {
 }
 /// A loss consumes the prior series. Its identity/day is the first day on which
 /// the missed writing day is final, independent of when a device notices it.
+/// engine.apply_global_streak_freeze: only the history half of the atomic
+/// item/history operation. The caller must prove project/group eligibility and
+/// consume exactly one inventory item in the same owner transaction.
+pub fn global_freeze_after(before: &Value, writing_day: &str) -> Result<Value> {
+    streak(before)?;
+    let today = crate::streaks::date_days(writing_day).ok_or("invalid_game_payload")?;
+    let history = before["history"].as_array().ok_or("invalid_game_payload")?;
+    let last = history.last().and_then(|v|v["day"].as_str())
+        .and_then(crate::streaks::date_days).ok_or("game_invalid_rule")?;
+    if before["enabled"] != true || last + 1 != today {
+        return Err("game_invalid_rule".into());
+    }
+    let mut after = before.clone();
+    after["history"].as_array_mut().ok_or("invalid_game_payload")?
+        .push(json!({"day":writing_day,"frozen":true}));
+    after["freezes"] = json!(history.iter().filter(|v|v["frozen"]==true).count()+1);
+    // The Python command does not award a day bonus or change maximum/loss
+    // markers. Status rendering/reconciliation remains a separate operation.
+    streak(&after)?;
+    Ok(after)
+}
+
 pub fn loss_after(before: &Value, writing_day: &str) -> Result<Value> {
     streak(before)?;
     let history = before["history"].as_array().ok_or("invalid_game_payload")?;
@@ -696,5 +718,23 @@ mod tests {
         assert!(validate(&e).is_err());
         e["action"]["completion_id"] = json!("completion:[\"p\",\"project\"]");
         assert!(validate(&e).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod global_freeze_parity_tests {
+    use super::*;
+    #[test]
+    fn global_freeze_extends_yesterday_once_without_rewards_or_marker_rewrite() {
+        let before=json!({"history":[{"day":"2026-11-04","frozen":false},{"day":"2026-11-05","frozen":true}],"maximum":2,"freezes":1,"enabled":true,"last_reward_day":"2026-11-04","lost_day":null,"lost_length":0});
+        let after=global_freeze_after(&before,"2026-11-06").unwrap();
+        assert_eq!(after["history"][2],json!({"day":"2026-11-06","frozen":true}));
+        assert_eq!(after["freezes"],2);
+        for key in ["maximum","last_reward_day","lost_day","lost_length","enabled"] { assert_eq!(after[key],before[key]); }
+        assert!(global_freeze_after(&after,"2026-11-06").is_err());
+        assert!(global_freeze_after(&before,"2026-11-07").is_err());
+        let mut off=before.clone();off["enabled"]=json!(false);
+        assert!(global_freeze_after(&off,"2026-11-06").is_err());
+        assert_eq!(before["history"].as_array().unwrap().len(),2);
     }
 }

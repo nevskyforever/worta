@@ -47,9 +47,34 @@ fn completion_header(db:&Connection,scope:&metadata::MetadataScope,p:&str,s:Opti
     o.insert("entity_id".into(),json!(s.map(|s|format!("game:stage:{s}:{id}")).unwrap_or_else(||format!("game:project:{id}"))));
     Ok(h)
 }
+fn capture_growth(db:&Connection,scope:&metadata::MetadataScope,source:&Value,before:&Value,now:&str)->Result<Option<Value>> {
+    let parents=game_sync::tips(db,&scope.account_id,"account")?;
+    if parents.len()!=1{return Err("game_noncommutative_conflict".into());}
+    let base=game_sync::rebuild_chain(db,&scope.account_id,"account",&parents[0])?;
+    if base!=game_projection::account_base(before)?{return Err("game_legacy_local_conflict".into());}
+    let Some((after,reward))=game_sync::growth_effect(db,&scope.account_id,source,&base)? else{return Ok(None)};
+    let day=source["action"]["fact"]["writing_day"].clone();let refs=json!([source["header"]["event_id"]]);
+    let id=game_sync::stable_action_id(&scope.canonical_user_id,"global_streak",&json!([day,refs]));
+    let e=json!({"version":1,"header":game_migration::header(db,scope,None,None,&id,&parents,"native-game-v1",now)?,"action":{"kind":"global_streak","writing_day":day,"project_action_ids":refs,"before":base["global_streak"],"after":after,"reward":reward}});
+    game_sync::preserve(db,&scope.account_id,&e,"unsealed")?;
+    let next=game_sync::rebuild_chain(db,&scope.account_id,"account",&id)?;
+    let out=game_projection::materialize_account(before,&next)?;
+    db.execute("DELETE FROM cloud_game_tips WHERE account_id=?1 AND owner_key='account'",[&scope.account_id]).map_err(sql)?;
+    db.execute("INSERT INTO cloud_game_tips VALUES(?1,'account',?2)",params![scope.account_id,id]).map_err(sql)?;
+    db.execute("UPDATE cloud_game_projection SET head_event_id=?1,snapshot_json=?2,generation=?3 WHERE account_id=?4 AND owner_key='account'",params![id,canonical(&next),e["header"]["revision"].as_i64(),scope.account_id]).map_err(sql)?;
+    db.execute("INSERT INTO cloud_game_write_intents(account_id,event_id,payload_json,prior_payload_json) VALUES(?1,?2,?3,?4)",params![scope.account_id,id,out.to_string(),before.to_string()]).map_err(sql)?;
+    Ok(Some(out))
+}
+
 /// Standalone account action; the parent Game chain is the source of truth.
 /// Caller commits the returned compatibility state in the same transaction.
 pub fn capture_loss(db: &Connection, before: &Value, day: &str, now: &str) -> Result<Option<Value>> {
+    capture_streak_change(db,before,day,now,false)
+}
+pub fn capture_global_freeze(db: &Connection, before: &Value, day: &str, now: &str) -> Result<Option<Value>> {
+    capture_streak_change(db,before,day,now,true)
+}
+fn capture_streak_change(db: &Connection, before: &Value, day: &str, now: &str, freeze:bool) -> Result<Option<Value>> {
     let mut q = db.prepare("SELECT m.account_id,b.canonical_user_id,s.device_id,m.lifecycle FROM cloud_game_migrations m JOIN cloud_account_bindings b ON b.local_account_id=m.account_id JOIN cloud_sync_state s ON s.account_id=m.account_id WHERE m.owner_key='account' LIMIT 2").map_err(sql)?;
     let scopes = q.query_map([], |r| Ok((metadata::MetadataScope{account_id:r.get(0)?,canonical_user_id:r.get(1)?,device_id:r.get(2)?},r.get::<_,String>(3)?))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     if scopes.is_empty() { return Ok(None); }
@@ -61,14 +86,25 @@ pub fn capture_loss(db: &Connection, before: &Value, day: &str, now: &str) -> Re
     if parents.len()!=1 { return Err("game_noncommutative_conflict".into()); }
     let proven=game_sync::rebuild_chain(db,&scope.account_id,"account",&parents[0])?;
     if proven!=base { return Err("game_legacy_local_conflict".into()); }
-    let after=game_codec::loss_after(&base["global_streak"],day)?;
-    let id=game_sync::loss_id(&scope.canonical_user_id,&base["global_streak"]);
-    let event=json!({"version":2,"header":game_migration::header(db,scope,None,None,&id,&parents,"native-game-v1",now)?,"action":{"kind":"global_streak","writing_day":day,"project_action_ids":[],"before":base["global_streak"],"after":after,"reward":{"coins":"0.000000","experience":"0.000000"}}});
+    let count=base["inventory"].as_array().into_iter().flatten().find(|v|v["category"]=="Предметы"&&v["item_id"]=="Заморозка").and_then(|v|v["count"].as_u64()).unwrap_or(0);
+    let event=if freeze {
+        if count==0{return Err("game_invalid_rule".into());}
+        let after=game_codec::global_freeze_after(&base["global_streak"],day)?;
+        let id=game_sync::stable_action_id(&scope.canonical_user_id,"global_freeze",&json!([day,base["global_streak"],count]));
+        json!({"version":1,"header":game_migration::header(db,scope,None,None,&id,&parents,"native-game-v1",now)?,"action":{"kind":"freeze","writing_day":day,"project_id":null,"project_action_id":null,"before_count":count,"after_count":count-1,"before":base["global_streak"],"after":after}})
+    }else{
+        let after=game_codec::loss_after(&base["global_streak"],day)?;
+        let id=game_sync::loss_id(&scope.canonical_user_id,&base["global_streak"]);
+        json!({"version":2,"header":game_migration::header(db,scope,None,None,&id,&parents,"native-game-v1",now)?,"action":{"kind":"global_streak","writing_day":day,"project_action_ids":[],"before":base["global_streak"],"after":after,"reward":{"coins":"0.000000","experience":"0.000000"}}})
+    };
+    let id=event["header"]["event_id"].as_str().ok_or("invalid_game_payload")?.to_string();
     // Validate before retaining anything. No optimistic state can outrun replay.
     let next=game_sync::transition(&event,&std::collections::BTreeMap::from([(parents[0].clone(),base)]))?;
     let mut out=game_projection::materialize_account(before,&next)?;
-    out["gamer"]["last_health_recovery_at"]=json!({"__type__":"datetime","value":now});
-    crate::game::append_loss_notifications(before,&mut out,&id,now)?;
+    if !freeze {
+        out["gamer"]["last_health_recovery_at"]=json!({"__type__":"datetime","value":now});
+        crate::game::append_loss_notifications(before,&mut out,&id,now)?;
+    }
     game_sync::preserve(db,&scope.account_id,&event,"unsealed")?;
     if game_sync::rebuild_chain(db,&scope.account_id,"account",&id)?!=next { return Err("game_invalid_rule".into()); }
     db.execute("DELETE FROM cloud_game_tips WHERE account_id=?1 AND owner_key='account'",[&scope.account_id]).map_err(sql)?;
@@ -144,7 +180,7 @@ pub fn capture_domain(
     entry: Option<&str>,
     delta: f64,
     before_raw: &str,
-    after: &Value,
+    after: &mut Value,
     context: &serde_json::Map<String,Value>,
     now: &str,
 ) -> Result<bool> {
@@ -268,6 +304,7 @@ pub fn capture_domain(
             db.execute("INSERT INTO cloud_game_projection VALUES(?1,?2,?3,?4,?5) ON CONFLICT(account_id,owner_key) DO UPDATE SET head_event_id=excluded.head_event_id,snapshot_json=excluded.snapshot_json,generation=excluded.generation",params![a,owner,id,canonical(value),revision]).map_err(sql)?;
         }
         db.execute("INSERT INTO cloud_game_write_intents(account_id,event_id,payload_json,prior_payload_json) VALUES(?1,?2,?3,?4)",params![a,rid,after.to_string(),before_raw]).map_err(sql)?;
+        if kind=="ProgressAdded" {if let Some(grown)=capture_growth(db,&scope,&g,after,now)?{*after=grown;}}
         Ok(())
     })();
     if result.is_err() {
@@ -299,12 +336,15 @@ mod tests {
         std::path::PathBuf,
         metadata::MetadataScope,
         Value,
-    ) {seed_with_source(infinite,None)}
-    fn seed_with_source(infinite:bool,initial:Option<Value>) -> (Connection,std::path::PathBuf,metadata::MetadataScope,Value) {
-        let path = std::env::temp_dir().join(format!(
-            "game-writer-{}.db",
-            metadata::new_event_id().unwrap()
+    ) {seed_with_source(infinite,None,0.0)}
+    fn seed_with_source(infinite:bool,initial:Option<Value>,personal_goal:f64) -> (Connection,std::path::PathBuf,metadata::MetadataScope,Value) {
+        let directory = std::env::temp_dir().join(format!(
+            "worta-game-writer-{}", metadata::new_event_id().unwrap()
         ));
+        // Exclusive creation: every fixture owns a separate directory. Cleanup
+        // below only unlinks its exact DB file; never traverse the parent root.
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("nfprogress.db");
         let mut db = crate::sqlite::open_database(&path).unwrap();
         let f: Value = serde_json::from_str(include_str!(
             "../../src/cloud/__fixtures__/progressCodecV1.json"
@@ -331,7 +371,8 @@ mod tests {
         )
         .unwrap();
         db.execute("INSERT INTO cloud_sync_project_bootstraps(project_id,account_id,device_id,bootstrap_id,mode,phase,created_at,updated_at) VALUES('P1','local',?1,?2,'upload_existing','prepared',?3,?3)",params![scope.device_id,h["bootstrap_id"].as_str(),NOW]).unwrap();
-        let e = json!({"version":1,"header":{"account_id":scope.canonical_user_id,"project_id":"P1","entity_id":"P1","device_id":scope.device_id,"bootstrap_id":h["bootstrap_id"],"event_id":h["metadata_event_id"],"revision":1,"generation":1,"operation":"create","parent_event_ids":[],"updated_at":NOW},"metadata":{"name":"Project","goal":null,"infinite":infinite,"unit":"symbols","status":"active","deadline":null,"personal_goal":0,"auto_freeze":true,"streak_enabled":true,"work_method":"manual","stages_enabled":false,"combine_stage_mindmaps":false},"deleted_at":null});
+        let e = json!({"version":1,"header":{"account_id":scope.canonical_user_id,"project_id":"P1","entity_id":"P1","device_id":scope.device_id,"bootstrap_id":h["bootstrap_id"],"event_id":h["metadata_event_id"],"revision":1,"generation":1,"operation":"create","parent_event_ids":[],"updated_at":NOW},"metadata":{"name":"Project","goal":if personal_goal>0.0{json!(1000)}else{Value::Null},"infinite":infinite,"unit":"symbols","status":"active","deadline":null,"personal_goal":personal_goal as i64,"auto_freeze":true,"streak_enabled":true,"work_method":"manual","stages_enabled":false,"combine_stage_mindmaps":false},"deleted_at":null});
+        if personal_goal>0.0{db.execute("UPDATE projects SET goal=1000 WHERE id='P1'",[]).unwrap();}
         let mut payload=e["metadata"].clone();payload["total"]=json!(0);payload["progress_entries"]=json!([]);
         db.execute("UPDATE projects SET payload_json=?1 WHERE id='P1'",[payload.to_string()]).unwrap();
         db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES('local',?1,1,?2,'P1','P1','project_metadata','upsert',1,?3,'received',?3)",params![h["metadata_event_id"].as_str(),scope.device_id,NOW]).unwrap();
@@ -389,10 +430,127 @@ mod tests {
         (db, path, scope, f)
     }
     #[test]
+    fn production_daily_goal_grows_global_streak_and_peer_applies_once(){
+        let (mut db,path,scope,_)=seed_with_source(false,None,100.0);
+        db.execute("UPDATE storage_ownership SET owner='sqlite' WHERE subsystem IN ('game','projects')",[]).unwrap();
+        crate::progress_sync::capture(&mut db,&scope,"P1",NOW).unwrap();
+        let root:Vec<u8>=db.query_row("SELECT canonical_frame FROM cloud_progress_events",[],|r|r.get(0)).unwrap();
+        let pe=progress_codec::decode(&root).unwrap();let h=&pe.header;
+        db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES('local',?1,4,?2,'P1','project','progress','event',1,?3,'received',?3)",params![h.event_id,scope.device_id,h.updated_at]).unwrap();
+        let root_cipher=vec![0u8;root.len()+16];
+        db.execute("INSERT INTO cloud_sync_event_objects VALUES('local',?1,1,1,zeroblob(24),?2,?3)",params![h.event_id,root_cipher,h.updated_at]).unwrap();
+        let mut receiver=crate::sqlite::open_privileged_remote_apply_database(&path).unwrap();
+        crate::progress_sync::apply(&mut receiver,&scope,&root,&[0;24],&root_cipher).unwrap();drop(receiver);
+        let peer_path=path.parent().unwrap().join("growth-peer.sqlite");
+        db.execute("VACUUM INTO ?1",[peer_path.to_str().unwrap()]).unwrap();
+        let peer_scope=metadata::MetadataScope{account_id:scope.account_id.clone(),canonical_user_id:scope.canonical_user_id.clone(),device_id:metadata::new_event_id().unwrap()};
+        let peer=crate::sqlite::open_database(&peer_path).unwrap();peer.execute("UPDATE cloud_sync_state SET device_id=?1 WHERE account_id='local'",[&peer_scope.device_id]).unwrap();
+        let saved=std::env::var_os("NFPROGRESS_DATA_DIR");std::env::set_var("NFPROGRESS_DATA_DIR",path.parent().unwrap());
+        let written=crate::add_progress_sqlite("P1".into(),None,100.0,Some(vec![h.event_id.clone()]));
+        if let Some(value)=saved{std::env::set_var("NFPROGRESS_DATA_DIR",value);}else{std::env::remove_var("NFPROGRESS_DATA_DIR");}
+        assert!(written.is_ok(),"{:?}",written);
+        let result=crate::game::process_pending_events(&mut db,100).unwrap();assert_eq!(result.processed,1);
+        let raw:String=db.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
+        let state=game_projection::account_base(&serde_json::from_str::<Value>(&raw).unwrap()).unwrap();
+        assert_eq!(state["global_streak"]["history"].as_array().unwrap().len(),1);
+        assert_eq!(state["coins"],"60.000000");assert_eq!(state["experience"],"500.000000");
+        println!("WORTA_GROWTH_PARITY:{}",canonical(&state));
+        let append:Vec<u8>=db.query_row("SELECT canonical_frame FROM cloud_progress_events WHERE revision=2",[],|r|r.get(0)).unwrap();let parsed=progress_codec::decode(&append).unwrap();
+        let ap=&parsed.header;let cipher=vec![0;append.len()+16];
+        peer.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES('local',?1,5,?2,'P1','project','progress','event',2,?3,'received',?3)",params![ap.event_id,scope.device_id,ap.updated_at]).unwrap();
+        peer.execute("INSERT INTO cloud_sync_event_objects VALUES('local',?1,1,1,zeroblob(24),?2,?3)",params![ap.event_id,cipher,ap.updated_at]).unwrap();
+        let mut receiver=crate::sqlite::open_privileged_remote_apply_database(&peer_path).unwrap();
+        crate::progress_sync::apply(&mut receiver,&peer_scope,&append,&[0;24],&cipher).unwrap();
+        let frames:Vec<Vec<u8>>=db.prepare("SELECT canonical_frame FROM cloud_game_events WHERE revision>1 ORDER BY rowid").unwrap().query_map([],|r|r.get(0)).unwrap().collect::<rusqlite::Result<_>>().unwrap();
+        assert_eq!(frames.len(),3);
+        for (index,frame) in frames.iter().enumerate(){
+            let project=frame[9]==12;let e=game_codec::unframe(frame,project).unwrap();let h=&e["header"];let seq=index as i64+6;
+            if project{
+                peer.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES('local',?1,?2,?3,'P1',?4,'project_game','event',?5,?6,'received',?6)",params![h["event_id"].as_str(),seq,scope.device_id,h["entity_id"].as_str(),h["revision"].as_i64(),h["updated_at"].as_str()]).unwrap();
+                peer.execute("INSERT INTO cloud_sync_event_objects VALUES('local',?1,1,1,zeroblob(24),zeroblob(32),?2)",params![h["event_id"].as_str(),h["updated_at"].as_str()]).unwrap();
+            }else{
+                peer.execute("INSERT INTO cloud_sync_account_inbox(account_id,event_id,canonical_user_id,scope,server_sequence,device_id,entity_id,entity_type,operation,sync_revision,updated_at,crypto_version,aad_version,nonce,ciphertext,received_at) VALUES('local',?1,?2,'account',?3,?4,?5,'account_game','upsert',?6,?7,2,2,zeroblob(24),zeroblob(32),?7)",params![h["event_id"].as_str(),scope.canonical_user_id,seq,scope.device_id,h["entity_id"].as_str(),h["revision"].as_i64(),h["updated_at"].as_str()]).unwrap();
+            }
+            if e["action"]["kind"]=="global_streak" {
+                let old:String=peer.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
+                let old_tips=game_sync::tips(&peer,"local","account").unwrap();
+                peer.execute_batch("CREATE TRIGGER growth_abort BEFORE INSERT ON cloud_game_apply_ledger BEGIN SELECT RAISE(ABORT,'growth interrupted'); END;").unwrap();
+                assert!(game_sync::apply(&mut receiver,&peer_scope,frame,&[0;24],&[0;32],project).is_err());
+                assert_eq!(peer.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap(),old);
+                assert_eq!(game_sync::tips(&peer,"local","account").unwrap(),old_tips);
+                peer.execute_batch("DROP TRIGGER growth_abort").unwrap();
+            }
+            assert_eq!(game_sync::apply(&mut receiver,&peer_scope,frame,&[0;24],&[0;32],project).unwrap(),"applied");
+            assert_eq!(game_sync::apply(&mut receiver,&peer_scope,frame,&[0;24],&[0;32],project).unwrap(),"applied");
+        }
+        let peer_raw:String=peer.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
+        assert_eq!(game_projection::account_base(&serde_json::from_str::<Value>(&peer_raw).unwrap()).unwrap(),state);
+        assert_eq!(crate::game::process_pending_events(&mut db,100).unwrap().processed,0);
+        drop(receiver);drop(peer);drop(db);
+        let reopened=crate::sqlite::open_database(&path).unwrap();assert_eq!(reopened.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap(),raw);drop(reopened);
+        let reopened=crate::sqlite::open_database(&peer_path).unwrap();assert_eq!(reopened.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap(),peer_raw);drop(reopened);
+        std::fs::remove_file(&peer_path).unwrap();std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn global_freeze_production_command_captures_and_rolls_back_atomically(){
+        let mut source=json!({"gamer":serde_json::from_str::<Value>(include_str!("../../src/cloud/__fixtures__/gameLegacyDefaultsV1.json")).unwrap()});
+        source["gamer"]["items"]=json!({"Предметы":{"Заморозка":2}});
+        // Fixture initialization is isolated; the operation below is the real command.
+        let (db0,path0,_,_)=seed_kind(false);
+        let day=crate::streaks::logical_writing_day(&db0).unwrap();
+        drop(db0);let _=std::fs::remove_file(&path0);
+        let yesterday=crate::streaks::date_from_days(crate::streaks::date_days(&day).unwrap()-1);
+        source["global_streak"]=json!({"global_streaks":[yesterday],"max_global_streak":1,"global_streak_status":"Active"});
+        let (mut db,path,scope,_)=seed_with_source(true,Some(source),0.0);
+        db.execute("UPDATE storage_ownership SET owner='sqlite' WHERE subsystem='game'",[]).unwrap();
+        let old:String=db.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
+        let peer_path=path.parent().unwrap().join("peer.sqlite");
+        db.execute("VACUUM INTO ?1",[peer_path.to_str().unwrap()]).unwrap();
+        let peer_scope=metadata::MetadataScope{account_id:scope.account_id.clone(),canonical_user_id:scope.canonical_user_id.clone(),device_id:metadata::new_event_id().unwrap()};
+        let peer=crate::sqlite::open_database(&peer_path).unwrap();
+        peer.execute("UPDATE cloud_sync_state SET device_id=?1 WHERE account_id='local'",[&peer_scope.device_id]).unwrap();
+        let tips=game_sync::tips(&db,"local","account").unwrap();
+        db.execute_batch("CREATE TRIGGER freeze_abort BEFORE UPDATE ON game_state BEGIN SELECT RAISE(ABORT,'freeze interrupted'); END;").unwrap();
+        assert!(crate::game::GameApplicationService::freeze_global_sqlite(&mut db).is_err());
+        assert_eq!(db.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap(),old);
+        assert_eq!(game_sync::tips(&db,"local","account").unwrap(),tips);
+        db.execute_batch("DROP TRIGGER freeze_abort").unwrap();
+        crate::game::GameApplicationService::freeze_global_sqlite(&mut db).unwrap();
+        let (id,frame):(String,Vec<u8>)=db.query_row("SELECT event_id,canonical_frame FROM cloud_game_events WHERE scope='account' AND revision=2",[],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();
+        let e=game_codec::unframe(&frame,false).unwrap();assert_eq!(e["action"]["kind"],"freeze");
+        let after=game_sync::rebuild_chain(&db,"local","account",&id).unwrap();
+        assert_eq!(after["global_streak"]["history"].as_array().unwrap().len(),2);
+        assert_eq!(after["inventory"][0]["count"],1);
+        assert_eq!(game_projection::account_base(&serde_json::from_str::<Value>(&db.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap()).unwrap()).unwrap(),after);
+        assert!(crate::game::GameApplicationService::freeze_global_sqlite(&mut db).is_err());
+        peer.execute("INSERT INTO cloud_sync_account_inbox(account_id,event_id,canonical_user_id,scope,server_sequence,device_id,entity_id,entity_type,operation,sync_revision,updated_at,crypto_version,aad_version,nonce,ciphertext,received_at) VALUES('local',?1,?2,'account',4,?3,?4,'account_game','upsert',2,?5,2,2,zeroblob(24),zeroblob(32),?5)",params![id,scope.canonical_user_id,scope.device_id,e["header"]["entity_id"].as_str(),e["header"]["updated_at"].as_str()]).unwrap();
+        let mut receiver=crate::sqlite::open_privileged_remote_apply_database(&peer_path).unwrap();
+        peer.execute_batch("CREATE TRIGGER peer_freeze_abort BEFORE INSERT ON cloud_game_apply_ledger BEGIN SELECT RAISE(ABORT,'peer interrupted'); END;").unwrap();
+        assert!(game_sync::apply(&mut receiver,&peer_scope,&frame,&[0;24],&[0;32],false).is_err());
+        assert_eq!(peer.query_row("SELECT payload_json FROM game_state",[],|r|r.get::<_,String>(0)).unwrap(),old);
+        assert_eq!(game_sync::tips(&peer,"local","account").unwrap(),tips);
+        peer.execute_batch("DROP TRIGGER peer_freeze_abort").unwrap();
+        assert_eq!(game_sync::apply(&mut receiver,&peer_scope,&frame,&[0;24],&[0;32],false).unwrap(),"applied");
+        assert_eq!(game_sync::apply(&mut receiver,&peer_scope,&frame,&[0;24],&[0;32],false).unwrap(),"applied");
+        let peer_raw:String=peer.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
+        assert_eq!(game_projection::account_base(&serde_json::from_str::<Value>(&peer_raw).unwrap()).unwrap(),after);
+        assert_eq!(peer.query_row("SELECT count(*) FROM cloud_game_apply_ledger WHERE event_id=?1",[&id],|r|r.get::<_,i64>(0)).unwrap(),1);
+        drop(receiver);drop(peer);
+        let peer=crate::sqlite::open_database(&peer_path).unwrap();
+        assert_eq!(game_sync::rebuild_chain(&peer,"local","account",&id).unwrap(),after);
+        drop(peer);std::fs::remove_file(&peer_path).unwrap();
+        assert_eq!(game_sync::tips(&db,"local","account").unwrap(),vec![id]);
+        drop(db);let reopened=crate::sqlite::open_database(&path).unwrap();
+        assert_eq!(game_sync::tips(&reopened,&scope.account_id,"account").unwrap().len(),1);
+        drop(reopened);let _=std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn active_account_loss_is_atomic_and_self_echo_matches() {
         let mut source=json!({"gamer":serde_json::from_str::<Value>(include_str!("../../src/cloud/__fixtures__/gameLegacyDefaultsV1.json")).unwrap(),"global_streak":{"global_streaks":["2026-10-01","2026-10-02","2026-10-03"],"max_global_streak":3,"global_streak_status":"Go"}});
         source["gamer"]["health"]=json!(100.0);
-        let (mut db,path,scope,_)=seed_with_source(true,Some(source));
+        let (mut db,path,scope,_)=seed_with_source(true,Some(source),0.0);
         let before:String=db.query_row("SELECT payload_json FROM game_state",[],|r|r.get(0)).unwrap();
         let tip_before=game_sync::tips(&db,"local","account").unwrap();
         {let tx=db.transaction().unwrap();assert!(crate::game::refresh_global_loss(&tx,"2026-10-05","2026-10-05T00:00:00.000000Z").unwrap());}

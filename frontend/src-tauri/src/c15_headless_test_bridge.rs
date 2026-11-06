@@ -663,6 +663,7 @@ fn game_bridge(request:&Value)->Value {
             db.execute("INSERT INTO game_state(id,schema_version,payload_json,updated_at) VALUES(1,2,?1,'2026-10-04T00:00:00.000000Z') ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json",[source.to_string()]).map_err(|e|e.to_string())?;Ok(json!(true))
         },
         "process"=>Ok(json!(crate::game::process_pending_events(&mut db,100)?)),
+        "freeze"=>Ok(json!(crate::game::GameApplicationService::freeze_global_sqlite(&mut db).map_err(|e|e.to_string())?)),
         "loss"=>{
             let tx=db.transaction().map_err(|e|e.to_string())?;
             let result=crate::game::refresh_global_loss(&tx,required_string(request,"writing_day"),required_string(request,"now"))?;

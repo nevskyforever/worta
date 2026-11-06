@@ -140,6 +140,62 @@ pub fn loss_health(state: &mut Value, length: u64) -> Result<()> {
     }
     Ok(())
 }
+/// Recompute eligibility from the exact introducing Progress chain and its
+/// structural references. No current mutable total is an authority.
+pub fn growth_effect(db:&Connection,account:&str,source:&Value,before:&Value)->Result<Option<(Value,Value)>> {
+    let h=&source["header"];let a=&source["action"];
+    if h["scope"]!="project"||a["kind"]!="writing"||h["rule"]!="native-game-v1"{return Err("game_scope_mismatch".into());}
+    let raw:String=db.query_row("SELECT payload_json FROM cloud_sync_metadata_events WHERE account_id=?1 AND event_id=?2",params![account,text(h,"metadata_event_id")?],|r|r.get(0)).map_err(sql)?;
+    let project:Value=serde_json::from_str(&raw).map_err(|_|"invalid_game_payload")?;
+    let aggregate_plan=project["personal_goal"].as_f64().unwrap_or(0.0)>0.0||project["deadline"].as_str().is_some();
+    let settings=if let Some(stage)=h["stage_id"].as_str(){
+        if project["stages_enabled"]!=true{return Ok(None);}
+        let refs=h["stage_event_ids"].as_array().ok_or("invalid_game_payload")?;
+        if refs.len()!=1{return Err("game_stage_authority_unresolved".into());}
+        let bytes:Vec<u8>=db.query_row("SELECT canonical_frame FROM cloud_sync_structural_events WHERE account_id=?1 AND project_id=?2 AND entity_id=?3 AND event_id=?4",params![account,text(h,"project_id")?,stage,refs[0].as_str()],|r|r.get(0)).map_err(sql)?;
+        crate::stage_sync::unframe(&bytes).map_err(|_|"game_stage_authority_unresolved")?.stage
+    }else{project};
+    if settings["infinite"]==true||settings["streak_enabled"]==false||!matches!(settings["status"].as_str(),Some("active"|"активен")){return Ok(None);}
+    let day=text(&a["fact"],"writing_day")?;
+    let days=crate::streaks::date_days(day).ok_or("invalid_game_payload")?;
+    let chain=crate::progress_sync::chain(db,account,text(h,"project_id")?,text(a,"progress_entity_id")?,text(a,"progress_event_id")?)?;
+    if !chain.migration_complete(){return Err("game_dependency_progress_missing".into());}
+    let total=chain.total()? as f64/1e6;
+    let added=chain.entries.iter().filter(|v|v.writing_day==day).try_fold(0i128,|sum,v|Ok::<_,String>(sum+crate::progress_codec::micros(&v.delta)?))? as f64/1e6;
+    let base=total-added;
+    let factor=match settings["unit"].as_str(){Some("symbols")=>1.0,Some("A4")=>1800.0,Some("author_list")=>40000.0,Some("ficbook_pages")=>4500.0,_=>return Err("game_invalid_rule".into())};
+    let personal=settings["personal_goal"].as_f64().unwrap_or(0.0)*factor;
+    let deadline=settings["deadline"].as_str().and_then(crate::streaks::date_days);
+    let goal=settings["goal"].as_f64().unwrap_or(0.0)*factor;
+    if h["stage_id"].is_string()&&personal==0.0&&deadline.is_none()&&aggregate_plan {
+        // The aggregate root needs all contributing Stage facts. A single
+        // writing action cannot certify that full group threshold.
+        return Err("game_unsupported_local_mutation".into());
+    }
+    let target=if let Some(end)=deadline{if days>=end{goal}else if personal>0.0{(base+personal).min(goal)}else{base+(goal-base).max(0.0)/(end-days+1) as f64}}else if personal>0.0{base+personal}else{return Ok(None)};
+    if target<=0.0||total<target{return Ok(None);}
+    let project_state=rebuild_chain(db,account,&owner(source),text(h,"event_id")?)?;
+    if project_state["streak"]["enabled"]!=true{return Ok(None);}
+    let mut after=before["global_streak"].clone();
+    if after["enabled"]!=true{return Ok(None);}
+    if after["last_reward_day"].as_str().is_some_and(|v|v>=day){return Ok(None);}
+    let source_last=project_state["streak"]["history"].as_array().and_then(|v|v.last()).and_then(|v|v["day"].as_str()).and_then(crate::streaks::date_days);
+    if source_last.is_some_and(|v|v>=days-1&&v<=days)&&project_state["streak"]["history"].as_array().map_or(0,Vec::len)>after["history"].as_array().map_or(0,Vec::len){after["history"]=project_state["streak"]["history"].clone();}
+    let history=after["history"].as_array_mut().ok_or("invalid_game_payload")?;
+    let last=history.last().and_then(|v|v["day"].as_str()).and_then(crate::streaks::date_days);
+    if last.is_some_and(|v|v>days){return Ok(None);}
+    if last==Some(days)&&history.last().is_some_and(|v|v["frozen"]==true){return Ok(None);}
+    // Loss is its own admitted action. Never erase damage by bridging a gap.
+    if last.is_some_and(|v|v<days-1){return Err("game_invalid_rule".into());}
+    if last!=Some(days){history.push(json!({"day":day,"frozen":false}));}
+    let length=history.len() as u64;
+    after["maximum"]=json!(after["maximum"].as_u64().unwrap_or(0).max(length));
+    after["last_reward_day"]=json!(day);after["lost_day"]=Value::Null;after["lost_length"]=json!(0);
+    let coins=if length==1{50.0*float(&before["coin_coefficient"])?}else{10.0*length as f64*float(&before["coin_coefficient"])?*(1.0+(before["level"].as_u64().ok_or("invalid_game_payload")?-1) as f64*0.15)};
+    let xp=if length==1{0.0}else{1000.0*length as f64*float(&before["experience_coefficient"])?};
+    Ok(Some((after,json!({"coins":decimal(tenth(coins))?,"experience":decimal(tenth(xp))?}))))
+}
+
 /// Frozen native v1 inputs, including its historical float rounding convention.
 pub fn writing_reward(a: &Value, rule: &str) -> Result<Value> {
     let delta = float(&a["fact"]["delta"])?;
@@ -204,6 +260,8 @@ pub fn dependencies(db: &Connection, account: &str, user: &str, e: &Value) -> Re
             &json!([h["project_id"], h["stage_id"], a["completion_id"]]),
         )),
         Some("reward") => Some(stable_action_id(user, "reward", &a["project_action_id"])),
+        Some("freeze") if a["project_id"].is_null() => Some(stable_action_id(user,"global_freeze",&json!([a["writing_day"],a["before"],a["before_count"]]))),
+        Some("global_streak") if e["version"] == 1 => Some(stable_action_id(user,"global_streak",&json!([a["writing_day"],a["project_action_ids"]]))),
         Some("global_streak") if e["version"] == 2 => Some(loss_id(user, &a["before"])),
         Some("compensation") => Some(stable_action_id(
             user,
@@ -309,6 +367,17 @@ pub fn dependencies(db: &Connection, account: &str, user: &str, e: &Value) -> Re
             return Err("game_reward_duplicate_mismatch".into());
         }
         verify_effect(&source)?;
+    } else if a["kind"]=="global_streak" && e["version"]==1 {
+        let refs=a["project_action_ids"].as_array().ok_or("invalid_game_payload")?;
+        if refs.len()!=1{return Err("game_unsupported_local_mutation".into());}
+        let id=refs[0].as_str().ok_or("invalid_game_payload")?;
+        let source=event(db,account,id)?;
+        let proven:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_game_apply_ledger l JOIN cloud_game_events e USING(account_id,event_id) WHERE l.account_id=?1 AND l.event_id=?2 AND l.outcome='applied' AND e.state=l.outcome AND e.server_sequence=l.server_sequence AND e.canonical_frame=l.canonical_frame AND e.nonce=l.nonce AND e.ciphertext=l.ciphertext)",params![account,id],|r|r.get(0)).map_err(sql)?;
+        if !proven{return Err("game_dependency_project_action_missing".into());}
+        dependencies(db,account,user,&source)?;
+        let base=rebuild_chain(db,account,"account",h["parents"][0].as_str().ok_or("game_parent_unknown")?)?;
+        let (after,reward)=growth_effect(db,account,&source,&base)?.ok_or("game_invalid_rule")?;
+        if a["before"]!=base["global_streak"]||a["after"]!=after||a["reward"]!=reward||a["writing_day"]!=source["action"]["fact"]["writing_day"] {return Err("game_invalid_rule".into());}
     } else if a["kind"] == "compensation" {
         let target = text(a, "target_action_id")?;
         let proven:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_game_apply_ledger l JOIN cloud_game_events e USING(account_id,event_id) WHERE l.account_id=?1 AND l.event_id=?2 AND e.scope='account' AND e.state='applied' AND l.outcome=e.state AND e.server_sequence=l.server_sequence AND e.canonical_frame=l.canonical_frame AND e.nonce=l.nonce AND e.ciphertext=l.ciphertext)",params![account,target],|r|r.get(0)).map_err(sql)?;
@@ -478,6 +547,22 @@ fn transition_with_source(
                     state["health"] = state["max_health"].clone();
                 }
             }
+            "freeze" if a["project_id"].is_null() => {
+                if h["rule"]!="native-game-v1" || state["global_streak"]!=a["before"] {return Err("game_invalid_rule".into());}
+                let after=codec::global_freeze_after(&state["global_streak"],text(a,"writing_day")?)?;
+                if after!=a["after"] {return Err("game_invalid_rule".into());}
+                let items=state["inventory"].as_array_mut().ok_or("invalid_game_payload")?;
+                let index=items.iter().position(|v|v["category"]=="Предметы"&&v["item_id"]=="Заморозка").ok_or("game_invalid_rule")?;
+                if items[index]["count"]!=a["before_count"] {return Err("game_invalid_rule".into());}
+                if a["after_count"]==0 {items.remove(index);}else{items[index]["count"]=a["after_count"].clone();}
+                state["global_streak"]=after;
+            }
+            "global_streak" if e["version"]==1 => {
+                if h["rule"]!="native-game-v1"||state["global_streak"]!=a["before"]{return Err("game_invalid_rule".into());}
+                state["global_streak"]=a["after"].clone();
+                change(&mut state,"coins",amount(&a["reward"]["coins"])?)?;
+                change(&mut state,"experience",amount(&a["reward"]["experience"])?)?;
+            }
             "global_streak" if e["version"] == 2 => {
                 if state["global_streak"] != a["before"] || h["event_id"] != loss_id(text(h,"account_id")?, &a["before"]) {
                     return Err("game_invalid_rule".into());
@@ -633,6 +718,14 @@ pub fn rebuild_chain(db: &Connection, account: &str, key: &str, id: &str) -> Res
             }
             _ => None,
         };
+        if e["action"]["kind"]=="global_streak"&&e["version"]==1 {
+            let refs=e["action"]["project_action_ids"].as_array().ok_or("invalid_game_payload")?;
+            if refs.len()!=1{return Err("game_unsupported_local_mutation".into());}
+            let source=event(db,account,refs[0].as_str().ok_or("invalid_game_payload")?)?;
+            let base=parents.get(e["header"]["parents"][0].as_str().ok_or("game_parent_unknown")?).ok_or("game_parent_unknown")?;
+            let (after,reward)=growth_effect(db,account,&source,base)?.ok_or("game_invalid_rule")?;
+            if e["action"]["after"]!=after||e["action"]["reward"]!=reward{return Err("game_invalid_rule".into());}
+        }
         states.insert(
             text(&e["header"], "event_id")?.to_owned(),
             transition_with_source(e, &parents, source.as_ref())?,
