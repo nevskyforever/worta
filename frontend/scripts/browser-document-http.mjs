@@ -14,8 +14,8 @@ const documentCount = fixture.projectDocument ? 2 : 1
 try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } }); await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
-  const launch = async () => {
-    context = await chromium.launchPersistentContext(profile, { headless: true })
+  const launch = async (profilePath = profile) => {
+    context = await chromium.launchPersistentContext(profilePath, { headless: true })
     await context.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
       if (request.method() === 'PUT' && url.pathname.includes('capabilities') || url.pathname.endsWith('/ack') || url.pathname.startsWith('/api/v1/sync/devices/')) {
@@ -23,9 +23,10 @@ try {
         return route.abort()
       }
       if (url.pathname === '/api/v3/recovery/encrypted/history') recovery.push(url.search)
-      if (fault && url.pathname === '/api/v3/recovery/encrypted/history') {
+      if (fault && url.pathname === '/api/v3/recovery/encrypted/history' && Number(url.searchParams.get('since'))>=100) {
+        if(fault==='interrupt')return route.abort()
         const response = await route.fetch({url:backend+url.pathname+url.search}), body = await response.json()
-        const item = body.items.find(item=>item.event.revision===2 && item.event.entity_type==='document')
+        const item = body.items.findLast(item=>item.event.entity_type==='document')
         if(item){const raw=item.object.ciphertext;item.object.ciphertext=(raw[0]==='A'?'B':'A')+raw.slice(1)}
         return route.fulfill({response,json:body})
       }
@@ -83,7 +84,10 @@ try {
       // although StageOrder puts S2 first. The harness does not select it again.
       assert.equal(await stages.locator(`[data-stage-id="${fixture.stageId}"]`).getAttribute('aria-pressed'),'true')
     }
-    await panel.locator(`[data-document-id="${fixture.expected.id}"]`).waitFor()
+    await Promise.race([
+      panel.locator(`[data-document-id="${fixture.expected.id}"]`).waitFor(),
+      panel.locator('[role="alert"]').waitFor().then(async()=>{throw Error('recovery refused: '+await panel.locator('[role="alert"]').getAttribute('data-read-code'))}),
+    ])
     if(await panel.locator('[data-testid="cloud-document-text"]').count() === 0) await panel.locator(`[data-document-id="${fixture.expected.id}"]`).click()
     assert.equal(await panel.locator('[data-document-id]').count(), 1)
     const text = panel.locator('[data-testid="cloud-document-text"]')
@@ -111,11 +115,22 @@ try {
   if(fixture.updateRequest){
     const input=createInterface({input:process.stdin}), updateLine=new Promise(ok=>input.once('line',ok))
     console.log(JSON.stringify({phase:'ready_for_update'}))
-    const update=JSON.parse(await updateLine); input.close()
-    // A corrupted new wire must not even stage the continuation or expose text.
+    let update=JSON.parse(await updateLine)
+    page.setDefaultTimeout(600000)
+    // A damaged later page may retain earlier ciphertext, but cannot apply it or expose text.
     fault=true;await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor();fault=false
-    assert.deepEqual(await snapshot(page),first)
+    const interrupted=await snapshot(page)
+    assert.equal(interrupted.replayManifest[0].phase,'receiving')
+    assert.equal(interrupted.replayManifest[0].applied_cursor,initialCursor)
+    assert.deepEqual(interrupted.documentProjection,first.documentProjection)
     assert.equal(await panel.locator('[data-testid="cloud-document-text"]').count(),0)
+    fault='interrupt';await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor();fault=false
+    assert.deepEqual(await snapshot(page),interrupted)
+    const continuedLine=new Promise(ok=>input.once('line',ok))
+    console.log(JSON.stringify({phase:'interrupted_between_pages'}))
+    update=JSON.parse(await continuedLine);input.close()
+    await context.close();page=await launch();panel=await loginAndOpen(page)
+    page.setDefaultTimeout(600000)
     // Capture the real transaction state before its first write, then abort at
     // encrypted projection replacement. No cursor/proof is assigned by the test.
     await page.evaluate(eventId=>{
@@ -129,7 +144,7 @@ try {
       }
       IDBObjectStore.prototype.put=function(value,...args){const r=window.originalDocumentPut.call(this,value,...args)
         if(this.name==='documentProjection'&&value.head_event_id===eventId){window.documentUpdateAborted=true;r.addEventListener('success',()=>this.transaction.abort(),{once:true})}return r}
-    },update.items.at(-1).event.event_id)
+    },update.items[initialCursor].event.event_id)
     await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
     const aborted=await page.evaluate(()=>{IDBObjectStore.prototype.add=window.originalDocumentAdd;IDBObjectStore.prototype.put=window.originalDocumentPut;return {fired:window.documentUpdateAborted,before:window.documentBeforeCommit}})
     assert.equal(aborted.fired,true);const pending=await snapshot(page);assert.deepEqual(pending,aborted.before)
@@ -138,10 +153,12 @@ try {
     assert.deepEqual(pending.inbox.slice(0,initialCursor),first.inbox)
     await read(panel,update.text)
     const applied=await snapshot(page)
-    assert.equal(applied.documentProjection.length,documentCount);assert.equal(applied.documentLedger.length,documentCount+1)
-    assert.equal(applied.inbox[initialCursor].state,'document_proven');assert.equal(applied.replayManifest[0].applied_cursor,initialCursor+1)
+    assert.equal(applied.documentProjection.length,documentCount);assert.equal(applied.documentLedger.length,documentCount+102)
+    assert.ok(applied.inbox.slice(initialCursor).every(row=>row.state==='document_proven')); assert.equal(applied.replayManifest[0].applied_cursor,initialCursor+102)
+    assert.deepEqual(applied.replayManifest[0].source_seeds,first.replayManifest[0].source_seeds)
+    assert.deepEqual(applied.projectBindings,first.projectBindings)
     assert.deepEqual(applied.inbox.slice(0,initialCursor),first.inbox);assert.deepEqual(applied.inbox.map(row=>JSON.parse(row.wire_item)),update.items)
-    assert.deepEqual(applied.documentLedger.find(row=>row.event_id===update.items.at(-1).event.event_id).previous_projection,first.documentProjection.find(row=>row.entity_id===fixture.expected.id))
+    assert.deepEqual(applied.documentLedger.find(row=>row.event_id===update.items[initialCursor].event.event_id).previous_projection,first.documentProjection.find(row=>row.entity_id===fixture.expected.id))
     assert.ok(!JSON.stringify(applied).includes(update.text));assert.equal(applied.cursors[0].ack_cursor,0)
     fixture.text=update.text;fixture.items=update.items;first=applied
     await read(panel);assert.deepEqual(await snapshot(page),first)
@@ -173,10 +190,26 @@ try {
   assert.equal(await panel.locator('[data-testid="cloud-document-text"]').count(), 0)
   const bad = await snapshot(page); assert.deepEqual({ ...bad, inbox: first.inbox }, first)
   await replaceProof(original); await read(panel); assert.deepEqual(await snapshot(page), first)
+  if (fixture.stageId) {
+    // Also open the already-published multi-page history in a completely fresh
+    // profile. No saved binding, source seed, projection or proof is injected.
+    await context.close(); visitedStage = false; page = await launch(profile + '-paginated-start')
+    page.setDefaultTimeout(600000); panel = await loginAndOpen(page); await read(panel)
+    const fresh = await snapshot(page)
+    assert.deepEqual(fresh.inbox.map(row => JSON.parse(row.wire_item)), fixture.items)
+    assert.equal(fresh.replayManifest[0].applied_cursor, fixture.items.length)
+    assert.equal(fresh.documentProjection.length, documentCount)
+    assert.equal(fresh.documentLedger.length, documentCount + 102)
+    assert.ok(fresh.inbox.filter(row => JSON.parse(row.wire_item).event.entity_type === 'document').every(row => row.state === 'document_proven'))
+    assert.equal(fresh.cursors[0].ack_cursor, 0)
+    await context.close(); page = await launch(profile + '-paginated-start')
+    page.setDefaultTimeout(600000); panel = await loginAndOpen(page); await read(panel)
+    assert.deepEqual(await snapshot(page), fresh)
+  }
   // Actual lock UI revokes all displayed plaintext.
   await page.locator('[data-testid="cloud-account-lock"]').click()
   await page.locator('[data-testid="browser-cloud-account"] [data-status="locked"]').waitFor()
   assert.equal(await page.locator('[data-testid="cloud-document-text"]').count(), 0)
-  assert.deepEqual(forbidden, []); assert.ok(recovery.length > 0)
-  console.log(JSON.stringify({ pass: true, nativeDocumentHttp: true, reopen: true, reimport: true, corruptProofRefused: true, recoveryRequests: recovery.length }))
+  assert.deepEqual(forbidden, []); assert.ok(recovery.some(query=>new URLSearchParams(query).get('since')==='100'))
+  console.log(JSON.stringify({ pass: true, nativeDocumentHttp: true, reopen: true, reimport: true, corruptProofRefused: true, recoveryPages: 2, events: fixture.items.length, restartResume: true, snapshotAdvance: true, recoveryRequests: recovery.length }))
 } finally { await context?.close(); await vite?.close() }

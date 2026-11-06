@@ -1,5 +1,5 @@
 import { decodeBase64Url, encodeBase64Url } from './base64url'
-import { apiRequest } from './client'
+import { apiRequest, ApiError } from './client'
 import { MAX_ENCRYPTED_SYNC_BATCH_CIPHERTEXT_BYTES, MAX_ENCRYPTED_SYNC_CIPHERTEXT_BYTES, MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES } from './encryptedSync'
 import { parseSyncTimestamp } from '@/cloud/syncTimestamp'
 import { ACCOUNT_ENTITY_TYPES, encodeAccountTuple, type AccountObjectEnvelope } from '@/crypto/accountObjectCrypto'
@@ -257,7 +257,23 @@ export const encryptedSyncV3Api = {
   async recoveryRaw(token: string, since: number, limit: number, cursor: number, epoch: number, signal?: AbortSignal): Promise<string> {
     if (!safe(since, 0) || !safe(limit, 1) || limit > 100 || !safe(cursor, since) || !safe(epoch, 0)) fail()
     const query = new URLSearchParams({ since: String(since), limit: String(limit), expected_cursor: String(cursor), expected_epoch: String(epoch) })
-    const value = await apiRequest<unknown>(`/api/v3/recovery/encrypted/history?${query}`, { headers: headers(token), signal, maxResponseBytes: MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES })
+    let value: unknown
+    for (let attempt = 0; ; attempt++) {
+      try {
+        value = await apiRequest<unknown>(`/api/v3/recovery/encrypted/history?${query}`, { headers: headers(token), signal, maxResponseBytes: MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES })
+        break
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 429 || attempt >= 5) throw error
+        // Recovery GET's existing budget returns Retry-After: 1. Keep the
+        // same pinned snapshot and respect its budget; cancellation still wins.
+        await new Promise<void>((resolve, reject) => {
+          const abort = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); reject(new DOMException('Aborted', 'AbortError')) }
+          const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, 1000)
+          if (signal?.aborted) abort()
+          else signal?.addEventListener('abort', abort, { once: true })
+        })
+      }
+    }
     if (!exact(value, ['delivery_version', 'current_cursor', 'cutover_epoch', 'writer_transport_version', 'items', 'next_cursor', 'has_more'])) fail()
     const outer = value as {delivery_version:number;current_cursor:number;cutover_epoch:number;writer_transport_version:number;items:unknown[];next_cursor:number;has_more:boolean}
     if (outer.delivery_version !== 1 || outer.current_cursor !== cursor || outer.cutover_epoch !== epoch || outer.writer_transport_version !== 3) fail()

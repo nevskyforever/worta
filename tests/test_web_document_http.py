@@ -128,25 +128,57 @@ def test_native_document_recovery_get_vue_and_profile_restart(cloud_client, tmp_
             # The real Desktop consumes its published event before authoring a
             # successor, so expected tips and revision come from its own owner.
             assert receive(client, tmp_path, token, db, identity, user, key) == (['applied', 'applied'] if stage_scoped else ['applied'])
-            updated = document(tmp_path, db, identity, user, 'save', stage_id=stage_id, content=content(updated_text),
-                               expected=heads(tmp_path, db, identity, user, expected['id']))
-            assert 'error' not in updated, updated
-            document(tmp_path, db, identity, user, 'begin')
-            pending = document(tmp_path, db, identity, user, 'pending')
-            assert len(pending) == 1
-            event = pending[0]['event']
-            assert event['header']['operation'] == 'update' and event['header']['revision'] == 2
-            assert event['document']['id'] == expected['id'] and event['document']['stage_id'] == stage_id
-            assert event['header']['parents'] == [genesis['event']['event_id']]
-            published_update = emit(client, tmp_path, token, db, identity, user, key)
-            assert len(published_update) == 1
-            latest = client.get('/api/v3/recovery/encrypted/history', headers=headers,
-                params={'since': 0, 'limit': 100, 'expected_cursor': cursor + 1, 'expected_epoch': 2})
-            assert latest.status_code == 200, latest.text
-            latest_items = latest.json()['items']
+            parent = genesis['event']['event_id']
+            sent_updates = []
+            def recovery_pages(expected_cursor):
+                retained = []
+                since = pages = 0
+                while since < expected_cursor:
+                    latest = client.get('/api/v3/recovery/encrypted/history', headers=headers,
+                        params={'since': since, 'limit': 100, 'expected_cursor': expected_cursor, 'expected_epoch': 2})
+                    assert latest.status_code == 200, latest.text
+                    body = latest.json(); pages += 1
+                    assert body['has_more'] == (body['next_cursor'] < expected_cursor)
+                    retained.extend(body['items']); since = body['next_cursor']
+                assert pages == 2
+                return retained
+
+            for revision in range(2, 104):
+                if revision == 103:
+                    latest_items = recovery_pages(cursor + 101)
+                    assert latest_items[:cursor] == items
+                    assert [value['object'] for value in latest_items[cursor:]] == sent_updates
+                    process.stdin.write(json.dumps({'text': updated_text, 'items': latest_items}) + '\n')
+                    process.stdin.flush()
+                    threading.Thread(target=lambda: ready.put(process.stdout.readline()), daemon=True).start()
+                    line = ready.get(timeout=120)
+                    if not line:
+                        stdout, stderr = process.communicate(timeout=10)
+                        raise AssertionError(stdout + stderr)
+                    assert line and json.loads(line)['phase'] == 'interrupted_between_pages', line
+                    # Advance the actual server while Chromium is interrupted.
+                    # Reopen must re-pin the snapshot without mixing pages.
+
+                updated_text = f'Редакция {revision}'
+                updated = document(tmp_path, db, identity, user, 'save', stage_id=stage_id, content=content(updated_text),
+                                   expected=heads(tmp_path, db, identity, user, expected['id']))
+                assert 'error' not in updated, updated
+                document(tmp_path, db, identity, user, 'begin')
+                pending = document(tmp_path, db, identity, user, 'pending')
+                assert len(pending) == 1
+                event = pending[0]['event']
+                assert event['header']['operation'] == 'update' and event['header']['revision'] == revision
+                assert event['document']['id'] == expected['id'] and event['document']['stage_id'] == stage_id
+                assert event['header']['parents'] == [parent]
+                published_update = emit(client, tmp_path, token, db, identity, user, key)
+                assert len(published_update) == 1
+                sent_updates.append(published_update[0]['items'][0]['object'])
+                parent = event['header']['event_id']
+                assert receive(client, tmp_path, token, db, identity, user, key) == ['applied']
+            latest_items = recovery_pages(cursor + 102)
             assert latest_items[:cursor] == items
-            assert latest_items[-1]['object'] == published_update[0]['items'][0]['object']
-            stdout, stderr = process.communicate(json.dumps({'text': updated_text, 'expected': event['document'], 'items': latest_items}) + '\n', timeout=120)
+            assert [value['object'] for value in latest_items[cursor:]] == sent_updates
+            stdout, stderr = process.communicate(json.dumps({'text': updated_text, 'expected': event['document'], 'items': latest_items}) + '\n', timeout=600)
             assert process.returncode == 0, stdout + stderr
             assert json.loads(stdout.strip().splitlines()[-1])['pass']
         finally:

@@ -104,13 +104,13 @@ export async function authenticateReplayDocuments(scope: BrowserSyncScope,
   snapshot: import('./replayInventory').ReplaySnapshot, amk: AccountMasterKey, current: () => boolean) {
   if (!current()) throw new BrowserPersistenceError('closed')
   if (!snapshot.rows.some(row => row.state === 'document_proven')) return []
-  const inventory = documentPreparationInventory(snapshot), documents = []
+  const inventory = documentPreparationInventory(snapshot), documents = [], verified = new Map<number, PreparedDocumentGenesis>()
   for (const row of snapshot.rows) if (row.state === 'document_proven') {
     if (!current()) throw new BrowserPersistenceError('closed')
     const joined = joinDocumentRecords(scope, row, snapshot.documents?.ledger ?? [], snapshot.documents?.projections ?? [])
     if (await documentDigest(joined.ledger) !== row.document_proof.ledger_digest
       || await documentDigest(joined.projection) !== row.document_proof.projection_digest) fail()
-    const token = await prepareDocumentEvent(scope, row, inventory, amk, current)
+    const token = await prepareDocumentEvent(scope, row, inventory, amk, current, verified)
     const document = await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
     if (snapshot.documents?.projections.some(value => (value as DocumentProjection).head_event_id === row.event_id)) documents.push(document)
   }

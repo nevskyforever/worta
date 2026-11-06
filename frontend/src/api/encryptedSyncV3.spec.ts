@@ -10,6 +10,28 @@ const descriptor = { event_id: EVENT, device_id: DEVICE, server_sequence: 1, pro
   entity_type: 'project_metadata' as const, operation: 'upsert' as const, revision: 1, updated_at: NOW, deleted_at: null }
 
 describe('mode-3 metadata transport boundary', () => {
+  it('retries a recovery rate refusal with the same pinned snapshot and remains cancellable', async () => {
+    vi.useFakeTimers()
+    const page = { delivery_version: 1, current_cursor: 0, cutover_epoch: 2, writer_transport_version: 3,
+      items: [], next_cursor: 0, has_more: false }
+    const fetch = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ detail: { code: 'recovery_rate_limited' } }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(page)))
+    try {
+      const reading = encryptedSyncV3Api.recoveryRaw('token', 0, 100, 0, 2)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(JSON.parse(await reading).items).toEqual([])
+      expect(fetch.mock.calls[0]![0]).toBe(fetch.mock.calls[1]![0])
+      const controller = new AbortController()
+      fetch.mockResolvedValueOnce(new Response('{}', { status: 429 }))
+      const cancelled = expect(encryptedSyncV3Api.recoveryRaw('token', 0, 100, 0, 2, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+      await vi.advanceTimersByTimeAsync(0)
+      controller.abort()
+      await cancelled
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(fetch).toHaveBeenCalledTimes(3)
+    } finally { fetch.mockRestore(); vi.useRealTimers() }
+  })
   it('validates the account recovery snapshot and preserves the encrypted wire', async () => {
     const item = { event: descriptor, object: { crypto_version: 1, aad_version: 1,
       nonce: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', ciphertext: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' } }

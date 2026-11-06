@@ -1,5 +1,156 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-06 — General encrypted Recovery GET pagination (LOCAL COMPLETE)
+
+Starting SHA `297da1d4f56a669eaa85ebb64aa5268eac80c09b`, branch `6.0`.
+Final SHA is the commit containing this entry (resolve with git log; the exact
+hash is reported in the task result). Stage 2/6 — full Web reading; Slice 4/5
+remains PARTIAL. The pagination task is locally accepted. Existing uncommitted
+batch receiver/test/checkpoint work is included and preserved; no reset/clean,
+new worktree, main, VPS, registration or release-policy changes.
+
+### Implemented production path
+
+The existing receiver accepts a bounded continuation page with has_more and
+continues its zero-origin reconciliation/page loop. Each page is persisted by
+existing replayStorage/CAS with a receiving manifest until receipt completes;
+receipt is separate from applied owner coverage. No project is shown while
+received history has unproven events. Document ciphertext is opened before
+retaining a new page; dependency, source/ledger/projection/proof authority still
+belongs to the existing owners and recoverV10.
+
+When a server head grows during interrupted receipt/apply, EVERY retained wire
+is re-fetched and compared under the new pinned cursor/epoch. Transport/bootstrap
+registry identities must remain unchanged and the head strictly increase. The
+same atomic stageRecoveryExtension/CAS re-pins and appends a bounded page without
+rewriting applied data, original source seeds/import binding or owner outcomes.
+Unproven parents remain pending until replay reaches them. A fresh server check
+and full snapshot CAS precede the write; changed ciphertext, lineage, sequence,
+epoch or a concurrent snapshot cannot authorize a mixed history.
+
+Document owner server verification now compares ALL pages before each existing
+ownerPort commit. Existing preparation tokens may be reused for ancestors only
+inside one authentication pass, with exact inventory/scope/live-session/wire
+checks. This removes repeated ancestor decryption without replacing proof
+reauthentication. Source, historical encrypted projections, ledger/proof and
+manifest remain atomic. No new owner, store, proof format, schema version,
+migration, sync engine or content/outbox repository. Existing v7 data uses the
+same layout. The100-event page limit,200-event account inventory bound and 32 MiB
+byte limits remain. Recovery GET 429 is retried with the existing one-second
+budget delay, bounded attempts and immediate cancellation; server limits remain.
+
+### Actual local acceptance
+
+* Real Native Rust/SQLite → production API push → isolated PostgreSQL 16/FastAPI
+  → authenticated Recovery GET → Chromium/Vue: **2 passed in 800.13 s**, project
+  and Stage scopes. No synthetic has_more or local page-size proxy. Each fixture
+  publishes 102 genuine sequential Document updates. Final account histories are
+  **104 and108 events**, each fetched through **two real pages (100+4/100+8)**.
+  Returned ciphertext is compared with every Native publication; descriptors and
+  sequence come from the actual server.
+* A corrupted later HTTP page is refused; already retained ciphertext remains
+  receiving, the original Document projection/owner coverage stays intact and
+  the UI exposes no partial result. A subsequent interrupted HTTP request leaves
+  the entire retained snapshot unchanged. Another genuine Native event is then
+  published while interrupted: profile reopen re-pins and safely resumes against
+  the larger server snapshot.
+* The real IndexedDB transaction is aborted at Document projection replacement.
+  Full before/after snapshots match: no partial source/ledger/proof/cursor/manifest
+  write. Retry succeeds. Original inbox ciphertext/proofs and encrypted parent
+  projection remain exact. Source seed/import binding preservation is explicitly
+  checked in the Stage scenario; actual Stage/StageOrder proofs survive.
+* Last text is Native revision103. Full redelivery is idempotent, without missing
+  or duplicate ledger events/current documents. Same-profile restart reauthenticates
+  the complete accepted history. The 108-event Stage history also opens from zero
+  in a **fresh profile** using real login/unlock/import and then reopens correctly.
+  A project Document and Stage Document remain isolated by selection. Corrupted
+  durable Document/Stage proofs refuse display; restoring them permits a new
+  authenticated read. Lock clears plaintext.
+* Focused Vitest: **175 passed, 2 pre-existing opt-in conflict Chromium cases
+  skipped/NOT RUN** (not counted as PASS). Covers receiver, API snapshot/retry/
+  cancellation, preparation, recovery, source, Content/ordered Content/structure
+  and Vue reader. Typecheck, frontend build and maintained quick acceptance PASS.
+  Python syntax and driver syntax PASS. Separate Cargo tests NOT RUN: Native code
+  unchanged; the actual prebuilt Rust/SQLite production writer is exercised
+  throughout both HTTP tests. Local results do not establish untested platforms.
+* Earlier diagnostic attempts timed out/were interrupted while the harness and
+  typecheck were being fixed; they are superseded by the successful final run.
+  Temporary diagnostic hooks were removed before final acceptance.
+
+### Boundaries, security and continuation
+
+This qualifies local server-to-browser pagination for the tested project/Stage
+Document histories through the GENERAL receiver/ownerPort; it does not qualify
+all histories, full Web readiness, Document ordinary/P2 proven_prefix or an ACK.
+Existing prefix authority remains owner-limited; manifest applied coverage is
+not substituted for ACK authority. Browser capability PUT, sync-device
+registration and ACK calls are monitored as absent; PostgreSQL still contains
+only the genuine Desktop device with last_ack_sequence=0. Native Desktop
+capabilities retain the owner's prior isolated synthetic-only authorization and
+production support. No real account/data, VPS or deployment was used.
+
+Readiness: **2/10 closed**, general orphan and full Web blockers remain open.
+Security gates unchanged: **ready=false, declarationAllowed=false,
+writerAuthorized=false**. Reader gate/E2EE/proofs/CAS are retained. Full owner
+requirements from 05.11.2026 remain: full ordinary/game Web, all existing game
+mechanics, Web creation/editing, bidirectional unified sync, maximum reuse and
+simple pragmatic implementation; read-only is not the final product.
+
+Commit/push: all accepted pagination/batch changes and documentation are saved
+in the commit containing this entry and pushed to origin/6.0 without force;
+final working tree checked clean. CI neither manually started nor polled.
+Task-owned PostgreSQL container is stopped after acceptance. Source/proof contract
+and roadmap updated; earlier checkpoint history preserved. Existing 200-event/
+32 MiB total bounds, unsupported data families and unqualified Document/P2 ACK
+remain explicit full-Web limitations, not newly closed readiness criteria.
+
+Next concrete product task: connect project-scoped Map reading through the
+existing recovery/ownerPort and Vue, with one genuine Desktop→HTTP→Web→restart
+scenario. Keep further work inside the same sync engine; do not expand readiness
+or capability declarations without their actual contracts/acceptance.
+
+## 2026-11-05 — Document batch recovery (PARTIAL)
+
+Starting/HEAD `297da1d4f56a669eaa85ebb64aa5268eac80c09b`, branch 6.0; no
+commit or push in this pass. Stage 2/6, Slice 4/5 remains PARTIAL. Existing owner
+decisions on full Web, full game mode, bidirectional sync and one engine remain.
+
+The uncommitted replayReceiver change accepts a bounded same-document sequence
+of peer updates. It authenticates the first using the existing owner preparation,
+decrypts subsequent actual wires and checks their descriptor, scope, revision,
+generation and parent chain. Every received event still passes independently
+through recoverV10, existing Document ownerPort, server verification and full
+snapshot CAS before its ledger/projection/proof and coverage are committed.
+The existing Native/HTTP/Chromium fixture now publishes four genuine successive
+Desktop updates and exercises both project and Stage scope, duplicate reads,
+corrupted ciphertext, actual projection transaction abort/retry and restart.
+
+Local PostgreSQL 16/FastAPI/Chromium: 2 passed (project and Stage), four updates
+each, same-profile reauthentication and latest text; genuine wire/proofs retained,
+no duplicate current document or browser ACK/capability declaration. Focused
+Vitest: 124 passed; typecheck, build and quick acceptance passed. Rust was not
+run: no Native code changed. The first exploratory HTTP run failed while an
+incorrectly scoped local variable was being corrected; the final run passed.
+
+NOT COMPLETE: pagination across the existing 100-event owner bound is still not
+implemented or tested. replayReceiver.ts rejects continuation pages with
+`has_more`, and replayStorage.stageRecoveryExtension requires the page to reach
+the full anchor; applyDocumentEvent also verifies the full server history with a
+single `recoveryRaw(..., 0, 100, ...)` and rejects `has_more`. Supporting a
+multi-page continuation safely requires a recoverable staged manifest transition
+and full paginated server-wire verification under the existing CAS, followed by
+real PostgreSQL/Chromium restart and corruption tests. Do not treat the four-event
+single-page acceptance as pagination acceptance or full task completion.
+
+Readiness remains 2/10 closed; browser ready=false, declarationAllowed=false,
+writerAuthorized=false. Security gates, registration, main and VPS unchanged;
+no browser capability PUT or early ACK; CI neither manually run nor polled.
+Uncommitted files: replayReceiver.ts, browser-document-http.mjs,
+test_web_document_http.py and this checkpoint. Preserve them. Task-owned local
+PostgreSQL container stopped after testing; no user data touched. Next complete
+the paginated continuation and owner server verification, then rerun acceptance
+and commit/push only after all requested local checks pass.
+
 ## 2026-11-05 — Stage-scoped Document reading (LOCAL COMPLETE)
 
 Starting SHA `d1041c03cbeef8e5a685e271b2b3fce840e9d2ab`, branch `6.0`, initial

@@ -1268,3 +1268,46 @@ inventory writes; ciphertext, encrypted persistence, atomic abort/retry and
 duplicate replay checks are retained. A separate project-only run preserves
 the previously accepted behavior. No Stage move, deletion/conflict, browser
 writer/capability, Document ACK/prefix or full reader readiness is qualified.
+
+
+### General encrypted recovery pagination — 2026-11-06
+
+Recovery GET keeps its 100-event page bound. The existing account replay bound
+of 200 events and 32 MiB byte bounds are unchanged. Multiple pages belong to one
+pinned registry cursor/cutover epoch, with exact contiguous server sequences and
+immutable retained wire. Each GET still checks that snapshot; a changed server
+head refuses the in-flight request rather than mixing snapshots.
+
+The existing receiving manifest/checkpoint persists each accepted ciphertext page
+under the full replay CAS. A continuation page may have has_more: it advances
+receipt only, retaining original source seed/import evidence and all prior owner
+outcomes. Complete receipt is distinct from applied manifest coverage. No project
+is presented until the existing owners authenticate and apply the complete
+received range. A damaged later page cannot make the cached partial range a
+fully authenticated project. Document ciphertext is opened before retaining a
+new page; dependencies, ledger, projection and owner proof still belong to the
+existing Document owner.
+
+After interruption, an unchanged snapshot reuses the existing receipt/replay
+loop. For an appended server history, the receiver first compares EVERY retained
+wire under the new pinned cursor and requires unchanged transport/bootstrap
+registry identities and a strictly larger server head. The same atomic
+stageRecoveryExtension/CAS can re-pin a receiving or partially applied manifest
+and append its next bounded page. Applied source/proofs/imports remain intact;
+unproven parents are replayed in sequence, never converted into proof by this
+transition. A second server verification and exact snapshot CAS precede writes.
+Rollback or a stale concurrent snapshot preserves the previously committed state.
+
+Document apply now server-compares the complete received history across bounded
+GET pages before its existing per-event ownerPort commit. Ancestor preparation
+may reuse existing preparation tokens within ONE authentication pass, validating
+their exact inventory/scope/live session and wire on every reuse. This cache is
+neither persisted evidence nor a substitute for source/ledger/projection/proof
+reauthentication after reopen. No proof format, database version, migration,
+owner or sync engine is introduced.
+
+This extends receipt and Document applied coverage; it does not qualify Document
+ordinary/P2 proven_prefix, create an ACK, advance a server ACK cursor or declare
+browser reader/writer capability. Prefix authority remains limited to the
+existing proven owner contract. Readiness/release/security gates stay unchanged.
+Acceptance results and precise event/page counts are recorded in the checkpoint.

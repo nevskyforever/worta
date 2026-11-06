@@ -24,8 +24,10 @@ function reject(): never { throw new BrowserPersistenceError('unsupported_local_
 
 /** Native linear document apply preparation (genesis and sequential update). This object is not an owner proof or ACK. */
 export async function prepareDocumentEvent(scope: BrowserSyncScope, input: DocumentGenesisInput,
-  inventory: BrowserPrefixInventory, amk: AccountMasterKey, current: () => boolean): Promise<PreparedDocumentGenesis> {
+  inventory: BrowserPrefixInventory, amk: AccountMasterKey, current: () => boolean, preparedChain = new Map<number, PreparedDocumentGenesis>()): Promise<PreparedDocumentGenesis> {
   if (!current()) throw new BrowserPersistenceError('closed')
+  const cached = preparedChain.get(input.server_sequence)
+  if(cached){const data=inspectPreparedDocumentGenesis(cached,scope,inventory);if(data.wireItem!==input.wire_item)reject();return cached}
   const initialInventory = immutableWireIdentity(inventory), initialScope = immutableWireIdentity(scope)
   const wire = JSON.parse(input.wire_item), descriptor = wire.event
   if (!Number.isSafeInteger(input.server_sequence) || input.server_sequence < 1 || descriptor.server_sequence !== input.server_sequence
@@ -65,7 +67,7 @@ export async function prepareDocumentEvent(scope: BrowserSyncScope, input: Docum
   } else {
     const parent = prior.at(-1) as (DocumentGenesisInput & { event_id: string }) | undefined
     if (!parent || h.parents.length !== 1 || h.parents[0] !== parent.event_id) reject()
-    const token = await prepareDocumentEvent(scope, parent, inventory, amk, current)
+    const token = await prepareDocumentEvent(scope, parent, inventory, amk, current, preparedChain)
     const previous = inspectPreparedDocumentGenesis(token, scope, inventory).event.header
     if (previous.stage_id !== h.stage_id || previous.entity_id !== h.entity_id || previous.project_id !== h.project_id || previous.bootstrap_id !== h.bootstrap_id
       || h.revision !== previous.revision + 1 || h.generation !== previous.generation + 1) reject()
@@ -75,6 +77,7 @@ export async function prepareDocumentEvent(scope: BrowserSyncScope, input: Docum
   const token = Object.freeze({}) as PreparedDocumentGenesis
   prepared.set(token, { scope: initialScope, inventory: initialInventory, current,
     data: { event: structuredClone(event), projection: structuredClone(event.document!), serverSequence: input.server_sequence, wireItem: input.wire_item } })
+  preparedChain.set(input.server_sequence, token)
   return token
 }
 

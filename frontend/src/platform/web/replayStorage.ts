@@ -420,9 +420,15 @@ class BrowserReplayStorage {
       if(!current())throw new BrowserPersistenceError('closed')
       const registry=await auth.authorized(token=>cloudProjectsApi.listBootstraps(token,this.signal)),mode=await auth.authorized(token=>encryptedSyncV2Api.capabilities(token,this.signal))
       if(!replaySame(replayAnchor(registry.value,mode.value),manifest.anchor))throw new BrowserPersistenceError('stale_authority')
-      const raw=await auth.authorized(token=>encryptedSyncV3Api.recoveryRaw(token,0,100,manifest.anchor.registry.current_cursor,manifest.anchor.transport.cutover_epoch,this.signal))
-      const page=prepareReplayPage(raw.value,0,this.scope,manifest.anchor).page
-      if(page.has_more||page.items.length!==expected.rows.length||page.items.some((value,index)=>!replaySame(value,JSON.parse(expected.rows[index]!.wire_item))))throw new BrowserPersistenceError('stale_authority')
+      let since=0,more=true
+      while(more){
+        const raw=await auth.authorized(token=>encryptedSyncV3Api.recoveryRaw(token,since,REPLAY_LIMITS.page,manifest.anchor.registry.current_cursor,manifest.anchor.transport.cutover_epoch,this.signal))
+        const page=prepareReplayPage(raw.value,since,this.scope,manifest.anchor).page
+        if(page.items.some((value,index)=>!expected.rows[since+index]||!replaySame(value,JSON.parse(expected.rows[since+index]!.wire_item))))throw new BrowserPersistenceError('stale_authority')
+        if(page.has_more&&page.next_cursor<=since)throw new BrowserPersistenceError('stale_authority')
+        since=page.next_cursor;more=page.has_more
+      }
+      if(since!==expected.rows.length)throw new BrowserPersistenceError('stale_authority')
       if(!current())throw new BrowserPersistenceError('closed')
     }
     return await lease.use(async amk=>{
@@ -491,15 +497,15 @@ class BrowserReplayStorage {
   /** Atomically stage one bounded authenticated recovery extension; owner proofs remain pending. */
   async stageRecoveryExtension(input: ReplaySnapshot, nextAnchor: ReplayAnchor, raw: string, server: () => Promise<void>): Promise<ReplaySnapshot> {
     const expected = structuredClone(input), prior = expected.manifest, anchor = replayAnchor(nextAnchor.registry, nextAnchor.transport)
-    if (!prior || prior.contract_version !== 6 || prior.phase !== 'received' || prior.applied_cursor !== prior.receive_cursor
-      || prior.receive_cursor !== prior.anchor.registry.current_cursor || anchor.registry.current_cursor <= prior.receive_cursor
+    if (!prior || prior.contract_version !== 6 || anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
+      || prior.receive_cursor > prior.anchor.registry.current_cursor
       || !replaySame(prior.anchor.transport, anchor.transport) || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)
       || prior.revision === Number.MAX_SAFE_INTEGER) throw new BrowserPersistenceError('stale_authority')
     const { page, bytes } = prepareReplayPage(raw, prior.receive_cursor, this.scope, anchor)
-    if (page.has_more || page.next_cursor !== anchor.registry.current_cursor || !page.items.length
+    if (page.next_cursor > anchor.registry.current_cursor || !page.items.length
       || prior.ciphertext_bytes + bytes > REPLAY_LIMITS.ciphertextBytes) throw new BrowserPersistenceError('source_limit')
     const nextManifest = { ...prior, anchor, receive_cursor: page.next_cursor, ciphertext_bytes: prior.ciphertext_bytes + bytes,
-      phase: 'received' as const, revision: prior.revision + 1 }
+      phase: page.has_more ? 'receiving' as const : 'received' as const, revision: prior.revision + 1 }
     const transaction: BrowserSyncTransaction = async (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope) || mode !== 'readwrite') fail()
       await server(); this.check()

@@ -1,5 +1,31 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-06 — General recovery pagination and Document batch reading
+
+The existing encrypted Recovery GET/receiver/recoverV10/ownerPort now receives
+and verifies multiple bounded HTTP pages. Receipt progress persists under replay
+CAS separately from applied owner coverage. Interrupted reception can re-pin an
+appended server snapshot only after comparing the entire immutable retained
+prefix and unchanged transport/bootstrap identities. Original import, ciphertext
+and owner proofs are retained; no partial history is presented or ACK issued.
+Document owner server verification covers every page, with fresh per-event CAS.
+No extra sync engine, schema/store/proof format or browser capability is added.
+
+Actual local Native Rust/SQLite → production push → isolated PostgreSQL 16/FastAPI
+→ Chromium/Vue: project and Stage Document histories of 104/108 events, two real
+100+4/100+8 pages and102 sequential updates each, passed. Corrupt-page refusal,
+interruption plus another server update, owner transaction abort/retry, duplicate
+reads, profile reopen and a fresh profile's first 108-event import passed. Exact
+counts/boundaries are in the checkpoint. Existing page100/account200/32MiB limits
+remain; this is not unbounded history or full Web readiness.
+
+Stage 2/6, Slice 4/5 remains PARTIAL, readiness 2/10. Document/P2 ACK authority and
+ordinary browser capability are not newly qualified; all security gates stay
+false. Full ordinary/game Web, existing game mechanics, Web creation/editing,
+bidirectional synchronization, one engine and pragmatic reuse remain required.
+Next product increment: project-scoped Map reading through the same production
+recovery/ownerPort/UI, with real HTTP/Chromium/restart acceptance.
+
 ## 2026-11-05 — Stage-scoped Document reading and updates
 
 Local Native SQLite → production push → isolated PostgreSQL16/FastAPI → Chromium

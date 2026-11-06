@@ -1,5 +1,5 @@
 import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
-import { prepareDocumentEvent } from './documentPrepare'
+import { prepareDocumentEvent, inspectPreparedDocumentGenesis } from './documentPrepare'
 import { readReplayStages } from './replayStageView'
 import { validateStageHead } from './stageRecords'
 import { validateStageOrderHead } from './stageOrderRecords'
@@ -17,6 +17,7 @@ import { openBrowserReplayStorage, type ReplaySnapshot, type ReplayStorage } fro
 import { openBrowserCanonicalObject } from './canonicalReaders'
 import { decodeBase64Url } from '@/api/base64url'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
+import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { ContentNoteEvent } from '@/cloud/contentNoteCodec'
 
 export interface BrowserAccountReceiveResult {
@@ -47,6 +48,20 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
     const response = await auth.authorized(token => { check(); return operation(token) })
     check(); return response.value
   }
+  // This is receipt validation, never an owner outcome. Dependencies/proofs are
+  // checked by the existing owners only after all pages have been received.
+  const authenticateDocumentWires = (items: ReturnType<typeof prepareReplayPage>['page']['items']) => lease.use(async amk => {
+    for (const item of items) if ((item.event as V3Descriptor).entity_type === 'document') {
+      const event = item.event as V3Descriptor
+      const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
+      const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
+      try {
+        await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
+          entityId: event.entity_id, entityType: 'document', eventId: event.event_id }, { ...object, nonce, ciphertext })
+      } finally { nonce.fill(0); ciphertext.fill(0) }
+      check()
+    }
+  })
   let storage: Awaited<ReturnType<typeof openBrowserReplayStorage>> | undefined
   try {
     check()
@@ -64,7 +79,7 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
       const previous = await storage.read(); check()
       const prior = previous.manifest
       if (prior && !replaySame(prior.anchor, anchor)) {
-        if (prior.phase !== 'received' || anchor.registry.current_cursor < prior.receive_cursor
+        if (anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
           || !replaySame(prior.anchor.transport, anchor.transport)
           || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)) fail('server_changed')
         let offset = 0
@@ -85,27 +100,52 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
         if (!replaySame(replayAnchor(afterRegistry, afterMode), anchor) || !replaySame(await storage.read(), previous)) fail('server_changed')
         // Admit bounded peer Content continuations or one verified StageOrder update.
         // Owner application still produces the authoritative proofs.
-        if (anchor.registry.current_cursor - prior.receive_cursor > REPLAY_LIMITS.page) fail('history_limit')
         const raw = await request(token => encryptedSyncV3Api.recoveryRaw(token, prior.receive_cursor, REPLAY_LIMITS.page,
           anchor.registry.current_cursor, anchor.transport.cutover_epoch, signal))
         const { page } = prepareReplayPage(raw, prior.receive_cursor, scope, anchor)
-        if (page.has_more || !page.items.length) fail('history_incomplete')
-        await lease.use(async amk => {
+        if (!page.items.length) fail('history_incomplete')
+        if (prior.phase === 'receiving' || prior.applied_cursor !== prior.receive_cursor) {
+          // Re-pin an interrupted receive/apply only after comparing ALL retained
+          // wire above. Keep the prior proofs/import and replay the unproven rows;
+          // a pending parent must not be mistaken for an applied dependency.
+          await authenticateDocumentWires(page.items)
+        } else await lease.use(async amk => {
           const heads = new Map<string, { event_id: string; revision: number }>()
           for (const row of previous.rows) {
             const event = JSON.parse(row.wire_item).event
             if (event.entity_type === 'note' && row.state === 'content_note_proven') heads.set(JSON.stringify([event.project_id, event.entity_id]), event)
           }
+          let documentHead: DocumentEvent['header'] | undefined
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
             if ('scope' in event || event.device_id === scope.deviceId) fail('unsupported_history_family')
-            if (event.entity_type === 'document' && event.operation === 'event' && page.items.length === 1) {
+            if (event.entity_type === 'document' && event.operation === 'event') {
               const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
-              await authenticateReplayDocuments(scope, previous, amk, current)
-              if (event.revision < 2) fail('unsupported_history_family')
-              await prepareDocumentEvent(scope, {server_sequence:event.server_sequence!,wire_item:JSON.stringify(item)}, documentPreparationInventory(previous), amk, current)
+              const inventory = documentPreparationInventory(previous)
+              if (!documentHead) {
+                await authenticateReplayDocuments(scope, previous, amk, current)
+                if (event.revision < 2) fail('unsupported_history_family')
+                const token = await prepareDocumentEvent(scope, {server_sequence:event.server_sequence!,wire_item:JSON.stringify(item)}, inventory, amk, current)
+                documentHead = inspectPreparedDocumentGenesis(token, scope, inventory).event.header
+              } else {
+                const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
+                const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
+                try {
+                  const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
+                    entityId: event.entity_id, entityType: 'document', eventId: event.event_id }, { ...object, nonce, ciphertext }) as DocumentEvent
+                  const h = decoded.header
+                  if (h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.entity_id !== event.entity_id
+                    || h.event_id !== event.event_id || h.device_id !== event.device_id || h.revision !== event.revision
+                    || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at) || h.operation !== 'update'
+                    || h.project_id !== documentHead.project_id || h.entity_id !== documentHead.entity_id || h.stage_id !== documentHead.stage_id
+                    || h.bootstrap_id !== documentHead.bootstrap_id || h.parents.length !== 1 || h.parents[0] !== documentHead.event_id
+                    || h.revision !== documentHead.revision + 1 || h.generation !== documentHead.generation + 1) fail('invalid_history')
+                  documentHead = h
+                } finally { nonce.fill(0); ciphertext.fill(0) }
+              }
               continue
             }
+            if (documentHead) fail('unsupported_history_family')
             if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 2 && item === page.items[0]) {
               await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
               const rawOrder = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
@@ -218,6 +258,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           if (!row || !replaySame(JSON.parse(row.wire_item), item)) fail('retained_wire_mismatch')
         }
       } else if (page.items.length) {
+        // Reject damaged Document ciphertext before retaining a new page. Owners
+        // still authenticate dependencies and issue proofs only after reception.
+        if (input.delivery === 'recovery') await authenticateDocumentWires(page.items)
         check(); snapshot = await storage.commitPage(snapshot, since, raw); check()
       }
       since = page.next_cursor; more = page.has_more
