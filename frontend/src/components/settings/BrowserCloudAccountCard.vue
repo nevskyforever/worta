@@ -7,6 +7,7 @@ import { KeyNotProvisionedError } from '@/auth/keyContext'
 import { StaleAuthContextError } from '@/auth/userAuth'
 import { CryptoError } from '@/crypto'
 import { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
+import { BrowserCloudReadError, type BrowserCloudProjectRead as CloudProjectMetadata } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
@@ -38,6 +39,9 @@ const workspaceOpen = ref(false)
 const workspace = ref<{ canLeave: () => boolean } | null>(null)
 const legalConfirmed = ref<Record<string, boolean>>({})
 const cloudProjects = ref<CloudProjectsResponse | null>(null)
+const cloudProjectMetadata = ref<Record<string, CloudProjectMetadata | null>>({})
+const cloudProjectMetadataLoading = ref<Record<string, boolean>>({})
+const cloudProjectMetadataError = ref<Record<string, string>>({})
 const selectedCloudProject = ref<string | null>(null)
 const cloudCatalogOpen = ref(false)
 const cloudCatalogBusy = ref(false)
@@ -56,9 +60,37 @@ function clearCloudCatalog(): void {
   cloudCatalogController?.abort()
   cloudCatalogController = null
   cloudProjects.value = null
+  cloudProjectMetadata.value = {}
+  cloudProjectMetadataLoading.value = {}
+  cloudProjectMetadataError.value = {}
   cloudCatalogError.value = null
   cloudCatalogBusy.value = false
   cloudCatalogOpen.value = false
+}
+
+async function loadCloudProjectMetadata(ids: string[], controller: AbortController, generation: number): Promise<void> {
+  if (typeof session.readCloudProject !== 'function') return
+  const loading = { ...cloudProjectMetadataLoading.value }
+  for (const id of ids) loading[id] = true
+  cloudProjectMetadataLoading.value = loading
+  await Promise.all(ids.map(async id => {
+    try {
+      const value = await session.readCloudProject(id, controller.signal)
+      if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
+      cloudProjectMetadata.value = { ...cloudProjectMetadata.value, [id]: value }
+      const nextError = { ...cloudProjectMetadataError.value }
+      delete nextError[id]
+      cloudProjectMetadataError.value = nextError
+    } catch (cause) {
+      if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
+      cloudProjectMetadata.value = { ...cloudProjectMetadata.value, [id]: null }
+      cloudProjectMetadataError.value = { ...cloudProjectMetadataError.value, [id]: cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError ? cause.code : 'connection_failed' }
+    } finally {
+      if (generation === cloudCatalogGeneration && !controller.signal.aborted) {
+        cloudProjectMetadataLoading.value = { ...cloudProjectMetadataLoading.value, [id]: false }
+      }
+    }
+  }))
 }
 
 async function loadCloudCatalog(): Promise<void> {
@@ -72,6 +104,7 @@ async function loadCloudCatalog(): Promise<void> {
     const result = await session.listCloudProjects(controller.signal)
     if (generation !== cloudCatalogGeneration || !['authenticated', 'unlocked'].includes(session.status)) return
     cloudProjects.value = result
+    if (session.status === 'unlocked') void loadCloudProjectMetadata(result.cloud_project_ids, controller, generation)
   } catch (cause) {
     if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
     if (cause instanceof StaleAuthContextError) {
@@ -156,6 +189,12 @@ function toggleWorkspace(): void {
   workspaceOpen.value = !workspaceOpen.value
 }
 
+watch([status, cloudProjects], ([nextStatus, projects]) => {
+  if (nextStatus === 'unlocked' && projects?.cloud_project_ids.length && cloudCatalogOpen.value && cloudCatalogController) {
+    void loadCloudProjectMetadata(projects.cloud_project_ids, cloudCatalogController, cloudCatalogGeneration)
+  }
+})
+
 onBeforeUnmount(() => {
   clearCloudCatalog()
   if (accountPasswordInput.value) accountPasswordInput.value.value = ''
@@ -218,6 +257,13 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
           <ul v-else>
             <li v-for="id in cloudProjects.cloud_project_ids" :key="id">
               <code>{{ id }}</code>
+              <p v-if="status === 'unlocked' && cloudProjectMetadataLoading[id]" role="status">{{ t('Загружаем с сервера…') }}</p>
+              <p v-else-if="status === 'unlocked' && cloudProjectMetadataError[id]" role="alert">{{ cloudProjectMetadataError[id] }}</p>
+              <p v-else-if="status === 'unlocked' && cloudProjectMetadata[id]">
+                {{ cloudProjectMetadata[id]!.metadata.name }}
+                <span v-if="cloudProjectMetadata[id]!.metadata.cover_reference"> · {{ t('Обложка') }}: {{ cloudProjectMetadata[id]!.metadata.cover_reference!.blob_id }}</span>
+                <span v-else> · —</span>
+              </p>
               <button class="nf-button nf-button--secondary" type="button" :disabled="status !== 'unlocked'" :data-cloud-project-id="id" @click="selectedCloudProject = id">{{ words.openCloudProject }}</button>
             </li>
           </ul>

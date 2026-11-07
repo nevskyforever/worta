@@ -411,3 +411,10 @@ Product reading groups: 4 of 9 closed, 5 remain. Note reader readiness remains 2
 Starting HEAD `297904b4`. Read-only project metadata now supports a non-null
 cover reference in `readBrowserCloudProject`; encrypted cover blob material
 remains separate. `cloudRead.spec.ts`: 18 passed. Security gates unchanged.
+
+## 2026-11-07 — Web cloud project catalog metadata display
+
+Starting HEAD `625933f2`. Cloud project catalog now shows authenticated project
+names and cover references where available, with per-project safe failure and no
+cover blob fetch. Tests: account card 2, project read 8, cloudRead 18; build pass.
+Security gates unchanged.

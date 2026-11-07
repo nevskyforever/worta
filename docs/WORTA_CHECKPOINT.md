@@ -16810,3 +16810,26 @@ Verified:
 Security gates unchanged; no E2EE/proof/CAS weakening; no media upload/fetch added.
 
 Final SHA: see commit below.
+
+## Web cloud project catalog metadata display — Beam
+
+Starting SHA `625933f238d94a87165b7b37de94eed812ce5f50`.
+Implemented a working Web cloud project catalog in `BrowserCloudAccountCard.vue`:
+the server-returned project IDs are enriched, when the account is unlocked, with
+authenticated project metadata (`readCloudProject`), showing project names and
+cover references. Projects with a non-null `cover_reference` display the cover
+blob ID; projects without a cover show a neutral placeholder. Unavailable
+metadata is reported per project without hiding the catalog. No encrypted cover
+blob is fetched or displayed; no new sync engine or media upload mechanism was
+added.
+
+Verified:
+- `BrowserCloudAccountCard.spec.ts`: 2 passed.
+- `BrowserCloudProjectRead.spec.ts`: 8 passed.
+- `cloudRead.spec.ts`: 18 passed.
+- `vite build`: passed.
+
+Security gates unchanged; E2EE/proofs/CAS not weakened. Readiness remains 2/10;
+Web reading remains 4/9 groups closed.
+
+Final SHA: see commit below.

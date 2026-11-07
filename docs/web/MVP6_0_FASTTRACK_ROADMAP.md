@@ -1244,3 +1244,11 @@ Starting HEAD `297904b4`. `readBrowserCloudProject` now accepts authenticated
 Project Metadata v2 with a non-null cover reference instead of rejecting it as
 `cover_material_unavailable`. Cover blob material/authentication remains separate.
 `cloudRead.spec.ts`: 18 passed. Security gates unchanged.
+
+## 2026-11-07 — Web cloud project catalog metadata display
+
+Starting HEAD `625933f2`. `BrowserCloudAccountCard` now enriches the server
+project ID catalog with authenticated project metadata (names and cover
+references) when unlocked. Cover blobs are not fetched. `BrowserCloudAccountCard`
+(2), `BrowserCloudProjectRead` (8) and `cloudRead` (18) tests pass; build passes.
+Security gates unchanged.
