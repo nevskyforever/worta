@@ -16854,3 +16854,27 @@ unsupported families; metadata-only preview remains separate; editing is not
 supported.
 
 Final SHA: see commit below.
+
+## Web cloud project opening E2E attempt — Beam
+
+Starting SHA `ebd22d55321d0d9ac3ffc7dd162853d0465d16e2`.
+No production code change was made in this pass. The existing implementation
+(auto-open recovery in `BrowserCloudProjectRead`, metadata read and catalog) was
+re-checked. A real Chromium/PostgreSQL/FastAPI end-to-end run was attempted with
+an ad-hoc two-project fixture, but it did not reach acceptance: the fixture's
+manual encrypted events triggered `source_seed_metadata_history_rejected`
+(decryption failure / malformed manual event) and the account accumulated more
+than the 200-event read boundary from repeated test runs. This is a test-fixture
+limitation, not a change to the product code or security gates.
+
+Verified:
+- `BrowserCloudAccountCard.spec.ts`: 2 passed.
+- `BrowserCloudProjectRead.spec.ts`: 8 passed.
+- `cloudRead.spec.ts`: 18 passed.
+- `vite build`: passed.
+
+Real PostgreSQL/FastAPI/Chromium E2E for catalog project opening remains NOT RUN.
+Restart/redelivery/proof/CAS for this specific end-to-end path were not verified
+in this pass. Readiness remains 2/10; Web reading remains 4/9 groups closed.
+
+Final SHA: see commit below.

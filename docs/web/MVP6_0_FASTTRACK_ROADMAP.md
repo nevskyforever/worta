@@ -1259,3 +1259,10 @@ Starting HEAD `7f9239aa`. Selecting an unlocked cloud project now auto-opens the
 existing recovery read path (`readRecoveryProject`) through
 `BrowserCloudProjectRead`, using the selected project ID. Card 2 and project read
 8 tests pass; build passes. Security gates unchanged.
+
+## 2026-11-07 — Web cloud project opening E2E attempt
+
+Starting HEAD `ebd22d55`. No production code change. Real Chromium/PostgreSQL/
+FastAPI E2E was attempted with an ad-hoc two-project fixture but did not reach
+acceptance due to fixture/seed issues; local checks (account card 2, project read 8,
+cloudRead 18, build) passed. Security gates unchanged.

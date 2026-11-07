@@ -424,3 +424,8 @@ Security gates unchanged.
 Starting HEAD `7f9239aa`. Cloud catalog selection now opens the existing
 recovery reader for the selected project ID. Card 2, project read 8, build pass.
 Security gates unchanged.
+
+## 2026-11-07 — Web cloud project opening E2E attempt
+
+Starting HEAD `ebd22d55`. No production code change. Real E2E not completed due to
+ad-hoc fixture limitations; local profile checks passed. Security gates unchanged.
