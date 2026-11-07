@@ -1266,3 +1266,11 @@ Starting HEAD `ebd22d55`. No production code change. Real Chromium/PostgreSQL/
 FastAPI E2E was attempted with an ad-hoc two-project fixture but did not reach
 acceptance due to fixture/seed issues; local checks (account card 2, project read 8,
 cloudRead 18, build) passed. Security gates unchanged.
+
+## 2026-11-07 — Automated encrypted project source seed test
+
+Starting HEAD `a4aa7ecd`. Added a repeatable Vitest test in
+`replaySourceSeed.spec.ts` that creates a real encrypted project (Note, Stage,
+Metadata) through production writers and authenticates its source seed, plus a
+negative corrupted-ciphertext case. File passes twice (22 tests). No readiness
+change. Security gates unchanged.

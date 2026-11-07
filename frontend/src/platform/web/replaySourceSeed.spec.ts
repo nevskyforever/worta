@@ -11,6 +11,8 @@ import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
 import { sealNoteSyncEvent } from '@/cloud/encryptedSyncProtocol'
 import type { NoteSyncRecord } from '@/cloud/noteSyncCodec'
 import { sealProjectMetadataEvent, type ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
+import { frameStructuralEvent, type StructuralEvent } from '@/cloud/stageCodec'
+import { encryptObjectBytes } from '@/crypto'
 import metadataFixture from '@/cloud/__fixtures__/projectMetadataV2.json'
 import noteFixture from '@/cloud/__fixtures__/noteSyncPlaintextV1.json'
 import { seedReplayNoteSource } from './replaySourceSeed'
@@ -211,4 +213,118 @@ it('seeds Metadata while keeping a later peer Document genesis unapplied', async
   vi.mocked(encryptedSyncV3Api.pullRaw).mockResolvedValue(JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, items: [], next_cursor: 3, has_more: false }))
   expect(await run()).toMatchObject({ status: 'seeded', projectOpened: false })
   expect(state.rows[2]!.state).toBe('received')
+})
+
+
+it('creates and authenticates one encrypted project with a Stage and a Note', async () => {
+  vi.restoreAllMocks(); active = true; amk = await generateAccountMasterKey()
+  auth = new NormalUserAuthRuntime({ login: async () => ({ access_token: 'test', refresh_token: 'test', access_expires_in: 600 }),
+    me: async () => ({ id: scope.canonicalUserId, username: 'writer', email: 'writer@example.test', email_verified: true,
+      role: 'user', status: 'active', created_at: 'now' }), refresh: vi.fn(), logout: async () => undefined })
+  await auth.login('writer', 'password')
+  bindings = { ensureForCurrentUser: vi.fn(async () => ({ context: auth.requireContext() })) } as unknown as AuthoritativeAccountBinding
+  const lease = { localAccountId: scope.accountId, canonicalUserId: scope.canonicalUserId, authEpoch: auth.requireContext().authEpoch,
+    isCurrent: () => active, use: async <T>(work: (key: typeof amk) => Promise<T>) => work(amk) }
+  keys = { leaseForAccount: () => lease } as unknown as RuntimeKeyContext
+  const note = structuredClone(noteFixture.plaintext.note) as NoteSyncRecord, noteId = 'project-note', at = note.updated_at
+  const noteEvent = { event_id: crypto.randomUUID(), project_id: project, entity_id: noteId, entity_type: 'note' as const,
+    operation: 'upsert' as const, revision: 1, updated_at: at, deleted_at: null }
+  const noteSealed = await sealNoteSyncEvent(amk, scope.canonicalUserId, noteEvent, null,
+    { ...note, id: noteId, project_id: project, metadata: {} })
+  const stageId = 'stage-one'
+  const stageEvent: StructuralEvent = { version: 1, header: { account_id: scope.canonicalUserId,
+    bootstrap_id: '55555555-5555-4555-8555-555555555555', device_id: source, entity_id: stageId, entity_type: 'stage',
+    event_id: crypto.randomUUID(), project_id: project, generation: 1, revision: 1, operation: 'create',
+    parent_event_ids: [], updated_at: at, metadata_event_id: '66666666-6666-4555-8666-666666666666' },
+    stage: { name: 'Stage One', goal: 100, infinite: false, unit: 'symbols', status: 'активен', deadline: null,
+      personal_goal: 1, auto_freeze: false, streak_enabled: false, work_method: 'manual', created_at: null, completed_at: null },
+    stage_ids: null, stage_heads: null, deleted_at: null }
+  const stageFrame = frameStructuralEvent(stageEvent)
+  const stageSealed = await encryptObjectBytes(amk, { userId: scope.canonicalUserId, projectId: project, entityId: stageId, entityType: 'stage' }, stageFrame)
+  const metadata = structuredClone(metadataFixture[0]!.event) as ProjectMetadataEvent
+  metadata.header = { ...metadata.header, account_id: scope.canonicalUserId, project_id: project, entity_id: project,
+    bootstrap_id: '55555555-5555-4555-8555-555555555555', device_id: source, event_id: crypto.randomUUID() }
+  metadata.metadata!.name = 'Project with Stage and Note'
+  metadata.metadata!.status = 'активен'
+  const metadataSealed = await sealProjectMetadataEvent(amk, metadata)
+  const metaEvent = { event_id: metadata.header.event_id, project_id: project, entity_id: project, entity_type: 'project_metadata',
+    operation: 'upsert', revision: 1, updated_at: metadata.header.updated_at, deleted_at: null }
+  const anchor = replayAnchor({ current_cursor: 3, projects: [{ project_id: project, bootstrap_id: metadata.header.bootstrap_id,
+    origin_device_id: source, state: 'active', initial_event_count: 1, initial_max_server_sequence: 1 }] },
+    { supported_transport_version: 2, writer_transport_version: 3, cutover_epoch: 2 })
+  const rows = [row(noteEvent, encoded(noteSealed.object), 1),
+    row({ event_id: stageEvent.header.event_id, project_id: project, entity_id: stageId, entity_type: 'stage', operation: 'upsert',
+      revision: 1, updated_at: stageEvent.header.updated_at, deleted_at: null }, encoded(stageSealed), 2),
+    row(metaEvent, encoded(metadataSealed), 3)]
+  state = { manifest: { record_version: 4, contract_version: 4, metadata_cursor: 0, applied_cursor: 0, source_seeds: [],
+    account_id: scope.accountId, canonical_user_id: scope.canonicalUserId, device_id: scope.deviceId,
+    generation: crypto.randomUUID(), anchor, receive_cursor: 3, ciphertext_bytes: 0, phase: 'received', revision: 1 },
+  rows, bindings: [], owners: [], sources: [] }
+  vi.spyOn(cloudProjectsApi, 'listBootstraps').mockImplementation(async () => structuredClone(anchor.registry))
+  vi.spyOn(encryptedSyncV2Api, 'capabilities').mockImplementation(async () => structuredClone(anchor.transport))
+  vi.spyOn(encryptedSyncV3Api, 'pullRaw').mockImplementation(async () => JSON.stringify({ protocol_version: 3,
+    encrypted_sync_version: 3, items: [], next_cursor: 3, has_more: false }))
+  commit = vi.fn<Commit>(async (expected, sourceRow, reference, server) => {
+    await server(); expect(expected).toEqual(state)
+    state.sources!.push(sourceRow)
+    const manifest = state.manifest as ReplayManifest
+    state.manifest = { ...manifest, source_seeds: [...manifest.source_seeds!, reference], revision: manifest.revision + 1 }
+  })
+  expect(await run()).toMatchObject({ status: 'seeded', projectOpened: false, writerAuthorized: false })
+  expect(state.sources).toHaveLength(1)
+  expect(state.rows.every(record => record.state === 'received')).toBe(true)
+  expect(await run()).toMatchObject({ status: 'already_seeded', projectOpened: false })
+  expect(commit).toHaveBeenCalledTimes(1)
+  const evidence = state.manifest!.source_seeds![0]!
+  expect(evidence.project_id).toBe(project)
+})
+
+it('rejects corrupted project ciphertext without seeding', async () => {
+  // Rebuild a minimal valid history, then corrupt the Metadata ciphertext.
+  vi.restoreAllMocks(); active = true; amk = await generateAccountMasterKey()
+  auth = new NormalUserAuthRuntime({ login: async () => ({ access_token: 'test', refresh_token: 'test', access_expires_in: 600 }),
+    me: async () => ({ id: scope.canonicalUserId, username: 'writer', email: 'writer@example.test', email_verified: true,
+      role: 'user', status: 'active', created_at: 'now' }), refresh: vi.fn(), logout: async () => undefined })
+  await auth.login('writer', 'password')
+  bindings = { ensureForCurrentUser: vi.fn(async () => ({ context: auth.requireContext() })) } as unknown as AuthoritativeAccountBinding
+  const lease = { localAccountId: scope.accountId, canonicalUserId: scope.canonicalUserId, authEpoch: auth.requireContext().authEpoch,
+    isCurrent: () => active, use: async <T>(work: (key: typeof amk) => Promise<T>) => work(amk) }
+  keys = { leaseForAccount: () => lease } as unknown as RuntimeKeyContext
+  const note = structuredClone(noteFixture.plaintext.note) as NoteSyncRecord
+  const noteEvent = { event_id: crypto.randomUUID(), project_id: project, entity_id: 'negative-note', entity_type: 'note' as const,
+    operation: 'upsert' as const, revision: 1, updated_at: note.updated_at, deleted_at: null }
+  const noteSealed = await sealNoteSyncEvent(amk, scope.canonicalUserId, noteEvent, null,
+    { ...note, id: noteEvent.entity_id, project_id: project, metadata: {} })
+  const metadata = structuredClone(metadataFixture[0]!.event) as ProjectMetadataEvent
+  metadata.header = { ...metadata.header, account_id: scope.canonicalUserId, project_id: project, entity_id: project,
+    bootstrap_id: '55555555-5555-4555-8555-555555555555', device_id: source, event_id: crypto.randomUUID() }
+  metadata.metadata!.name = 'Corrupted project'
+  metadata.metadata!.status = 'активен'
+  const metadataSealed = await sealProjectMetadataEvent(amk, metadata)
+  const metaEvent = { event_id: metadata.header.event_id, project_id: project, entity_id: project, entity_type: 'project_metadata',
+    operation: 'upsert', revision: 1, updated_at: metadata.header.updated_at, deleted_at: null }
+  const anchor = replayAnchor({ current_cursor: 2, projects: [{ project_id: project, bootstrap_id: metadata.header.bootstrap_id,
+    origin_device_id: source, state: 'active', initial_event_count: 1, initial_max_server_sequence: 1 }] },
+    { supported_transport_version: 2, writer_transport_version: 3, cutover_epoch: 2 })
+  const rows = [row(noteEvent, encoded(noteSealed.object), 1), row(metaEvent, encoded(metadataSealed), 2)]
+  state = { manifest: { record_version: 4, contract_version: 4, metadata_cursor: 0, applied_cursor: 0, source_seeds: [],
+    account_id: scope.accountId, canonical_user_id: scope.canonicalUserId, device_id: scope.deviceId,
+    generation: crypto.randomUUID(), anchor, receive_cursor: 2, ciphertext_bytes: 0, phase: 'received', revision: 1 },
+  rows, bindings: [], owners: [], sources: [] }
+  vi.spyOn(cloudProjectsApi, 'listBootstraps').mockImplementation(async () => structuredClone(anchor.registry))
+  vi.spyOn(encryptedSyncV2Api, 'capabilities').mockImplementation(async () => structuredClone(anchor.transport))
+  vi.spyOn(encryptedSyncV3Api, 'pullRaw').mockImplementation(async () => JSON.stringify({ protocol_version: 3,
+    encrypted_sync_version: 3, items: [], next_cursor: 2, has_more: false }))
+  commit = vi.fn<Commit>(async (expected, sourceRow, reference, server) => {
+    await server(); expect(expected).toEqual(state)
+    state.sources!.push(sourceRow)
+    const manifest = state.manifest as ReplayManifest
+    state.manifest = { ...manifest, source_seeds: [...manifest.source_seeds!, reference], revision: manifest.revision + 1 }
+  })
+  const wire = JSON.parse(state.rows[1]!.wire_item)
+  wire.object.ciphertext = (wire.object.ciphertext[0] === 'A' ? 'B' : 'A') + wire.object.ciphertext.slice(1)
+  state.rows[1]!.wire_item = JSON.stringify(wire)
+  await expect(run()).rejects.toThrow()
+  expect(commit).not.toHaveBeenCalled()
+  expect(state.sources).toEqual([])
 })

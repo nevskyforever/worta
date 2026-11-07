@@ -429,3 +429,10 @@ Security gates unchanged.
 
 Starting HEAD `ebd22d55`. No production code change. Real E2E not completed due to
 ad-hoc fixture limitations; local profile checks passed. Security gates unchanged.
+
+## 2026-11-07 — Automated encrypted project source seed test
+
+Starting HEAD `a4aa7ecd`. Added repeatable automated source-seed authentication
+test with a real encrypted project (Note, Stage, Metadata) and a negative
+corrupted-ciphertext case. `replaySourceSeed.spec.ts`: 22 passed twice.
+Security gates unchanged.

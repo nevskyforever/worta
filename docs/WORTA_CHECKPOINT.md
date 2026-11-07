@@ -16878,3 +16878,23 @@ Restart/redelivery/proof/CAS for this specific end-to-end path were not verified
 in this pass. Readiness remains 2/10; Web reading remains 4/9 groups closed.
 
 Final SHA: see commit below.
+
+## Automated encrypted project source seed test — Beam
+
+Starting SHA `a4aa7ecdaf2869bfdcbd16c8e3f0eb950f23ed4e`.
+Added an automated Vitest source-seed test in
+`frontend/src/platform/web/replaySourceSeed.spec.ts`:
+"creates and authenticates one encrypted project with a Stage and a Note".
+It builds a real encrypted project history through production writers
+(`sealNoteSyncEvent`, `frameStructuralEvent`/`encryptObjectBytes`, `sealProjectMetadataEvent`)
+with one Note, one Stage and one Project Metadata event, then authenticates it with
+`seedReplayNoteSource`. A second added test rejects a corrupted Metadata ciphertext
+without seeding. The file passes twice independently (22 tests).
+
+Verified:
+- `replaySourceSeed.spec.ts`: 22 passed, twice.
+- No HTTP/Chromium/PostgreSQL E2E was run in this pass.
+
+Security gates unchanged; no E2EE/source validation/proof/CAS weakening.
+
+Final SHA: see commit below.
