@@ -63,7 +63,7 @@ function assertGameBatchTransition(before:ReplaySnapshot,after:ReplaySnapshot,se
  const key=(row:unknown)=>{const r=row as {project_id:string;entity_id:string};return JSON.stringify([r.project_id,r.entity_id])}
  if(!replaySame(old!.projections.filter(row=>!keys.has(key(row))),next!.projections.filter(row=>!keys.has(key(row)))))fail()
  for(const k of keys){
-  const chain=added.filter(row=>key(row)===k).sort((a,b)=>a.server_sequence-b.server_sequence)
+  const chain=added.filter(row=>key(row)===k).sort((a,b)=>JSON.parse(a.wire_item).event.revision-JSON.parse(b.wire_item).event.revision)
   let previous=old!.projections.find(row=>key(row)===k) as GameProjection|undefined
   for(const ledger of chain){
    if(!replaySame(ledger.previous_projection,previous))fail()

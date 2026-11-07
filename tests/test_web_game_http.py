@@ -5,6 +5,7 @@ import socket
 import sqlite3
 import subprocess
 import threading
+from datetime import date, timedelta
 from queue import Queue
 
 import uvicorn
@@ -29,7 +30,8 @@ from test_cloud_c15_headless_cross_runtime import _crypto_bridge
 from base64 import urlsafe_b64encode
 
 @pytest.mark.parametrize("account_first", [False, True], ids=["project-before-reward", "reward-before-project"])
-def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, account_first):
+@pytest.mark.parametrize("growth", [False, True], ids=["freeze", "growth"])
+def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, account_first, growth):
     client, engine = cloud_client
     user = str(create_user(engine))
     token = login(client).json()['access_token']
@@ -37,7 +39,9 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
     db, identity = provision(tmp_path, 'game-http-native', user, True)
     with sqlite3.connect(db) as connection:
         register_remote_apply_authorization_guard(connection)
-        connection.execute("UPDATE projects SET status='активен',goal=100,infinite=0,payload_json=json_set(payload_json,'$.work_method','manual','$.total',0,'$.progress_entries',json('[]'))")
+        connection.execute("UPDATE projects SET status='активен',goal=100,infinite=0,payload_json=json_set(payload_json,'$.work_method','manual','$.total',0,'$.progress_entries',json('[]'),'$.goal',100,'$.personal_goal',?)", (100 if growth else 0,))
+        if growth:
+            connection.execute("UPDATE cloud_sync_metadata_events SET payload_json=json_set(payload_json,'$.metadata.goal',100,'$.metadata.personal_goal',100)")
     device = identity['device_id']
     assert client.put(f'/api/v1/sync/devices/{device}', headers=headers).status_code == 200
     boot = bootstrap(tmp_path, db, identity, 'bootstrap_prepare')['bootstrap_id']
@@ -60,7 +64,10 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
     source = {'gamer': json.loads((ROOT/'frontend/src/cloud/__fixtures__/gameLegacyDefaultsV1.json').read_text()),
               'project_game_state': {f'project:{PROJECT_ID}': {'streaks':['2026-10-01','2026-10-02'], 'max_streak':4, 'streak_status':True}}}
     source['gamer']['coins'] = 1000
-    source['global_streak'] = {'global_streaks':['2026-11-03','2026-11-04','2026-11-05'],'max_global_streak':3,'global_streak_status':'Go'}
+    source['gamer']['items'] = {'Предметы': {'Заморозка': 2}}
+    today = date.today()
+    streak_days = [(today - timedelta(days=offset)).isoformat() for offset in (2, 1)]
+    source['global_streak'] = {'global_streaks':streak_days,'max_global_streak':len(streak_days),'global_streak_status':'Go'}
     assert game(tmp_path, db, identity, user, 'init', source=source) is True
     assert client.put('/api/v3/sync/encrypted/game-reader-capabilities', headers=headers, json=declaration(device)).status_code == 204
     progress(tmp_path, db, identity, user, 'begin')
@@ -96,7 +103,7 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
     assert 'entry' in result,result
     assert game(tmp_path,db,identity,user,'process')['processed']==1
     emit_progress(client,tmp_path,token,db,identity,user,key)
-    assert len(publish_game())==2
+    assert len(publish_game())==(3 if growth else 2)
     assert game(tmp_path,db,identity,user,'inventory',category='Зелья',item_id='Микро зелье здоровья',count=2,operation='buy') is not None
     assert len(publish_game())==1
     def history():
@@ -110,7 +117,7 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
             chain=json.loads(connection.execute('SELECT snapshot_json FROM cloud_progress_projection').fetchone()[0])
             rows=connection.execute("SELECT canonical_frame FROM cloud_game_events WHERE scope='project' ORDER BY server_sequence").fetchall()
         return {'projections':dict(projections(db)), 'projectEvents':[json.loads(bytes(row[0])[20:]) for row in rows], 'progress':chain}
-    items=history();assert len(items)==8
+    items=history();assert len(items)==(9 if growth else 8)
     source_seq=next(i['event']['server_sequence'] for i in items if i['event']['entity_type']=='project_game' and i['event']['revision']==2)
     reward_seq=next(i['event']['server_sequence'] for i in items if i['event']['entity_type']=='account_game' and i['event']['revision']==2)
     assert (reward_seq < source_seq) == account_first
@@ -132,9 +139,12 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
             assert len(publish_game())==2
             assert game(tmp_path,db,identity,user,'inventory',category='Зелья',item_id='Микро зелье здоровья',count=1,operation='sell') is not None
             assert len(publish_game())==1
-            assert game(tmp_path,db,identity,user,'loss',writing_day='2026-11-08',now='2026-11-08T00:00:00.000000Z') is True
+            
+            loss_day = (today + timedelta(days=2)).isoformat()
+            assert game(tmp_path,db,identity,user,'loss',writing_day=loss_day,now=loss_day+'T00:00:00.000000Z') is True
             assert len(publish_game())==1
-            assert game(tmp_path,db,identity,user,'loss',writing_day='2026-11-09',now='2026-11-09T00:00:00.000000Z') is False
+            next_day = (today + timedelta(days=3)).isoformat()
+            assert game(tmp_path,db,identity,user,'loss',writing_day=next_day,now=next_day+'T00:00:00.000000Z') is False
             latest=history();assert latest[:len(items)]==items
             stdout,stderr=process.communicate(json.dumps({'items':latest,'expected':expected()})+'\n',timeout=180)
             assert process.returncode==0,stdout+stderr

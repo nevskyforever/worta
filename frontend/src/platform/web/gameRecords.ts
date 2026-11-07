@@ -33,7 +33,7 @@ export function joinGameRecords(s:BrowserSyncScope,r:GameInbox,ledgers:unknown[]
  if(e.revision>1){
   const previous=l.previous_projection,parent=ledgers.find(x=>(x as GameLedger).event_id===previous?.head_event_id) as GameLedger|undefined
   if(!previous||!parent||previous.account_id!==s.accountId||previous.device_id!==s.deviceId||previous.project_id!==l.project_id||previous.entity_id!==l.entity_id
-   ||parent.project_id!==l.project_id||parent.entity_id!==l.entity_id||parent.server_sequence>=r.server_sequence||JSON.parse(parent.wire_item).event.revision!==e.revision-1)fail()
+   ||parent.project_id!==l.project_id||parent.entity_id!==l.entity_id||JSON.parse(parent.wire_item).event.revision!==e.revision-1)fail()
  }
  const env=p.envelope,version=e.scope==='account'?2:1
  if(Object.keys(env).sort().join(',')!=='aad_version,ciphertext,crypto_version,nonce'||env.crypto_version!==version||env.aad_version!==version||decodeBase64Url(env.nonce).length!==24||decodeBase64Url(env.ciphertext).length<16)fail()

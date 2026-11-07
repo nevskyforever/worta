@@ -73,11 +73,12 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
     }finally{n.fill(0);c.fill(0)}
    }
   }
- }else if(!['genesis','reward','inventory','global_streak'].includes(a.kind))reject()
+ }else if(!['genesis','reward','inventory','global_streak','freeze'].includes(a.kind))reject()
  let previous:GamePlan|undefined,source:ProjectGameEvent|undefined
  // Filter by durable owner key only to select candidates. Each candidate is
  // independently decrypted and its actual owner identity checked below.
  for(const row of snapshot.rows){if(row.server_sequence>=input.server_sequence)break
+  if(active.has(row.server_sequence))continue
   if(row.state!=='game_proven'||!snapshot.games?.ledger.some(value=>{const l=value as {event_id:string;entity_id:string};return l.event_id===row.event_id&&l.entity_id===key}))continue
   const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic),scope,snapshot)
   if(gameOwner(plan.event)!==key)reject()
@@ -86,10 +87,12 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
  if(a.kind==='genesis'){if(previous||h.revision!==1||h.parents.length)reject()}
  else {
   if(h.parents.length!==1)reject()
-  const parent=snapshot.rows.find(row=>row.event_id===h.parents[0]&&row.server_sequence<input.server_sequence)
+  // Native account actions can be delivered before their causal parent. A
+  // parent is valid when already proven or part of the same atomic Game window.
+  const parent=snapshot.rows.find(row=>row.event_id===h.parents[0]&&(row.server_sequence<input.server_sequence||row.state==='game_proven'||atomic.has(row.server_sequence)))
   if(!parent||!(parent.state==='game_proven'||parent.state==='received'&&atomic.has(parent.server_sequence)))reject()
   const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,parent,snapshot,amk,current,cache,active,atomic),scope,snapshot)
-  if(gameOwner(plan.event)!==key||h.revision!==plan.event.header.revision+1||parent.state==='game_proven'&&previous?.event.header.event_id!==parent.event_id)reject()
+  if(gameOwner(plan.event)!==key||h.revision!==plan.event.header.revision+1)reject()
   previous=plan
  }
  if(a.kind==='reward'){
@@ -102,7 +105,24 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
   if(plan.event.header.scope!=='project'||h.event_id!==await gameActionId(h.account_id,'reward',a.project_action_id))reject()
   source=plan.event as ProjectGameEvent
  }
- if(a.kind==='global_streak' && (event.version!==2 || h.event_id!==await gameActionId(h.account_id,'global_streak_loss',a.before)))reject()
+ if(a.kind==='global_streak'){
+  if(event.version===2){
+   if(h.event_id!==await gameActionId(h.account_id,'global_streak_loss',a.before))reject()
+  }else if(event.version===1){
+   const refs=a.project_action_ids
+   if(refs.length!==1)reject()
+   const row=snapshot.rows.find(row=>row.event_id===refs[0]&&(row.state==='game_proven'||row.state==='received'&&atomic.has(row.server_sequence)))
+   if(!row||JSON.parse(row.wire_item).event.entity_type!=='project_game')reject()
+   const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic),scope,snapshot)
+   if(plan.event.header.scope!=='project'||plan.event.action.kind!=='writing'||plan.event.action.fact.writing_day!==a.writing_day
+     ||h.event_id!==await gameActionId(h.account_id,'global_streak',[a.writing_day,refs]))reject()
+   source=plan.event as ProjectGameEvent
+  }else reject()
+ }
+ if(a.kind==='freeze'){
+  if(a.project_id!==null||a.project_action_id!==null||a.before===null||a.after===null
+    ||h.event_id!==await gameActionId(h.account_id,'global_freeze',[a.writing_day,a.before,a.before_count]))reject()
+ }
  const projection=transitionGame(event,previous?.projection,source)
  if(!current())throw new BrowserPersistenceError('closed')
  if(identity!==immutableWireIdentity(snapshot))throw new BrowserPersistenceError('stale_source')

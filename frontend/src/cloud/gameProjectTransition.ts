@@ -59,10 +59,19 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
     return fail()
   }
   if(a.kind==='global_streak'){
-    if(e.version!==2||e.header.rule!=='native-game-v1')fail()
+    if(e.header.rule!=='native-game-v1')fail()
     const account=state as AccountGameBase
     if(canonical(account.global_streak)!==canonical(a.before))fail()
     account.global_streak=structuredClone(a.after)
+    if(e.version===1){
+      if(!source||source.header.scope!=='project'||source.action.kind!=='writing')fail()
+      const reward=a.reward
+      const change=(key:'coins'|'experience',delta:bigint)=>{const n=progressMicros(account[key])+delta;if(n<0n||n>1000000000000000000n)fail();account[key]=`${n/1000000n}.${(n%1000000n).toString().padStart(6,'0')}`}
+      change('coins',progressMicros(reward.coins))
+      change('experience',progressMicros(reward.experience))
+      return account
+    }
+    if(e.version!==2)fail()
     const damage=BigInt(a.after.lost_length)*5000000n
     const health=progressMicros(account.health), max=progressMicros(account.max_health)
     const remaining=(health<max?health:max)-damage
@@ -72,6 +81,16 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
       const index=account.inventory.findIndex(item=>item.category==='Зелья'&&item.item_id==='Зелье воскрешения'&&item.count>0)
       if(index>=0){if(account.inventory[index]!.count===1)account.inventory.splice(index,1);else account.inventory[index]!.count--;account.health=account.max_health}
     }
+    return account
+  }
+  if(a.kind==='freeze'){
+    if(e.header.rule!=='native-game-v1'||a.project_id!==null||a.before===null||a.after===null)fail()
+    const account=state as AccountGameBase
+    if(canonical(account.global_streak)!==canonical(a.before))fail()
+    const index=account.inventory.findIndex(item=>item.category==='Предметы'&&item.item_id==='Заморозка')
+    if(index<0||account.inventory[index]!.count!==a.before_count)fail()
+    if(a.after_count===0)account.inventory.splice(index,1);else account.inventory[index]!.count=a.after_count
+    account.global_streak=structuredClone(a.after)
     return account
   }
   if(a.kind==='inventory'){

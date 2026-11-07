@@ -16722,3 +16722,17 @@ Backend acceptance: 288 passed, 7 failed in metadata/replay PostgreSQL tests (en
 Full HTTP/Chromium global streak growth/freeze end-to-end acceptance was not completed in this run.
 
 Status: PARTIAL.
+
+## Game streak/freeze Web sync completion — Beam
+
+Starting SHA `6daaca82e105d3d4f7b9c6d46a35e3fb5a135173`.
+Implemented minimal Web support for Native account Game events:
+- global_streak v1 growth admission, dependency proof, transition and rewards.
+- freeze admission, inventory decrement and streak transition.
+- loss-v2 remains supported.
+- Out-of-order parent sequence handling in prepare and replay validation.
+
+Verified:
+- tests/test_web_game_http.py: 4 passed (growth/freeze, both transport orders), including real PostgreSQL/FastAPI/Chromium, restart, redelivery, rollback, and Native/Web projection parity.
+
+Final SHA: adc89af7a7969553f56a9b5027ff8a8854a3db35
