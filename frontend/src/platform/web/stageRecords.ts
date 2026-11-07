@@ -13,7 +13,7 @@ export interface BrowserStageProof {
   event_id: string;
   source_device_id: string;
   server_sequence: number;
-  operation: 'create' | 'update';
+  operation: 'create' | 'update' | 'delete';
   revision: number;
   generation: number;
   parent_event_ids: string[];
@@ -53,9 +53,12 @@ export function validateStageProof(value: unknown, scope: BrowserSyncScope): Bro
   if (!exact(value, ['record_version', 'owner_kind', 'account_id', 'project_id', 'stage_id', 'bootstrap_id', 'event_id', 'source_device_id', 'server_sequence', 'operation', 'revision', 'generation', 'parent_event_ids', 'metadata_event_id', 'codec_version', 'protocol_version', 'wire_digest', 'reference']))
     bad();
   const p = value as unknown as BrowserStageProof, d = p.reference;
-  if (p.record_version !== 1 || p.owner_kind !== 'stage' || p.account_id !== scope.accountId || !id(p.project_id) || !id(p.stage_id) || ![p.bootstrap_id, p.event_id, p.source_device_id, p.metadata_event_id].every(uuid) || !positive(p.server_sequence) || !positive(p.revision) || p.generation !== p.revision || p.protocol_version !== 3 || ![1, 2].includes(p.codec_version) || !['create', 'update'].includes(p.operation) || p.codec_version === 2 && p.operation === 'create' || !Array.isArray(p.parent_event_ids) || p.parent_event_ids.length !== (p.operation === 'create' ? 0 : 1) || !p.parent_event_ids.every(s => uuid(s) && s !== p.event_id) || p.operation === 'create' && p.revision !== 1 || p.operation === 'update' && p.revision < 2 || typeof p.wire_digest !== 'string' || !/^[0-9a-f]{64}$/.test(p.wire_digest))
+  if (p.record_version !== 1 || p.owner_kind !== 'stage' || p.account_id !== scope.accountId || !id(p.project_id) || !id(p.stage_id) || ![p.bootstrap_id, p.event_id, p.source_device_id, p.metadata_event_id].every(uuid) || !positive(p.server_sequence) || !positive(p.revision) || p.generation !== p.revision || p.protocol_version !== 3 || ![1, 2].includes(p.codec_version) || !['create', 'update', 'delete'].includes(p.operation) || p.codec_version === 2 && p.operation === 'create' || !Array.isArray(p.parent_event_ids) || p.parent_event_ids.length !== (p.operation === 'create' ? 0 : 1) || !p.parent_event_ids.every(s => uuid(s) && s !== p.event_id) || p.operation === 'create' && p.revision !== 1 || p.operation !== 'create' && p.revision < 2 || typeof p.wire_digest !== 'string' || !/^[0-9a-f]{64}$/.test(p.wire_digest))
     bad();
-  if (!exact(d, ['event_id', 'device_id', 'server_sequence', 'project_id', 'entity_id', 'entity_type', 'operation', 'revision', 'updated_at', 'deleted_at']) || d.event_id !== p.event_id || d.device_id !== p.source_device_id || d.server_sequence !== p.server_sequence || d.project_id !== p.project_id || d.entity_id !== p.stage_id || d.entity_type !== 'stage' || d.operation !== 'upsert' || d.revision !== p.revision || d.deleted_at !== null || !wireTimestamp(d.updated_at))
+  if (!exact(d, ['event_id', 'device_id', 'server_sequence', 'project_id', 'entity_id', 'entity_type', 'operation', 'revision', 'updated_at', 'deleted_at']) || d.event_id !== p.event_id || d.device_id !== p.source_device_id || d.server_sequence !== p.server_sequence || d.project_id !== p.project_id || d.entity_id !== p.stage_id || d.entity_type !== 'stage' || d.revision !== p.revision || !wireTimestamp(d.updated_at))
+    bad();
+  // A tombstone descriptor is the delete itself; every other proof is an upsert with no deletion.
+  if (p.operation === 'delete' ? d.operation !== 'delete' || !wireTimestamp(d.deleted_at) : d.operation !== 'upsert' || d.deleted_at !== null)
     bad();
   return structuredClone(p);
 }

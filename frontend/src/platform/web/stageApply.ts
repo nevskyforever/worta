@@ -14,7 +14,7 @@ import { validateBrowserProjectBinding } from './projectBindings';
 import { immutableWireIdentity, snapshotBrowserSyncScope, validateBrowserInboxRecord, readBrowserSyncCursor, type BrowserSyncScope, type BrowserSyncTransaction, type BrowserInboxRecord } from './syncDurability';
 import { PREFIX_STORES, type BrowserPrefixInventory } from './provenPrefixRecords';
 const same = (a: unknown, b: unknown) => immutableWireIdentity(a) === immutableWireIdentity(b);
-function fail(code: 'closed' | 'corrupt_record' | 'stale_authority' | 'ineligible_lineage' | 'missing_history' | 'metadata_conflict' | 'self_echo_unavailable' | 'unsupported_local_source' = 'corrupt_record'): never {
+function fail(code: 'closed' | 'corrupt_record' | 'stale_authority' | 'ineligible_lineage' | 'missing_history' | 'metadata_conflict' | 'self_echo_unavailable' | 'unsupported_local_source' | 'stage_tombstone_child_manifest_incomplete' = 'corrupt_record'): never {
   throw new BrowserPersistenceError(code);
 }
 export function readStageInventory(tx: IDBTransaction, scope: BrowserSyncScope, done: (v: BrowserPrefixInventory) => void, abort: (e: unknown) => void) {
@@ -54,11 +54,14 @@ async function open(scope: BrowserSyncScope, row: BrowserInboxRecord, amk: Accou
 }
 async function proofFor(scope: BrowserSyncScope, row: BrowserInboxRecord, e: StructuralEvent): Promise<BrowserStageProof> {
   const h = e.header, w = JSON.parse(row.wire_item).event;
-  if (h.entity_type !== 'stage' || !['create', 'update'].includes(h.operation))
+  if (h.entity_type !== 'stage' || !['create', 'update', 'delete'].includes(h.operation))
     fail('unsupported_local_source');
+  // Native receiver validation: a tombstone carries no value and equals its header time.
+  if (h.operation === 'delete' && (e.stage !== null || e.deleted_at !== h.updated_at))
+    fail();
   if (h.device_id === scope.deviceId)
     fail('self_echo_unavailable');
-  if (h.account_id !== scope.canonicalUserId || h.project_id !== w.project_id || h.entity_id !== w.entity_id || h.device_id !== w.device_id || h.event_id !== row.event_id || h.revision !== w.revision || h.updated_at !== canonicalizeSyncTimestamp(w.updated_at) || e.deleted_at !== w.deleted_at || w.operation !== 'upsert')
+  if (h.account_id !== scope.canonicalUserId || h.project_id !== w.project_id || h.entity_id !== w.entity_id || h.device_id !== w.device_id || h.event_id !== row.event_id || h.revision !== w.revision || h.updated_at !== canonicalizeSyncTimestamp(w.updated_at) || (h.operation === 'delete' ? e.deleted_at !== canonicalizeSyncTimestamp(w.deleted_at) : e.deleted_at !== w.deleted_at) || w.operation !== (h.operation === 'delete' ? 'delete' : 'upsert'))
     fail();
   return validateStageProof({ record_version: 1, owner_kind: 'stage', account_id: scope.accountId, project_id: h.project_id, stage_id: h.entity_id, bootstrap_id: h.bootstrap_id, event_id: h.event_id, source_device_id: h.device_id, server_sequence: row.server_sequence, operation: h.operation, revision: h.revision, generation: h.generation, parent_event_ids: h.parent_event_ids, metadata_event_id: h.metadata_event_id, codec_version: e.version, protocol_version: 3, wire_digest: await structuralWireDigest(row), reference: w }, scope);
 }
@@ -199,6 +202,8 @@ export class BrowserStageRuntime {
         replay = true;
       }
       else {
+        if (old && old.history.find(p => p.event_id === old.tip_event_ids[0])?.operation === 'delete')
+          fail('stage_tombstone_child_manifest_incomplete');
         if (old ? !same(proof.parent_event_ids, old.tip_event_ids) || proof.revision !== old.history.length + 1 || proof.generation !== old.history.length + 1 : proof.operation !== 'create')
           fail('metadata_conflict');
         head = validateStageHead({ record_version: 1, owner_kind: 'stage', owner_id: stageOwnerId(proof.project_id, proof.stage_id), account_id: scope.accountId, device_id: scope.deviceId, project_id: proof.project_id, stage_id: proof.stage_id, bootstrap_id: proof.bootstrap_id, tip_event_ids: [proof.event_id], history: [...(old?.history ?? []), proof].sort((a, b) => a.event_id.localeCompare(b.event_id)) }, scope);

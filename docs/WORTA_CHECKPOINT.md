@@ -16743,3 +16743,30 @@ Starting/Final SHA `7d3cc3b08f4e47221c1361d9fa7c272dd0fc0658`.
 Verified existing real E2E suites: progress (2 passed), map/document (4 passed). No additional code changes in this pass; next concrete remaining group is Stage deletion/structure update per roadmap.
 
 Final SHA: 7d3cc3b08f4e47221c1361d9fa7c272dd0fc0658
+
+## Web Stage deletion apply — Beam
+
+Starting SHA `3c8e106d312de43a34f752732a24cac420d31a23`.
+Implemented browser Stage deletion apply through the existing browser Stage owner (`BrowserStageApply`/`stageApply`/`stageRecords`), mirroring the Native receiver contract:
+
+- `stageRecords.ts`: `BrowserStageProof.operation` now accepts `'delete'`; `validateStageProof` accepts a tombstone descriptor (`operation:'delete'`, single parent, revision≥2/generation=revision, `deleted_at` canonical timestamp) and keeps create/update on `'upsert'` with `deleted_at:null`.
+- `stageApply.ts`: `proofFor` accepts `operation:'delete'` with shape checks (`e.stage===null`, `e.deleted_at===h.updated_at`, wire op `'delete'`, canonical timestamp comparison); tombstone-successor guard rejects a fresh event over a tombstone tip with `stage_tombstone_child_manifest_incomplete` (added to the fail union and to `BrowserPersistenceCode`).
+- `stageApply.spec.ts`: removed the outdated "delete rejected" param case; added positive tombstone tests (codec v1/v2, exact deleted_at identity rejection, successor-over-tombstone rejection) — 158 stage specs pass.
+- `stageOrderApply.spec.ts`: forged tombstone head rewritten as a consistent two-event forge (create + delete with valid parent/revision/reference, uuid > prior event id).
+- `stagePrefix.spec.ts`: barrier kind `'delete'` → `'tombstone'` using an orphan-parent well-formed delete (fixture cannot build malformed payloads).
+- `scripts/browser-stage-apply-acceptance.mjs`: safe scenario extended with a tombstone at seq 7; asserts `st.apply(scope,7)`→`'applied'`, `st.read`→`null`, replay `already_applied` with byte-equal snapshot, `winner=null`, final `pull_cursor` 6→7, ACK target stays 4.
+
+Verified:
+- Vitest stage specs: 158 passed (stageApply/stageOrderApply/stagePrefix/stageOrderPrefix).
+- Regressions: contentConflict/contentNoteApply/contentNoteBoundary/contentStage/documentPrepare/gamePrepare/historicalPrefixQualification/mapPrepare/privateMetadataAuthentication — 404 passed; progressPrepare/replayOrderedContent/replayStructural/v10MixedRecovery/v10Recovery/v10OrdinaryBoundary/indexedDbV9Migration/historicalMetadataDependency/ackPrerequisites — 292 passed / 2 skipped.
+- Real Chromium IndexedDB acceptance (`browser-stage-apply-only.mjs` against Vite dev server): PASSED — tombstone persisted, projection null, replay idempotent, reopen/redelivery/rollback verified; tombstone survives renderer reload and disk profile reopen; deleted tip rehydrates as null.
+
+Known limitations (unchanged by this slice):
+- A tombstoned Stage still blocks StageOrder (`stage_tombstone_child_manifest_incomplete`), matching Native blocked authority.
+- `readReplayStages` throws `unsupported_history` when stage order lists a tombstoned stage (matches Native).
+- Native cannot originate Stage delete via production command (`guard_delete` blocks connected projects); browser tombstone corresponds to Native inbound tombstone semantics.
+
+Readiness remains 2/10 closed Web reading groups; this slice closes group 5 (Stage deletion apply); 6 remaining Web reading groups.
+Security gates unchanged; no E2EE/proof/CAS weakening.
+
+Final SHA: see commit below.
