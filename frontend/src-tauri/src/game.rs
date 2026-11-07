@@ -3011,7 +3011,8 @@ impl GameApplicationService {
                     }
                     let new_count = checked_inventory_total(current, count, item.maximum)?;
                     let item_price = if item.apply_inflation {
-                        let multiplier = 1.0 + (integer_field(gamer, "level", 1).max(1) - 1) as f64 * 0.15;
+                        let multiplier =
+                            1.0 + (integer_field(gamer, "level", 1).max(1) - 1) as f64 * 0.15;
                         rounded_money(item.price * multiplier)
                     } else {
                         item.price
@@ -4143,7 +4144,8 @@ impl GameApplicationService {
         let points = checked_count(request.points)?;
         Self::mutate(move |state, _rng, _now| {
             let gamer = gamer_object(state)?;
-            if !["productivity", "profitability", "endurance"].contains(&request.skill_id.as_str()) {
+            if !["productivity", "profitability", "endurance"].contains(&request.skill_id.as_str())
+            {
                 return Err(GameError::NotFound("Неизвестное умение.".into()));
             }
             if integer_field(gamer, "available_skill_points", 0) < points {
