@@ -587,6 +587,7 @@ struct CatalogItem {
     buyable: bool,
     sellable: bool,
     credit_allowed: bool,
+    apply_inflation: bool,
 }
 
 // Catalog keys are save-format data. Display metadata may evolve, while this
@@ -602,6 +603,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -613,6 +615,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -624,6 +627,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -635,6 +639,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -646,6 +651,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -657,6 +663,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -668,6 +675,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -679,6 +687,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -690,6 +699,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -701,6 +711,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -712,6 +723,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -723,6 +735,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -734,6 +747,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -745,6 +759,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -756,6 +771,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -767,6 +783,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -778,6 +795,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -789,6 +807,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -800,6 +819,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -811,6 +831,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Зелья",
@@ -822,6 +843,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -833,6 +855,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -844,6 +867,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -855,6 +879,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -866,6 +891,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -877,6 +903,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -888,6 +915,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -899,6 +927,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -910,6 +939,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: false,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -921,6 +951,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -932,6 +963,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -943,6 +975,7 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Предметы",
@@ -954,39 +987,43 @@ const CATALOG: &[CatalogItem] = &[
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: false,
     },
     CatalogItem {
         category: "Парфюм",
         key: "First Cherry",
         price: 50000.0,
         level: 1,
-        maximum: None,
-        usable: true,
+        maximum: Some(1),
+        usable: false,
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: true,
     },
     CatalogItem {
         category: "Парфюм",
         key: "My Dance",
         price: 75000.0,
         level: 1,
-        maximum: None,
-        usable: true,
+        maximum: Some(1),
+        usable: false,
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: true,
     },
     CatalogItem {
         category: "Парфюм",
         key: "Marocco&Bejuin",
         price: 125000.0,
         level: 1,
-        maximum: None,
-        usable: true,
+        maximum: Some(1),
+        usable: false,
         buyable: true,
         sellable: true,
         credit_allowed: true,
+        apply_inflation: true,
     },
 ];
 
@@ -1722,6 +1759,36 @@ fn inventory_buff_definitions(category: &str, item_key: &str) -> Vec<InventoryBu
         }
     }
 
+    if category == "Парфюм" {
+        if item_identifier_matches(item_key, "First Cherry") {
+            return vec![inventory_buff_definition(
+                "🍒 Почерк вишни",
+                "Постоянный бонус к коэффициенту опыта.",
+                "exp",
+                1.0,
+                false,
+            )];
+        }
+        if item_identifier_matches(item_key, "My Dance") {
+            return vec![inventory_buff_definition(
+                "💃 Ритм танца",
+                "Постоянный бонус к коэффициенту восстановления здоровья.",
+                "health_recovery",
+                1.0,
+                false,
+            )];
+        }
+        if item_identifier_matches(item_key, "Marocco&Bejuin") {
+            return vec![inventory_buff_definition(
+                "🍂 Восточный шлейф",
+                "Постоянный бонус к коэффициенту монет.",
+                "coins",
+                1.0,
+                false,
+            )];
+        }
+    }
+
     if category == "Награды" {
         if item_identifier_matches(item_key, "👑  Корона Первой Эпохи") {
             return vec![inventory_buff_definition(
@@ -1878,16 +1945,22 @@ fn catalog_item(category: &str, key: &str) -> Option<CatalogItem> {
 fn catalog_item_json(gamer: &Map<String, Value>, item: CatalogItem, include_count: bool) -> Value {
     let count = item_count(gamer, item.category, item.key);
     let (name, description, effect) = catalog_metadata(item.key);
+    let price = if item.apply_inflation {
+        let multiplier = 1.0 + (integer_field(gamer, "level", 1).max(1) - 1) as f64 * 0.15;
+        rounded_money(item.price * multiplier)
+    } else {
+        item.price
+    };
     let mut result = json!({
         "id": format!("{}:{}", item.category, item.key), "key": item.key,
         "category": item.category, "name": name,
         "description": description, "effect": effect,
-        "price": item.price, "sell_price": rounded_money(item.price * 0.75),
+        "price": price, "sell_price": rounded_money(price * 0.75),
         "level": item.level, "sellable": item.sellable, "usable": item.usable,
         "buy": item.buyable, "credit_allowed": item.credit_allowed,
         "maximum_quantity": item.maximum, "available_for_level": integer_field(gamer, "level", 1) >= item.level,
         "can_buy": item.buyable && integer_field(gamer, "level", 1) >= item.level
-            && number_field(gamer, "coins", 0.0) >= item.price
+            && number_field(gamer, "coins", 0.0) >= price
             && count < MAX_ITEM_COUNT
             && item.maximum.map_or(true, |maximum| count < maximum), "known": true,
     });
@@ -1933,9 +2006,9 @@ const ITEM_METADATA: &[(&str, &str, &str, Option<&str>)] = &[
     ("Ноутбук Роалинг", "💻  Ноутбук Роалинг", "Постоянно увеличивает коэффициент опыта на 1.", None),
     ("Литературный раб", "📃  Литературный раб", "Постоянно увеличивает коэффициенты опыта и монет на 0,25 за экземпляр.", None),
     ("Амулет восстановления", "❤️  Амулет восстановления", "Постоянно увеличивает коэффициент восстановления здоровья на 1.", None),
-    ("First Cherry", "First Cherry", "Сочная чёрная вишня, терпкий миндаль и тёплая ваниль сливаются в соблазнительную композицию. Аромат смелых решений, незабываемых приключений и бесценного опыта.", Some("Увеличивает навык «Опыт» на 1")),
-    ("My Dance", "My Dance", "Нежность розы, сладость спелой груши и сливочные оттенки сандала окутывают мягким теплом. Словно объятие после долгого дня, этот аромат возвращает силы и дарит ощущение гармонии.", Some("Увеличивает навык «Восстановление здоровья» на 1")),
-    ("Marocco&Bejuin", "Marocco&Bejuin", "Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностей.", Some("Увеличивает навык «Монеты» на 1")),
+    ("First Cherry", "First Cherry", "Сочная чёрная вишня, терпкий миндаль и тёплая ваниль сливаются в соблазнительную композицию. Аромат смелых решений, незабываемых приключений и бесценного опыта.", Some("Постоянно увеличивает коэффициент опыта на 1.")),
+    ("My Dance", "My Dance", "Нежность розы, сладость спелой груши и сливочные оттенки сандала окутывают мягким теплом. Словно объятие после долгого дня, этот аромат возвращает силы и дарит ощущение гармонии.", Some("Постоянно увеличивает коэффициент восстановления здоровья на 1.")),
+    ("Marocco&Bejuin", "Marocco&Bejuin", "Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностей.", Some("Постоянно увеличивает коэффициент монет на 1.")),
 ];
 
 const REWARD_METADATA: &[(&str, &str, &str)] = &[
@@ -2937,7 +3010,13 @@ impl GameApplicationService {
                         )));
                     }
                     let new_count = checked_inventory_total(current, count, item.maximum)?;
-                    let total = rounded_money(item.price * count as f64);
+                    let item_price = if item.apply_inflation {
+                        let multiplier = 1.0 + (integer_field(gamer, "level", 1).max(1) - 1) as f64 * 0.15;
+                        rounded_money(item.price * multiplier)
+                    } else {
+                        item.price
+                    };
+                    let total = rounded_money(item_price * count as f64);
                     let coins = number_field(gamer, "coins", 0.0);
                     if coins < total {
                         return Err(GameError::InsufficientFunds("Недостаточно монет!".into()));
@@ -3102,21 +3181,6 @@ impl GameApplicationService {
                         .expect("array")
                         .push(draw.clone());
                     array_mut(gamer, "lottery_history").push(draw);
-                }
-                "First Cherry" => {
-                    let skills = object_map(gamer, "skills");
-                    let old = skills.get("productivity").and_then(Value::as_i64).unwrap_or(0);
-                    skills.insert("productivity".into(), json!(old + 1));
-                }
-                "My Dance" => {
-                    let skills = object_map(gamer, "skills");
-                    let old = skills.get("endurance").and_then(Value::as_i64).unwrap_or(0);
-                    skills.insert("endurance".into(), json!(old + 1));
-                }
-                "Marocco&Bejuin" => {
-                    let skills = object_map(gamer, "skills");
-                    let old = skills.get("profitability").and_then(Value::as_i64).unwrap_or(0);
-                    skills.insert("profitability".into(), json!(old + 1));
                 }
                 _ => {}
             }
