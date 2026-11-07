@@ -418,3 +418,9 @@ Starting HEAD `625933f2`. Cloud project catalog now shows authenticated project
 names and cover references where available, with per-project safe failure and no
 cover blob fetch. Tests: account card 2, project read 8, cloudRead 18; build pass.
 Security gates unchanged.
+
+## 2026-11-07 — Web cloud project opening from catalog
+
+Starting HEAD `7f9239aa`. Cloud catalog selection now opens the existing
+recovery reader for the selected project ID. Card 2, project read 8, build pass.
+Security gates unchanged.

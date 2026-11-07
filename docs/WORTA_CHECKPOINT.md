@@ -16833,3 +16833,24 @@ Security gates unchanged; E2EE/proofs/CAS not weakened. Readiness remains 2/10;
 Web reading remains 4/9 groups closed.
 
 Final SHA: see commit below.
+
+## Web cloud project opening from catalog — Beam
+
+Starting SHA `7f9239aaf6e197faee3777e190f361056231fcbd`.
+Implemented project opening from the Web cloud catalog: selecting an unlocked
+cloud project now mounts `BrowserCloudProjectRead` with `autoOpenRecovery`, which
+calls the existing `readRecoveryProject` path instead of leaving only the
+metadata preview. The selected `project_id` is passed explicitly; no new sync
+engine, media handling or security-gate bypass was added. Recovery remains subject
+to the existing supported-history gates.
+
+Verified:
+- `BrowserCloudAccountCard.spec.ts`: 2 passed.
+- `BrowserCloudProjectRead.spec.ts`: 8 passed.
+- `vite build`: passed.
+
+Limitations: full project recovery can still fail with `unsupported_history` for
+unsupported families; metadata-only preview remains separate; editing is not
+supported.
+
+Final SHA: see commit below.

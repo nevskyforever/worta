@@ -4,14 +4,14 @@ import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
-import { onBeforeUnmount, onMounted, ref, computed } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
-const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string }>()
+const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean }>()
 const emit = defineEmits<{ invalidated: [] }>()
 const locale = useLocaleStore(), t = locale.translate
 const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: string; network: string; register: string }> = {
@@ -151,7 +151,8 @@ async function openRecovery(): Promise<void> {
     error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError || cause instanceof BrowserReplayError ? cause.code : 'unsafe_history'
   } finally { if (controller === active) busy.value = false }
 }
-onMounted(() => { void open() })
+onMounted(() => { if (props.autoOpenRecovery) void openRecovery(); else void open() })
+watch(() => props.projectId, () => { if (props.autoOpenRecovery) void openRecovery() })
 onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null })
 </script>
 

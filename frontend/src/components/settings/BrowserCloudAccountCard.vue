@@ -268,7 +268,7 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
             </li>
           </ul>
           <p>{{ words.projectIdsOnly }}</p>
-          <BrowserCloudProjectRead v-if="selectedCloudProject && status === 'unlocked'" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" @invalidated="refresh(); clearCloudCatalog()" />
+          <BrowserCloudProjectRead v-if="selectedCloudProject && status === 'unlocked'" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" :auto-open-recovery="true" @invalidated="refresh(); clearCloudCatalog()" />
         </template>
       </section>
       <form v-if="status !== 'unlocked'" class="browser-cloud-account__inputs" @submit.prevent="unlock">

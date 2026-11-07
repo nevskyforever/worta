@@ -1252,3 +1252,10 @@ project ID catalog with authenticated project metadata (names and cover
 references) when unlocked. Cover blobs are not fetched. `BrowserCloudAccountCard`
 (2), `BrowserCloudProjectRead` (8) and `cloudRead` (18) tests pass; build passes.
 Security gates unchanged.
+
+## 2026-11-07 — Web cloud project opening from catalog
+
+Starting HEAD `7f9239aa`. Selecting an unlocked cloud project now auto-opens the
+existing recovery read path (`readRecoveryProject`) through
+`BrowserCloudProjectRead`, using the selected project ID. Card 2 and project read
+8 tests pass; build passes. Security gates unchanged.
