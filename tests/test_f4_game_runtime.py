@@ -43,7 +43,7 @@ def test_rust_catalog_matches_legacy_buyable_game_catalog():
     rust_keys = sorted(re.findall(r'key: "([^"]+)"', catalog_source))
     legacy_keys = sorted(
         key
-        for category in ('Зелья', 'Предметы')
+        for category in ('Зелья', 'Предметы', 'Парфюм')
         for key, item in game_data.ITEM_REGISTRY[category].items()
         if getattr(item, 'Buy', True)
     )

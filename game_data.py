@@ -1419,6 +1419,30 @@ def session_grade_medal_func(do, add=None):
     return 'Медаль качества подготовлена для следующей успешной сессии.'
 
 
+def perfume_skill_func(do, skill_key=None, add=None):
+    """Повышает указанный навык на 1."""
+    skill_key = skill_key or add
+    skill_names = {
+        'productivity': 'Опыт',
+        'profitability': 'Монеты',
+        'endurance': 'Восстановление здоровья',
+    }
+    skill_name = skill_names.get(skill_key, skill_key)
+    if do == '?':
+        return f'Увеличивает навык «{skill_name}» на 1'
+    if do != 'use':
+        return 'Неизвестное действие'
+
+    gamer = game.load_game()
+    gamer.normalize_skills()
+    if skill_key not in game.SKILL_META:
+        raise ValueError('Неизвестное умение.')
+    gamer.skills[skill_key] = gamer.skills.get(skill_key, 0) + 1
+    gamer.update_cf()
+    gamer.save()
+    return f'Навык «{skill_name}» увеличен на 1.'
+
+
 def lottery_ticket_func(do, add=None):
     """Функция лотерейного билета"""
     if do == '?':
@@ -1664,6 +1688,22 @@ recovery_amulet = Item(
     ),
     maximum_quantity_in_stock=1,
 )
+first_cherry = FuncItem('First Cherry', item_type='Парфюм', level=1,
+                          price=lambda: calculate_item_price(50000),
+                          func=perfume_skill_func, add='productivity',
+                          description='Сочная чёрная вишня, терпкий миндаль и тёплая ваниль сливаются в соблазнительную композицию. Аромат смелых решений, незабываемых приключений и бесценного опыта.',
+                          usable=True, maximum_quantity_in_stock=None)
+my_dance = FuncItem('My Dance', item_type='Парфюм', level=1,
+                    price=lambda: calculate_item_price(75000),
+                    func=perfume_skill_func, add='endurance',
+                    description='Нежность розы, сладость спелой груши и сливочные оттенки сандала окутывают мягким теплом. Словно объятие после долгого дня, этот аромат возвращает силы и дарит ощущение гармонии.',
+                    usable=True, maximum_quantity_in_stock=None)
+marocco_bejuin = FuncItem('Marocco&Bejuin', item_type='Парфюм', level=1,
+                          price=lambda: calculate_item_price(125000),
+                          func=perfume_skill_func, add='profitability',
+                          description='Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностях.',
+                          usable=True, maximum_quantity_in_stock=None)
+
 health_potion_5 = FuncItem('🧪  Микро зелье здоровья', item_type='Зелья', level=1, func=health_potion_func, price=lambda: calculate_item_price(10), add=5,
                            description='🧪  Восстанавливает здоровье на 5 единиц')
 health_potion_10 = FuncItem('🧪  Малое зелье здоровья', item_type='Зелья', level=1, func=health_potion_func, price=lambda: calculate_item_price(20), add=10,
@@ -2048,6 +2088,9 @@ ITEM_REGISTRY = {'Зелья':
                              'Знак глобального квартала': global_quarter_badge,
                              'Знак глобального полугодия': global_half_year_badge,
                              'Знак глобального года': global_year_badge,},}
+ITEM_REGISTRY['Парфюм'] = {'First Cherry': first_cherry,
+                           'My Dance': my_dance,
+                           'Marocco&Bejuin': marocco_bejuin,}
 
 # Ключи наград должны совпадать с их отображаемыми именами.
 ITEM_REGISTRY['Награды'] = {
