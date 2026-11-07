@@ -4079,7 +4079,7 @@ impl GameApplicationService {
         let points = checked_count(request.points)?;
         Self::mutate(move |state, _rng, _now| {
             let gamer = gamer_object(state)?;
-            if !["productivity", "discipline", "creativity"].contains(&request.skill_id.as_str()) {
+            if !["productivity", "profitability", "endurance"].contains(&request.skill_id.as_str()) {
                 return Err(GameError::NotFound("Неизвестное умение.".into()));
             }
             if integer_field(gamer, "available_skill_points", 0) < points {
