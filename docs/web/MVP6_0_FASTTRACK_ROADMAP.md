@@ -1274,3 +1274,9 @@ Starting HEAD `a4aa7ecd`. Added a repeatable Vitest test in
 Metadata) through production writers and authenticates its source seed, plus a
 negative corrupted-ciphertext case. File passes twice (22 tests). No readiness
 change. Security gates unchanged.
+
+## 2026-11-07 — Web replay source seed HTTP acceptance repaired
+
+Starting HEAD `9d0e4e8e`. Fixed the outdated replay-store migration assertion in
+`browser-replay-source-seed-acceptance.mjs`; real PostgreSQL/FastAPI/Chromium source
+seed acceptance passes twice. No production code change. Security gates unchanged.

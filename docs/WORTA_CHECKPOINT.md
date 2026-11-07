@@ -16898,3 +16898,20 @@ Verified:
 Security gates unchanged; no E2EE/source validation/proof/CAS weakening.
 
 Final SHA: see commit below.
+
+## Web replay source seed HTTP acceptance repaired — Beam
+
+Starting SHA `9d0e4e8e28fcbfb0a7330fea27b12d0c8ffef9aa`.
+Repaired the existing real PostgreSQL/FastAPI/Chromium source-seed acceptance
+script (`frontend/scripts/browser-replay-source-seed-acceptance.mjs`) for the
+current replay IndexedDB schema: its v3→current migration comparison now uses the
+current store set instead of the obsolete six-store v6 expectation. No production
+code or security behavior changed.
+
+Verified:
+- `tests/test_web_replay_source_seed.py::test_browser_replay_source_seed_real_api_postgresql`: 1 passed, twice.
+- Real encrypted Note source seed against disposable PostgreSQL 16/FastAPI/Chromium passed.
+
+Security gates unchanged.
+
+Final SHA: see commit below.

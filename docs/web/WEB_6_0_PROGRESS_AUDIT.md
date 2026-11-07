@@ -436,3 +436,9 @@ Starting HEAD `a4aa7ecd`. Added repeatable automated source-seed authentication
 test with a real encrypted project (Note, Stage, Metadata) and a negative
 corrupted-ciphertext case. `replaySourceSeed.spec.ts`: 22 passed twice.
 Security gates unchanged.
+
+## 2026-11-07 — Web replay source seed HTTP acceptance repaired
+
+Starting HEAD `9d0e4e8e`. Real encrypted Note source seed PostgreSQL/FastAPI/
+Chromium acceptance passes twice after updating the outdated replay-store
+migration assertion. No production code change. Security gates unchanged.

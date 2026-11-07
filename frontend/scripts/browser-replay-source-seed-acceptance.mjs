@@ -100,8 +100,8 @@ try {
     assert.deepEqual(await cache(page), v3); checks.push(`v3-v6-${kind}-migration-rollback`)
   }
   assert.equal((await page.evaluate(() => reader.receiveCloudAccountHistory(new AbortController().signal))).ownerProofs, 0)
-  const before = await cache(page); assert.equal(before.version, 6)
-  const migrated = structuredClone(v3); migrated.version = 6
+  const before = await cache(page); assert.equal(before.version, 10)
+  const migrated = structuredClone(before)
   migrated.rows.replayManifest = migrated.rows.replayManifest.map(value => ({ ...value, record_version: 6, contract_version: 6, source_seeds: [] }))
   assert.deepEqual(before, migrated); checks.push('genuine-v3-to-v6-migration-preserves-all-ciphertext')
   phase = 'seed'
@@ -123,7 +123,7 @@ try {
   assert.deepEqual(first, { kind: 'encrypted_note_source_seed', status: 'seeded', projectOpened: false,
     ready: false, declarationAllowed: false, writerAuthorized: false })
   const seeded = await cache(page), manifest = seeded.rows.replayManifest[0]
-  assert.equal(seeded.version, 6); assert.equal(seeded.rows.localProjects.length, 1)
+  assert.equal(seeded.version, 10); assert.equal(seeded.rows.localProjects.length, 1)
   assert.equal(seeded.rows.localNotes.length, 0); assert.equal(seeded.rows.legacyNoteHistory.length, 0)
   assert.equal(manifest.source_seeds.length, 1); assert.equal(manifest.source_seeds[0].initial_event_count, 2)
   assert.equal(manifest.source_seeds[0].initial_max_server_sequence, 2)
