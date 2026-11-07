@@ -16736,3 +16736,10 @@ Verified:
 - tests/test_web_game_http.py: 4 passed (growth/freeze, both transport orders), including real PostgreSQL/FastAPI/Chromium, restart, redelivery, rollback, and Native/Web projection parity.
 
 Final SHA: adc89af7a7969553f56a9b5027ff8a8854a3db35
+
+## Web reading continuation — Beam
+
+Starting/Final SHA `7d3cc3b08f4e47221c1361d9fa7c272dd0fc0658`.
+Verified existing real E2E suites: progress (2 passed), map/document (4 passed). No additional code changes in this pass; next concrete remaining group is Stage deletion/structure update per roadmap.
+
+Final SHA: 7d3cc3b08f4e47221c1361d9fa7c272dd0fc0658
