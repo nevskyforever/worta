@@ -40,13 +40,20 @@ describe('read-only server Metadata preview', () => {
     expect(await read()).toMatchObject({ kind: 'metadata_only', projectId: 'project', metadata: base.metadata, cursor: 1, ready: false, writerAuthorized: false })
     expect(fetch).not.toHaveBeenCalled()
   })
+  it('reads authenticated project metadata including a non-null cover reference', async () => {
+    rows = [await item(vectors[2]!.event as ProjectMetadataEvent, 1)]
+    high = 1
+    const result = await read()
+    expect(result.metadata.name).toBe('Cover vector')
+    expect(result.metadata.cover_reference).toMatchObject({ blob_id: '123e4567-e89b-42d3-a456-426614174004', mime_type: 'image/jpeg' })
+  })
   it('validates a two-page account sequence and preserves the exact update', async () => {
     const update = structuredClone(base); update.header = { ...update.header, event_id: crypto.randomUUID(), operation: 'update', parent_event_ids: [base.header.event_id], revision: 2, generation: 2 }; update.metadata!.name = 'Updated'
     rows.push(await item(update, 2)); high = 2
     vi.mocked(encryptedSyncV3Api.pull).mockImplementation(async (_token, _device, since) => ({ protocol_version: 3, encrypted_sync_version: 3, items: structuredClone([rows[since]!]), next_cursor: since + 1, has_more: since === 0 }))
     expect((await read()).metadata.name).toBe('Updated')
   })
-  it.each(['gap', 'duplicate', 'ciphertext', 'foreign_account', 'missing_parent', 'conflict', 'unsupported', 'cover', 'registry_drift', 'locked', 'mode'] as const)('rejects %s without returning a partial project', async kind => {
+  it.each(['gap', 'duplicate', 'ciphertext', 'foreign_account', 'missing_parent', 'conflict', 'unsupported', 'registry_drift', 'locked', 'mode'] as const)('rejects %s without returning a partial project', async kind => {
     if (kind === 'gap') rows[0]!.event.server_sequence = 2
     if (kind === 'duplicate') { rows.push(structuredClone(rows[0]!)); rows[1]!.event.server_sequence = 2; high = 2 }
     if (kind === 'ciphertext') rows[0]!.object.ciphertext[0]! ^= 1
@@ -54,7 +61,6 @@ describe('read-only server Metadata preview', () => {
     if (kind === 'missing_parent') { const event = structuredClone(base); event.header = { ...event.header, revision: 2, generation: 2, operation: 'update', parent_event_ids: [crypto.randomUUID()] }; rows = [await item(event, 1)] }
     if (kind === 'conflict') { const event = structuredClone(base); event.header.event_id = crypto.randomUUID(); rows.push(await item(event, 2)); high = 2 }
     if (kind === 'unsupported') rows[0]!.event.entity_type = 'stage'
-    if (kind === 'cover') rows = [await item(vectors[2]!.event as ProjectMetadataEvent, 1)]
     if (kind === 'registry_drift') vi.mocked(cloudProjectsApi.listBootstraps).mockImplementation(async () => ({ current_cursor: high++, projects: [{ project_id: 'project', bootstrap_id: base.header.bootstrap_id, origin_device_id: base.header.device_id, state: 'active', initial_event_count: 0, initial_max_server_sequence: 0 }] }))
     if (kind === 'locked') vi.mocked(encryptedSyncV3Api.pull).mockImplementation(async () => { active = false; return { protocol_version: 3, encrypted_sync_version: 3, items: rows, next_cursor: 1, has_more: false } })
     if (kind === 'mode') vi.mocked(encryptedSyncV2Api.capabilities).mockResolvedValue({ supported_transport_version: 2, writer_transport_version: 2, cutover_epoch: 1 })

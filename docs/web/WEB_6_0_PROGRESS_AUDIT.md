@@ -405,3 +405,9 @@ Starting HEAD `a1b2ebbe`. No production code change required; existing browser S
 owner already supports Stage structure update (`BrowserStageOrderApply`). Real Chromium
 IndexedDB acceptance passed; tombstone semantics and `guard_delete` unchanged.
 Product reading groups: 4 of 9 closed, 5 remain. Note reader readiness remains 2/10.
+
+## 2026-11-07 — Web project catalog and cover metadata read
+
+Starting HEAD `297904b4`. Read-only project metadata now supports a non-null
+cover reference in `readBrowserCloudProject`; encrypted cover blob material
+remains separate. `cloudRead.spec.ts`: 18 passed. Security gates unchanged.

@@ -93,7 +93,8 @@ export async function readBrowserCloudProject(input: {
               || h.updated_at !== canonicalizeSyncTimestamp(e.updated_at)
               || event.deleted_at !== (e.deleted_at === null ? null : canonicalizeSyncTimestamp(e.deleted_at))
               || e.operation !== (h.operation === 'delete' ? 'delete' : 'upsert')) fail('descriptor_mismatch')
-            if (event.metadata?.cover_reference != null) fail('cover_material_unavailable')
+            // Cover metadata (reference) is part of authenticated project metadata and is readable here.
+            // Encrypted cover blob material/authentication remains a separate concern.
             const history = histories.get(e.project_id) ?? []
             history.push(event); histories.set(e.project_id, history)
             ids.add(e.event_id); cursor = e.server_sequence

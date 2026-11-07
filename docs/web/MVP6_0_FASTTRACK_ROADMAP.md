@@ -1237,3 +1237,10 @@ Real Chromium IndexedDB acceptance passed (Metadata1/Stages2-3/ID1 Order4[B,A]/N
 prefix5 ACK5; normal Stage update6 preserves Order4; clean v2 order8; reopen/redelivery).
 `guard_delete` remains intact. Product reading groups: 4 of 9 closed, 5 remain.
 Note reader readiness remains 2/10. Security gates unchanged.
+
+## 2026-11-07 — Web project catalog and cover metadata read
+
+Starting HEAD `297904b4`. `readBrowserCloudProject` now accepts authenticated
+Project Metadata v2 with a non-null cover reference instead of rejecting it as
+`cover_material_unavailable`. Cover blob material/authentication remains separate.
+`cloudRead.spec.ts`: 18 passed. Security gates unchanged.

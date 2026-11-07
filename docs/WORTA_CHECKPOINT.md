@@ -16791,3 +16791,22 @@ This closes the next Web reading group (Stage structure update). Product reading
 Security gates unchanged; no E2EE/proof/CAS weakening.
 
 Final SHA: see commit below.
+
+## Web project catalog and cover metadata read — Beam
+
+Starting SHA `297904b4b2ffbb4a27612a970ee6c96e47909d64`.
+Implemented read-only support for project metadata that carries a non-null
+cover reference in `readBrowserCloudProject` (`frontend/src/platform/web/cloudRead.ts`):
+the authenticated Metadata v2 `cover_reference` is no longer rejected as
+`cover_material_unavailable`, so project catalog metadata can be read with its
+cover reference. Encrypted cover blob material/authentication remains a separate
+concern and is not fetched or displayed by this read path.
+
+Verified:
+- `cloudRead.spec.ts`: 18 passed, including a new case reading authenticated
+  project metadata with a non-null cover reference.
+- TypeScript check for `cloudRead.ts`: no new errors.
+
+Security gates unchanged; no E2EE/proof/CAS weakening; no media upload/fetch added.
+
+Final SHA: see commit below.
