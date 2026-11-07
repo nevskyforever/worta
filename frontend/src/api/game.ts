@@ -73,8 +73,10 @@ export const gameApi = {
 
   updateDeveloperProfile(payload: DeveloperProfileUpdate): Promise<GameCommandResponse> {
     if (isDesktopGame()) return nativeCommand('game_update_developer_profile', {
-      level: payload.level, health: payload.health, coins: payload.coins, exp: payload.exp,
-      testDateEnabled: payload.test_date_enabled, testDatetime: payload.test_datetime,
+      payload: {
+        level: payload.level, health: payload.health, coins: payload.coins, exp: payload.exp,
+        testDateEnabled: payload.test_date_enabled, testDatetime: payload.test_datetime,
+      },
     })
     return command('/developer/profile', payload, 'PUT')
   },
@@ -85,7 +87,7 @@ export const gameApi = {
     count: number,
   ): Promise<GameCommandResponse> {
     if (isDesktopGame()) return nativeCommand('game_grant_developer_inventory_item', {
-      category, itemId, count,
+      payload: { category, itemId, count },
     })
     return command('/developer/inventory', {
       category,
@@ -254,16 +256,18 @@ export const gameApi = {
 
   previewBankProduct(payload: BankProductRequest): Promise<GameCommandResponse> {
     if (isDesktopGame()) return nativeCommand('game_preview_bank_product', {
-      productType: payload.product_type,
-      amount: payload.amount,
-      days: payload.days,
-      allowInterestWithdrawal: payload.allow_interest_withdrawal,
+      payload: {
+        productType: payload.product_type,
+        amount: payload.amount,
+        days: payload.days,
+        allowInterestWithdrawal: payload.allow_interest_withdrawal,
+      },
     })
     return command('/bank/preview', payload)
   },
 
   openBankCredit(amount: number, days: number): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_open_bank_credit', { amount, days })
+    if (isDesktopGame()) return nativeCommand('game_open_bank_credit', { payload: { amount, days } })
     return command('/bank/credit', { amount, days })
   },
 
@@ -273,7 +277,7 @@ export const gameApi = {
     allowInterestWithdrawal: boolean,
   ): Promise<GameCommandResponse> {
     if (isDesktopGame()) return nativeCommand('game_open_bank_deposit', {
-      amount, days, allowInterestWithdrawal,
+      payload: { amount, days, allowInterestWithdrawal },
     })
     return command('/bank/deposit', {
       amount,
@@ -283,7 +287,7 @@ export const gameApi = {
   },
 
   processBankEvents(autoPay = true): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeGame<GameCommandResponse>('game_process_bank_events', { autoPay })
+    if (isDesktopGame()) return nativeGame<GameCommandResponse>('game_process_bank_events', { payload: { autoPay } })
     return command('/bank/process', { auto_pay: autoPay })
   },
 
@@ -293,7 +297,7 @@ export const gameApi = {
   },
 
   partiallyRepayBankCredit(amount: number): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_partially_repay_bank_credit', { amount })
+    if (isDesktopGame()) return nativeCommand('game_partially_repay_bank_credit', { payload: { amount } })
     return command('/bank/credit/partial-repayment', { amount })
   },
 
@@ -303,12 +307,12 @@ export const gameApi = {
   },
 
   topUpBankDeposit(amount: number): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_top_up_bank_deposit', { amount })
+    if (isDesktopGame()) return nativeCommand('game_top_up_bank_deposit', { payload: { amount } })
     return command('/bank/deposit/top-up', { amount })
   },
 
   withdrawBankDeposit(allowEarly = false): Promise<GameCommandResponse> {
-    if (isDesktopGame()) return nativeCommand('game_withdraw_bank_deposit', { allowEarly })
+    if (isDesktopGame()) return nativeCommand('game_withdraw_bank_deposit', { payload: { allowEarly } })
     return command('/bank/deposit/withdraw', { allow_early: allowEarly })
   },
 
