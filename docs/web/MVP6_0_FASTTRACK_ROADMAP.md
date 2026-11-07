@@ -1226,3 +1226,14 @@ current [checkpoint](../WORTA_CHECKPOINT.md).
 ## Native global streak growth
 
 Starting SHA `7ba13869`. OpenCode completed verification; Rust tests pass; parity test passes.
+
+## 2026-11-07 — Web Stage structure update (reorder) verification
+
+Starting/Final HEAD transition `a1b2ebbe` → current. No production code change required:
+Stage structure update (reorder) is already implemented by the existing browser
+Stage owner (`BrowserStageOrderApply`), including Native `reorder_stages` inbound events,
+dependency/tombstone checks, owner proof, CAS, IndexedDB persistence and replay.
+Real Chromium IndexedDB acceptance passed (Metadata1/Stages2-3/ID1 Order4[B,A]/Note5
+prefix5 ACK5; normal Stage update6 preserves Order4; clean v2 order8; reopen/redelivery).
+`guard_delete` remains intact. Product reading groups: 4 of 9 closed, 5 remain.
+Note reader readiness remains 2/10. Security gates unchanged.

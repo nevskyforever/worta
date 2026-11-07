@@ -16770,3 +16770,24 @@ Readiness remains 2/10 closed Web reading groups; this slice closes group 5 (Sta
 Security gates unchanged; no E2EE/proof/CAS weakening.
 
 Final SHA: see commit below.
+
+## Web Stage structure update (reorder) verification — Beam
+
+Starting SHA `a1b2ebbe793abefb62a8ba1fd8c7ab5806227bcb`.
+No production code change was required: Stage structure update is already
+implemented by the existing browser Stage owner through `BrowserStageOrderApply`
+(`stageOrderApply.ts` / `stageOrderRecords.ts`), including Native `reorder_stages`
+/ `normal_order` inbound events, dependency/tombstone checks, owner proof, CAS,
+IndexedDB persistence and replay.
+
+Verified:
+- Vitest stage specs: 158 passed (stageApply/stageOrderApply/stagePrefix/stageOrderPrefix).
+- Regressions previously run: contentConflict/contentNoteApply/contentNoteBoundary/contentStage/documentPrepare/gamePrepare/historicalPrefixQualification/mapPrepare/privateMetadataAuthentication — 404 passed; progressPrepare/replayOrderedContent/replayStructural/v10MixedRecovery/v10Recovery/v10OrdinaryBoundary/indexedDbV9Migration/historicalMetadataDependency/ackPrerequisites — 292 passed / 2 skipped.
+- Real Chromium IndexedDB acceptance (`browser-stage-order-only.mjs` against Vite dev server): PASSED — real Metadata1/Stages2-3/ID1 Order4[B,A]/Note5 prefix5 ACK5; normal Stage update6 preserves proven Order4 ancestor coverage/prefix7; clean v2 order8 references older accepted Stage head, prefix9/ACK9; atomic abort/key revocation/logout/account isolation; renderer and full disk reopen retain order/Stage histories and proven61/ACK61.
+- Tombstone semantics unchanged: a tombstoned Stage still blocks StageOrder (`stage_tombstone_child_manifest_incomplete`); an order that omits a deleted Stage remains applicable.
+- `guard_delete` is not bypassed; Native delete writer remains blocked after structural sync.
+
+This closes the next Web reading group (Stage structure update). Product reading groups: 4 of 9 closed, 5 remain. Note reader readiness remains 2/10; no readiness overclaim.
+Security gates unchanged; no E2EE/proof/CAS weakening.
+
+Final SHA: see commit below.

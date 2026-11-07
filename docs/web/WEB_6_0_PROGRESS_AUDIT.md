@@ -398,3 +398,10 @@ UI не принят. Обратный допустимый порядок R-bef
 ## Native global streak growth
 
 Starting SHA `7ba13869`. OpenCode completed verification; Rust tests pass; parity test passes.
+
+## 2026-11-07 — Web Stage structure update (reorder) verification
+
+Starting HEAD `a1b2ebbe`. No production code change required; existing browser Stage
+owner already supports Stage structure update (`BrowserStageOrderApply`). Real Chromium
+IndexedDB acceptance passed; tombstone semantics and `guard_delete` unchanged.
+Product reading groups: 4 of 9 closed, 5 remain. Note reader readiness remains 2/10.
