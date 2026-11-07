@@ -16915,3 +16915,19 @@ Verified:
 Security gates unchanged.
 
 Final SHA: see commit below.
+
+## Temporary CI disable for branch 6.0 — Beam
+
+Starting SHA `f8ecc210bd52d12a7f77982d8206c88d351a0809`.
+Automatic `push` triggers for `6.0` were removed from:
+- `.github/workflows/cloud-backend-tests.yml`
+- `.github/workflows/sqlite-sync-tests.yml`
+
+`build.yml` already triggers only on `main`; `f11-windows-qualification.yml` and
+`release-qualification.yml` are `workflow_dispatch` only. Manual `workflow_dispatch`
+remains available where it already existed. `main` and other branch behavior is
+preserved; `6.0` is excluded only. This is a temporary development-only change;
+CI must be re-enabled before release preparation. No production code or security
+gates were changed.
+
+Final SHA: see commit below.
