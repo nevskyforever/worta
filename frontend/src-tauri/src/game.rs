@@ -955,6 +955,39 @@ const CATALOG: &[CatalogItem] = &[
         sellable: true,
         credit_allowed: true,
     },
+    CatalogItem {
+        category: "Парфюм",
+        key: "First Cherry",
+        price: 50000.0,
+        level: 1,
+        maximum: None,
+        usable: true,
+        buyable: true,
+        sellable: true,
+        credit_allowed: true,
+    },
+    CatalogItem {
+        category: "Парфюм",
+        key: "My Dance",
+        price: 75000.0,
+        level: 1,
+        maximum: None,
+        usable: true,
+        buyable: true,
+        sellable: true,
+        credit_allowed: true,
+    },
+    CatalogItem {
+        category: "Парфюм",
+        key: "Marocco&Bejuin",
+        price: 125000.0,
+        level: 1,
+        maximum: None,
+        usable: true,
+        buyable: true,
+        sellable: true,
+        credit_allowed: true,
+    },
 ];
 
 fn game_object(value: &mut Value) -> GameResult<&mut Map<String, Value>> {
@@ -1900,6 +1933,9 @@ const ITEM_METADATA: &[(&str, &str, &str, Option<&str>)] = &[
     ("Ноутбук Роалинг", "💻  Ноутбук Роалинг", "Постоянно увеличивает коэффициент опыта на 1.", None),
     ("Литературный раб", "📃  Литературный раб", "Постоянно увеличивает коэффициенты опыта и монет на 0,25 за экземпляр.", None),
     ("Амулет восстановления", "❤️  Амулет восстановления", "Постоянно увеличивает коэффициент восстановления здоровья на 1.", None),
+    ("First Cherry", "First Cherry", "Сочная чёрная вишня, терпкий миндаль и тёплая ваниль сливаются в соблазнительную композицию. Аромат смелых решений, незабываемых приключений и бесценного опыта.", Some("Увеличивает навык «Опыт» на 1")),
+    ("My Dance", "My Dance", "Нежность розы, сладость спелой груши и сливочные оттенки сандала окутывают мягким теплом. Словно объятие после долгого дня, этот аромат возвращает силы и дарит ощущение гармонии.", Some("Увеличивает навык «Восстановление здоровья» на 1")),
+    ("Marocco&Bejuin", "Marocco&Bejuin", "Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностей.", Some("Увеличивает навык «Монеты» на 1")),
 ];
 
 const REWARD_METADATA: &[(&str, &str, &str)] = &[
@@ -1988,7 +2024,7 @@ fn notifications_state(root: &Map<String, Value>) -> Value {
 
 fn catalog_state(gamer: &Map<String, Value>, include_count: bool) -> Value {
     let mut categories: Vec<Value> = Vec::new();
-    for category in ["Зелья", "Предметы"] {
+    for category in ["Зелья", "Предметы", "Парфюм"] {
         let items: Vec<Value> = CATALOG
             .iter()
             .filter(|item| item.category == category)
@@ -3066,6 +3102,21 @@ impl GameApplicationService {
                         .expect("array")
                         .push(draw.clone());
                     array_mut(gamer, "lottery_history").push(draw);
+                }
+                "First Cherry" => {
+                    let skills = object_map(gamer, "skills");
+                    let old = skills.get("productivity").and_then(Value::as_i64).unwrap_or(0);
+                    skills.insert("productivity".into(), json!(old + 1));
+                }
+                "My Dance" => {
+                    let skills = object_map(gamer, "skills");
+                    let old = skills.get("endurance").and_then(Value::as_i64).unwrap_or(0);
+                    skills.insert("endurance".into(), json!(old + 1));
+                }
+                "Marocco&Bejuin" => {
+                    let skills = object_map(gamer, "skills");
+                    let old = skills.get("profitability").and_then(Value::as_i64).unwrap_or(0);
+                    skills.insert("profitability".into(), json!(old + 1));
                 }
                 _ => {}
             }
@@ -5201,7 +5252,7 @@ mod tests {
             json!("Марафон")
         );
         assert_eq!(
-            state["inventory"]["categories"][2]["items"][0]["description"],
+            state["inventory"]["categories"][3]["items"][0]["description"],
             json!("Награда за запасной день и заботу о стрике.")
         );
         assert_eq!(
