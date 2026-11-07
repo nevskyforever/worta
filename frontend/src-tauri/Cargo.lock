@@ -2374,7 +2374,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "nfprogress-desktop"
-version = "5.3.14"
+version = "5.3.15"
 dependencies = [
  "flate2",
  "getrandom 0.3.4",
