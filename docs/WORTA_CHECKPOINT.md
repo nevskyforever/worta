@@ -16931,3 +16931,15 @@ CI must be re-enabled before release preparation. No production code or security
 gates were changed.
 
 Final SHA: see commit below.
+
+## 2026-11-10 — Isolated Web catalog project opening E2E
+
+Starting SHA `2cdcea281ec4cbeaa36576b029d35b0cf2bd01a7`.
+Added `tests/test_web_catalog_recovery_http.py` and
+`frontend/scripts/browser-catalog-recovery-http.mjs`. The new acceptance uses one
+real encrypted project created through production writers (metadata, one Stage,
+one Note), real PostgreSQL 16/FastAPI/Chromium, UI login/unlock, cloud catalog
+selection, project click, automatic recovery, Stage/Note display, and a fresh
+browser reopen. It passed two independent runs. No production code, E2EE, proof,
+CAS, source validation, or security-gate behavior changed. Source-seed acceptance
+remains a separate test. Final SHA: see commit below.

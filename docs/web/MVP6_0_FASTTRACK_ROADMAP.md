@@ -1280,3 +1280,14 @@ change. Security gates unchanged.
 Starting HEAD `9d0e4e8e`. Fixed the outdated replay-store migration assertion in
 `browser-replay-source-seed-acceptance.mjs`; real PostgreSQL/FastAPI/Chromium source
 seed acceptance passes twice. No production code change. Security gates unchanged.
+
+## 2026-11-10 — Isolated Web catalog project opening E2E
+
+Starting HEAD `2cdcea28`. Added a new standalone real Chromium/PostgreSQL/
+FastAPI E2E, `frontend/scripts/browser-catalog-recovery-http.mjs` with
+`tests/test_web_catalog_recovery_http.py`. It creates one real encrypted project
+through production writers (metadata, one Stage, one Note), logs in and unlocks
+through the Web UI, opens the cloud catalog, clicks the project, and verifies
+automatic recovery, project title, Stage, and Note. The runner also verifies a
+fresh-browser reopen. It passed two independent runs. No production code or
+security-gate changes. Source-seed acceptance remains separate and unchanged.

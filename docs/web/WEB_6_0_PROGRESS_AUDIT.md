@@ -442,3 +442,12 @@ Security gates unchanged.
 Starting HEAD `9d0e4e8e`. Real encrypted Note source seed PostgreSQL/FastAPI/
 Chromium acceptance passes twice after updating the outdated replay-store
 migration assertion. No production code change. Security gates unchanged.
+
+## 2026-11-10 — Isolated Web catalog project opening E2E
+
+Starting HEAD `2cdcea28`. New standalone E2E
+`tests/test_web_catalog_recovery_http.py` +
+`frontend/scripts/browser-catalog-recovery-http.mjs` passed twice against real
+PostgreSQL 16/FastAPI/Chromium. One encrypted project opens from the catalog by
+UI click, auto-recovery displays its Stage and Note, and a fresh browser reopen
+passes. No production code or security-gate changes.
