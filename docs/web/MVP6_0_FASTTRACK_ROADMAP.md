@@ -1,5 +1,12 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-10 — Closed Web Beta deployed
+
+Deployed at `https://test.worta.ru` with HTTPS, closed registration, production
+frontend/backend, and empty staging database. SSH restored via existing
+`worta_vps` key as `worta-admin`. No new product features were added.
+
+
 ## 2026-11-10 — Fast-track closed Web MVP beta priority
 
 Owner decision: stop the long E2E matrix and prioritize a working closed Web MVP.

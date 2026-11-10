@@ -1,5 +1,21 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-10 — Closed Web Beta deployed at https://test.worta.ru
+
+Starting SHA `ae8cca72197106ea534b9cbe495f6251466e9d9b`, final SHA pending commit.
+
+SSH access was restored using the existing `worta_vps` key and `worta-admin` user.
+The staging backend now runs as `worta-staging.service` on `127.0.0.1:8000`.
+Production frontend is served from `/opt/worta/frontend/dist`. Caddy provides HTTPS for
+`test.worta.ru`; firewall allows 80/443. Registration remains closed. Backend health
+and ready checks pass. No existing user data was changed; database backup is stored
+under `/var/backups/worta-beta/`.
+
+Login/read verification still requires an owner-provisioned test account and
+encrypted project in the staging database; the staging database is intentionally empty.
+No writer capabilities, false ACK, or reader-readiness declarations were enabled.
+
+
 ## 2026-11-10 — Fast-track closed Web MVP beta (code ready, deployment blocked)
 
 Starting SHA `cf29ab1760b3fd31fb65e33bc4f15ebf202b3266`, branch `6.0`.
