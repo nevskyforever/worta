@@ -1,5 +1,16 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-10 — First beta user flow verified on https://test.worta.ru
+
+Final SHA `739354449fc09e44d298016d3cae01a88766c88e`.
+
+Added minimal Web E2EE provisioning (account master key, passphrase wrap, recovery
+key, server stores only encrypted key material). Added a production cloud-only
+`/api/settings` fallback. Verified on the live site: HTTPS, login, unlock,
+cloud catalog (empty), and closed registration. E2EE and security gates remain
+intact. No project exists in staging yet; creation requires Desktop sync.
+
+
 ## 2026-11-10 — Closed Web Beta deployed at https://test.worta.ru
 
 Starting SHA `ae8cca72197106ea534b9cbe495f6251466e9d9b`, final SHA pending commit.
