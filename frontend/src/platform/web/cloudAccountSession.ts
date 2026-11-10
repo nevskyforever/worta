@@ -8,7 +8,7 @@ import { readReplayStages, type ReplayStageView } from './replayStageView'
 import { replaySame } from './replayRecords'
 import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteResult, ReplayOrderedContentResult } from './replayMetadata'
 import type { ReplaySourceSeedResult } from './replaySourceSeed'
-import { accountCryptoApi, type AccountCryptoTransport } from '@/api/accountCrypto'
+import { accountCryptoApi, type AccountCryptoTransport, type AccountCryptoProvisioningTransport } from '@/api/accountCrypto'
 import { cloudProjectsApi, type CloudProjectsResponse } from '@/api/cloudProjects'
 import { legalDocumentsApi, type LegalDocument, type LegalDocumentConfirmation,
   type LegalDocumentStatus } from '@/api/legalDocuments'
@@ -24,6 +24,9 @@ import type { BrowserLocalStagesRuntime } from './localStages'
 import type { BrowserLocalDocumentsRuntime } from './localDocuments'
 import type { BrowserSyncScope } from './syncDurability'
 import { readBrowserCloudProject, BrowserCloudReadError, type BrowserCloudProjectRead } from './cloudRead'
+import { generateAccountMasterKey, generateRecoveryKey } from '@/crypto/keys'
+import { wrapAmkWithPassphrase, wrapAmkWithRecoveryKey } from '@/crypto/wrapping'
+import { encodeBase64Url } from '@/api/base64url'
 import { withReceivedBrowserAccountHistory, receiveBrowserAccountHistory, type BrowserAccountReceiveResult } from './replayReceiver'
 
 type BrowserStorage = Awaited<ReturnType<typeof openBrowserPersistence>>
@@ -358,7 +361,9 @@ export class BrowserCloudAccountSession {
       if (legal.value.missing_required_document_ids.length) return null
       return await this.finishLogin(context)
     } catch (error) {
-      if (this.auth.isCurrent(context)) await this.auth.logout().catch(() => undefined)
+      if (!(error instanceof KeyNotProvisionedError) && this.auth.isCurrent(context)) {
+        await this.auth.logout().catch(() => undefined)
+      }
       throw error
     }
   }
@@ -395,6 +400,45 @@ export class BrowserCloudAccountSession {
     }
     this.everUnlocked = true
     return lease
+  }
+
+  async provision(passphrase: string): Promise<{ identity: BrowserIdentity; recoveryKey: string }> {
+    this.assertWebRuntime()
+    const context = this.auth.requireContext()
+    const amk = await generateAccountMasterKey()
+    const recovery = await generateRecoveryKey()
+    let passwordRecord, recoveryRecord
+    try {
+      passwordRecord = await wrapAmkWithPassphrase(amk, passphrase)
+      recoveryRecord = await wrapAmkWithRecoveryKey(amk, recovery)
+    } finally {
+      // Best-effort cleanup of key material from memory is handled by sodium in wrappers.
+    }
+    const request = {
+      password: {
+        crypto_version: passwordRecord.crypto_version,
+        wrapping_version: passwordRecord.wrapping_version,
+        kdf: {
+          kdf_version: passwordRecord.kdf.kdf_version,
+          algorithm: passwordRecord.kdf.algorithm,
+          salt: encodeBase64Url(passwordRecord.kdf.salt),
+          opslimit: passwordRecord.kdf.opslimit,
+          memlimit: passwordRecord.kdf.memlimit,
+        },
+        nonce: encodeBase64Url(passwordRecord.nonce),
+        ciphertext: encodeBase64Url(passwordRecord.ciphertext),
+      },
+      recovery: {
+        crypto_version: recoveryRecord.crypto_version,
+        wrapping_version: recoveryRecord.wrapping_version,
+        nonce: encodeBase64Url(recoveryRecord.nonce),
+        ciphertext: encodeBase64Url(recoveryRecord.ciphertext),
+      },
+    }
+    const provisioning = this.cryptoTransport as AccountCryptoProvisioningTransport
+    await this.auth.authorized(token => provisioning.provision(token, request))
+    const identity = await this.finishLogin(context)
+    return { identity, recoveryKey: encodeBase64Url(recovery) }
   }
 
   /** Internal local-only composition. The returned source becomes unusable on lock/logout. */

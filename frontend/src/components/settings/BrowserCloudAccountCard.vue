@@ -35,6 +35,12 @@ const encryptionPasswordInput = ref<HTMLInputElement | null>(null)
 const connectedUsername = ref<string | null>(null)
 const busy = ref(false)
 const error = ref<string | null>(null)
+const needsProvisioning = ref(false)
+const provisioningBusy = ref(false)
+const provisioningError = ref<string | null>(null)
+const recoveryKey = ref<string | null>(null)
+const provisioningPasswordInput = ref<HTMLInputElement | null>(null)
+const provisioningConfirmInput = ref<HTMLInputElement | null>(null)
 const workspaceOpen = ref(false)
 const workspace = ref<{ canLeave: () => boolean } | null>(null)
 const legalConfirmed = ref<Record<string, boolean>>({})
@@ -161,20 +167,60 @@ async function act(action: 'login' | 'unlock' | 'lock' | 'logout', operation: ()
   }
 }
 
-function signIn(): Promise<void> {
+async function signIn(): Promise<void> {
   const input = accountPasswordInput.value
-  if (!input || !input.value || !username.value) return Promise.resolve()
+  if (!input || !input.value || !username.value) return
   const password = input.value
   input.value = ''
   clearCloudCatalog()
   legalConfirmed.value = {}
-  return act('login', () => session.login(username.value, password, locale.language))
+  if (busy.value) return
+  busy.value = true
+  error.value = null
+  needsProvisioning.value = false
+  try {
+    await session.login(username.value, password, locale.language)
+  } catch (cause) {
+    if (cause instanceof KeyNotProvisionedError) {
+      needsProvisioning.value = true
+      return
+    }
+    if (cause instanceof ApiError && cause.code === 'legal_document_version_changed') legalConfirmed.value = {}
+    error.value = safeError(cause, 'login')
+  } finally {
+    refresh()
+    busy.value = false
+  }
 }
 function acceptLegal(): Promise<void> {
   const required = session.legalDocuments.filter(document => document.mandatory)
   if (!required.length || !required.every(document => legalConfirmed.value[document.document_id])) return Promise.resolve()
   return act('login', () => session.acceptLegalDocuments(locale.language, required.map(confirmationFor)))
 }
+async function provisionEncryption(): Promise<void> {
+  const input = provisioningPasswordInput.value
+  const confirm = provisioningConfirmInput.value
+  if (!input || !input.value || !confirm || !confirm.value) return
+  if (input.value !== confirm.value) { provisioningError.value = t('Пароли не совпадают.'); return }
+  if (provisioningBusy.value) return
+  provisioningBusy.value = true
+  provisioningError.value = null
+  const password = input.value
+  input.value = ''
+  confirm.value = ''
+  try {
+    const result = await session.provision(password)
+    recoveryKey.value = result.recoveryKey
+    needsProvisioning.value = false
+    refresh()
+  } catch (cause) {
+    provisioningError.value = safeError(cause, 'unlock')
+  } finally {
+    provisioningBusy.value = false
+    refresh()
+  }
+}
+
 function unlock(): Promise<void> {
   const input = encryptionPasswordInput.value
   if (!input || !input.value) return Promise.resolve()
@@ -271,10 +317,22 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
           <BrowserCloudProjectRead v-if="selectedCloudProject && status === 'unlocked'" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" :auto-open-recovery="true" @invalidated="refresh(); clearCloudCatalog()" />
         </template>
       </section>
-      <form v-if="status !== 'unlocked'" class="browser-cloud-account__inputs" @submit.prevent="unlock">
+      <form v-if="needsProvisioning" class="browser-cloud-account__inputs" @submit.prevent="provisionEncryption">
+        <p>{{ t('Создать ключ шифрования') }}</p>
+        <label>{{ t('Пароль шифрования') }} <input ref="provisioningPasswordInput" type="password" autocomplete="new-password" required /></label>
+        <label>{{ t('Повторите пароль') }} <input ref="provisioningConfirmInput" type="password" autocomplete="new-password" required /></label>
+        <button class="nf-button" type="submit" :disabled="provisioningBusy">{{ t('Создать ключ шифрования') }}</button>
+        <p v-if="provisioningError" role="alert">{{ provisioningError }}</p>
+      </form>
+      <form v-else-if="status !== 'unlocked'" class="browser-cloud-account__inputs" @submit.prevent="unlock">
         <label>{{ t('Пароль шифрования') }} <input ref="encryptionPasswordInput" type="password" autocomplete="off" required /></label>
         <button class="nf-button" type="submit" :disabled="busy">{{ t('Разблокировать') }}</button>
       </form>
+      <section v-if="recoveryKey" class="browser-cloud-account__catalog" aria-live="polite">
+        <h3>{{ t('Ключ восстановления') }}</h3>
+        <textarea readonly style="width:100%" :value="recoveryKey"></textarea>
+        <button class="nf-button" type="button" @click="recoveryKey = null">{{ t('Закрыть') }}</button>
+      </section>
       <button v-if="status === 'unlocked'" class="nf-button nf-button--secondary" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
       <button v-if="status === 'unlocked'" class="nf-button" type="button" :disabled="busy" @click="toggleWorkspace">
         {{ workspaceOpen ? t('Закрыть рабочее пространство') : words.localWorkspace }}

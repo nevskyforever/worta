@@ -39,6 +39,7 @@ from .cloud.encrypted_blobs_router import router as cloud_encrypted_blobs_router
 from .cloud.email import email_sender_from_config
 from .cloud.passwords import PasswordCapacityError
 from .routers import content, documents, game, integrations, notes, projects
+from .content_schemas import SettingsResponse
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -299,6 +300,36 @@ def create_app(config: RuntimeConfig | None = None) -> FastAPI:
     app.include_router(cloud_recovery_router)
     app.include_router(cloud_encrypted_blobs_router)
     app.include_router(cloud_admin_router)
+    if services is None:
+        from fastapi import Body
+
+        def _cloud_settings() -> SettingsResponse:
+            return SettingsResponse(
+                values={'user_agreement': True, 'language': 'ru', 'frontend_theme': 'system',
+                        'frontend_motion': 'full', 'start_day_time': '00:00:00',
+                        'notification_display_time': 10, 'game_mode': False,
+                        'inf_project': False, 'global_streak': False,
+                        'show_written_today_in_all_projects': False},
+                version=engine.version,
+                platform='web',
+                capabilities={'local_file_sync': False, 'background_file_sync': False,
+                              'native_updates': False, 'remote_api': True,
+                              'developer_mode_available': False},
+                editable_keys=[],
+            )
+
+        @app.get('/api/settings', response_model=SettingsResponse)
+        def cloud_settings() -> SettingsResponse:
+            return _cloud_settings()
+
+        @app.patch('/api/settings', response_model=SettingsResponse)
+        def cloud_settings_update(_payload: dict = Body(default={})) -> SettingsResponse:
+            return _cloud_settings()
+
+        @app.post('/api/settings/user-agreement/accept', response_model=SettingsResponse)
+        def cloud_accept_agreement(_payload: dict = Body(default={})) -> SettingsResponse:
+            return _cloud_settings()
+
     return app
 
 

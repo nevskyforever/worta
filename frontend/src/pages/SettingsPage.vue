@@ -90,8 +90,6 @@ const form = reactive<SettingsForm>({
 
 const editable = computed(() => new Set<SettingKey>(response.value?.editable_keys ?? []))
 const isDesktop = computed(() => response.value?.platform === 'desktop')
-const isTestWeb = computed(() => currentPlatform() === 'web'
-  && response.value?.platform === 'web')
 const updaterAvailable = computed(() => isDesktop.value && supportsUpdateChecks())
 const developerAvailable = computed(
   () => response.value?.capabilities.developer_mode_available === true,
@@ -260,8 +258,8 @@ onBeforeUnmount(() => controller.abort())
           </aside>
 
           <div class="settings-groups">
+            <BrowserCloudAccountCard v-if="currentPlatform() === 'web' && response?.platform !== 'desktop'" />
             <CloudSyncSettingsCard v-if="isDesktop" />
-            <BrowserCloudAccountCard v-if="isTestWeb" />
             <DiagnosticsCard v-if="isDesktop" />
 
             <section class="settings-card" aria-labelledby="appearance-settings-title">
