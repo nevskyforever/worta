@@ -83,7 +83,7 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
     }
     return account
   }
-  if(a.kind==='freeze'){
+  if (a.kind === 'freeze' && 'project_id' in a) {
     if(e.header.rule!=='native-game-v1'||a.project_id!==null||a.before===null||a.after===null)fail()
     const account=state as AccountGameBase
     if(canonical(account.global_streak)!==canonical(a.before))fail()

@@ -90,8 +90,8 @@ const form = reactive<SettingsForm>({
 
 const editable = computed(() => new Set<SettingKey>(response.value?.editable_keys ?? []))
 const isDesktop = computed(() => response.value?.platform === 'desktop')
-const isTestWeb = computed(() => import.meta.env.DEV && currentPlatform() === 'web'
-  && response.value?.platform === 'web' && response.value.capabilities.developer_mode_available === true)
+const isTestWeb = computed(() => currentPlatform() === 'web'
+  && response.value?.platform === 'web')
 const updaterAvailable = computed(() => isDesktop.value && supportsUpdateChecks())
 const developerAvailable = computed(
   () => response.value?.capabilities.developer_mode_available === true,

@@ -1,5 +1,28 @@
 # WORTA 6.0 — Web Online-Only roadmap
 
+## 2026-11-10 — Fast-track closed Web MVP beta priority
+
+Owner decision: stop the long E2E matrix and prioritize a working closed Web MVP.
+The first release is read-only: login, E2EE unlock, cloud project catalog, opening a
+supported encrypted project, reading stages/notes, clear rejection of unsupported
+history, and reopen from another browser.
+
+Implemented in this slice:
+- `BrowserCloudAccountSession.assertWeb()` split into a production-safe runtime gate
+  for supported read/auth flows and a development-only gate for unprepared
+  replay/apply operations.
+- `SettingsPage` now exposes the cloud account card on Web builds without requiring
+  `import.meta.env.DEV`, so the closed beta can be used without a test harness.
+- Production frontend build (`npm run build`) passes; pre-existing game type
+  narrowing errors were corrected for build stability.
+
+Security gates are unchanged: no writer capabilities, no false ACK, no browser
+reader readiness declaration, no public registration. Registration remains closed.
+
+Deployment to the existing VPS is prepared via the staging Caddy/systemd templates
+but is currently blocked by missing SSH/VPS access from this environment (permission
+denied for all tested keys/users). No data or live configuration was changed.
+
 ## 2026-11-06 — Safety verification and two-SQLite freeze acceptance (PARTIAL)
 
 Starting/Final HEAD `7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0;

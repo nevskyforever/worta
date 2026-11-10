@@ -119,7 +119,7 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
    source=plan.event as ProjectGameEvent
   }else reject()
  }
- if(a.kind==='freeze'){
+ if (a.kind === 'freeze' && 'project_id' in a) {
   if(a.project_id!==null||a.project_action_id!==null||a.before===null||a.after===null
     ||h.event_id!==await gameActionId(h.account_id,'global_freeze',[a.writing_day,a.before,a.before_count]))reject()
  }

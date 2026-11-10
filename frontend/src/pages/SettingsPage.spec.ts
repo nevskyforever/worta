@@ -190,7 +190,7 @@ describe('SettingsPage', () => {
 
     expect(wrapper.text()).toContain('Версия nfprogress 5.3.9')
     expect(wrapper.text()).not.toContain('Версия nfprogress 5.0')
-    expect(wrapper.find('[data-testid="browser-cloud-account"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="browser-cloud-account"]').exists()).toBe(true)
   })
 
   it('shows an unknown marker when runtime version is unavailable', async () => {

@@ -100,7 +100,7 @@ export class BrowserCloudAccountSession {
 
   /** Fetches server-owned IDs only; local developer projects are never a fallback. */
   async listCloudProjects(signal?: AbortSignal): Promise<CloudProjectsResponse> {
-    this.assertWeb()
+    this.assertWebRuntime()
     if (this.status === 'logged_out' || this.status === 'legal_required') throw new StaleAuthContextError()
     const { value, context } = await this.auth.authorized(token => cloudProjectsApi.list(token, signal))
     if (!this.auth.isCurrent(context)) throw new StaleAuthContextError()
@@ -117,7 +117,7 @@ export class BrowserCloudAccountSession {
 
   /** Server read only. The result belongs to this active key/auth session. */
   async readCloudProject(projectId: string, signal: AbortSignal): Promise<BrowserCloudProjectRead> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !this.controller) throw new BrowserCloudReadError('key_locked')
@@ -128,7 +128,7 @@ export class BrowserCloudAccountSession {
 
   /** Explicit ciphertext receipt only; no owner apply, project opening or background work. */
   async receiveCloudAccountHistory(signal: AbortSignal): Promise<BrowserAccountReceiveResult> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !this.controller) throw new BrowserCloudReadError('key_locked')
@@ -140,7 +140,7 @@ export class BrowserCloudAccountSession {
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
   async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.controller) throw new BrowserCloudReadError('key_locked')
@@ -271,10 +271,23 @@ export class BrowserCloudAccountSession {
       accountId: identity.local_account_id, deviceId: identity.device_id })
   }
 
-  private assertWeb(): void {
-    if (this.disposed || currentPlatform() !== 'web' || !import.meta.env.DEV) {
+  /** Production Web runtime gate: platform Web only. Used by supported read/auth flows. */
+  private assertWebRuntime(): void {
+    if (this.disposed || currentPlatform() !== 'web') {
       throw new BrowserPersistenceError('unavailable')
     }
+  }
+
+  /** Development-only gate for unprepared replay/apply operations. */
+  private assertWebDev(): void {
+    this.assertWebRuntime()
+    if (!import.meta.env.DEV) {
+      throw new BrowserPersistenceError('unavailable')
+    }
+  }
+
+  private assertWeb(): void {
+    this.assertWebDev()
   }
 
   private async revoke(clearIdentity: boolean): Promise<void> {
@@ -337,7 +350,7 @@ export class BrowserCloudAccountSession {
   }
 
   async login(username: string, password: string, language: SupportedLanguage = 'ru'): Promise<BrowserIdentity | null> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const context = await this.auth.login(username, password)
     try {
       const legal = await this.auth.authorized(token => this.legalTransport.status(token, language))
@@ -352,7 +365,7 @@ export class BrowserCloudAccountSession {
 
   async acceptLegalDocuments(language: SupportedLanguage,
     documents: LegalDocumentConfirmation[]): Promise<BrowserIdentity> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const context = this.auth.requireContext()
     let result
     try {
@@ -370,7 +383,7 @@ export class BrowserCloudAccountSession {
   }
 
   async unlock(passphrase: string): Promise<AuthoritativeKeyContextLease> {
-    this.assertWeb()
+    this.assertWebRuntime()
     const context = this.auth.requireContext()
     await this.openFor(context)
     const keys = this.keys, identity = this.identity, generation = this.generation

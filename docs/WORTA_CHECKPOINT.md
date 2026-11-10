@@ -1,5 +1,24 @@
 # WORTA 6.0 — ПОЛНЫЙ ПРОЕКТНЫЙ ЧЕКПОИНТ
 
+## 2026-11-10 — Fast-track closed Web MVP beta (code ready, deployment blocked)
+
+Starting SHA `cf29ab1760b3fd31fb65e33bc4f15ebf202b3266`, branch `6.0`.
+
+Priority changed to a working closed Web Beta instead of completing all Web 6.0
+stages first. First release is read-only. Security gates, proofs, E2EE and closed
+registration remain intact. No writer capabilities or false ACK were enabled.
+
+Code changes:
+- Production-safe Web runtime gate for supported read/auth flows; development-only
+  gate retained for unprepared apply/replay operations.
+- Web settings expose the cloud account card in production builds.
+- Production frontend build passes.
+
+Deployment: BLOCKED by missing VPS SSH access from this environment (permission
+denied for all tested keys/users). Staging Caddy/systemd templates remain
+available. No live data or server configuration was changed.
+
+
 ## 2026-11-06 — Safety verification and two-SQLite freeze acceptance (PARTIAL)
 
 Starting/Final HEAD `7ba13869b2cd73fbd1b76182a7bcd4722aad9081`, branch6.0;
