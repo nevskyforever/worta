@@ -132,7 +132,7 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
     const [queued] = await storage.sync.enqueue(scope, [encodeV3MetadataPush(scope.deviceId, [item])])
     if (!queued) throw new BrowserPersistenceError('corrupt_record')
     check()
-    const lineage = await storage.projects.prepareMetadataCreate(scope, projectId, bootstrapId)
+    const lineage = await storage.projects.prepareMetadataCreate(scope, projectId, bootstrapId, eventId)
     check()
     const device = await storage.device.bind(auth, bindings).registerOnce(scope)
     check()

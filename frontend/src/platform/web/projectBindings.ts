@@ -2,7 +2,7 @@ import type { CloudProjectBootstrapRecord } from '@/infrastructure/sqlite/cloudP
 import { BrowserPersistenceError } from './persistence'
 import { immutableWireIdentity, snapshotBrowserSyncScope, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
-export interface BrowserProjectBinding extends CloudProjectBootstrapRecord { record_version: 1 }
+export interface BrowserProjectBinding extends CloudProjectBootstrapRecord { record_version: 1; initial_metadata_event_id?: string }
 export interface BrowserProjectPreparation { project_id: string; mode: 'upload_existing' }
 export interface BrowserRemoteProjectImport { project_id: string; bootstrap_id: string; remote_state: 'active'; remote_high_water: number }
 /** Record preparation only; remote provenance must still be established by the importing owner. */
@@ -31,11 +31,17 @@ function bootstrap(value: string): void {
 }
 export function validateBrowserProjectBinding(value: unknown, scope: BrowserSyncScope): BrowserProjectBinding {
   scope = snapshotBrowserSyncScope(scope)
-  if (!exact(value, keys)) fail()
+  const metadata = !!value && Object.hasOwn(value, 'initial_metadata_event_id')
+  if (!exact(value, metadata ? [...keys, 'initial_metadata_event_id'] : keys)) fail()
   const row = value as BrowserProjectBinding
   project(row.project_id); bootstrap(row.bootstrap_id)
   if (row.record_version !== 1 || row.account_id !== scope.accountId || row.device_id !== scope.deviceId
     || row.blocked_reason !== null || !safe(row.initial_event_count) || !safe(row.initial_local_ordinal_hi) ) fail()
+  if (metadata && (row.mode !== 'upload_existing'
+    || typeof row.initial_metadata_event_id !== 'string'
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.initial_metadata_event_id)
+    || (['captured', 'completing'].includes(row.phase) && row.initial_event_count !== 1)
+    || (row.phase === 'registered' && row.remote_state !== 'initializing'))) fail()
   if (row.mode === 'upload_existing') {
     if (row.phase === 'prepared') { if (row.remote_state !== null || row.remote_high_water !== null) fail() }
     else if (row.phase === 'registered') { if (!['initializing','active'].includes(row.remote_state!) || !safe(row.remote_high_water)) fail() }
@@ -66,7 +72,7 @@ export function compareBrowserProjectTransition(scope: BrowserSyncScope, current
   const row = validateBrowserProjectBinding(current, scope), old = validateBrowserProjectBinding(expected, scope), next = validateBrowserProjectBinding(target, scope)
   if (old.phase === 'completing' || next.phase === 'completing') fail('invalid_lineage_transition')
   for (const key of ['initial_event_count','initial_local_ordinal_hi','initial_max_server_sequence'] as const) if (old[key] !== next[key]) fail('invalid_lineage_transition')
-  for (const key of ['account_id','project_id','device_id','bootstrap_id','mode'] as const) if (row[key] !== old[key] || row[key] !== next[key]) fail('conflicting_record')
+  for (const key of ['account_id','project_id','device_id','bootstrap_id','mode','initial_metadata_event_id'] as const) if (row[key] !== old[key] || row[key] !== next[key]) fail('conflicting_record')
   if (next.phase !== (old.phase === 'prepared' ? 'registered' : old.phase) || next.remote_high_water === null
     || next.remote_high_water < (old.remote_high_water ?? 0) || old.remote_state === 'active' && next.remote_state !== 'active') fail('invalid_lineage_transition')
   if (immutableWireIdentity(row) === immutableWireIdentity(next)) return 'already_committed'
@@ -93,7 +99,8 @@ export class BrowserProjectBindings {
         try {
           if (existing.result !== undefined) {
             const old = validateBrowserProjectBinding(existing.result, scope)
-            if (old.mode !== candidate.mode || replay !== 'preparation' && old.bootstrap_id !== candidate.bootstrap_id) fail('conflicting_record')
+            if (old.mode !== candidate.mode || old.initial_metadata_event_id !== candidate.initial_metadata_event_id
+              || replay !== 'preparation' && old.bootstrap_id !== candidate.bootstrap_id) fail('conflicting_record')
             result(old); return // Native prepare/import retry preserves original record; never resets phase/high-water.
           }
           if (lineage.result !== undefined && validateBrowserProjectBinding(lineage.result, scope).project_id !== candidate.project_id) fail('conflicting_record')
@@ -112,10 +119,10 @@ export class BrowserProjectBindings {
       initial_event_count: 0, initial_local_ordinal_hi: 0, remote_high_water: null, initial_max_server_sequence: null, blocked_reason: null }, 'preparation')
   }
   /** Retain the lineage already authenticated by the Metadata Create author. */
-  prepareMetadataCreate(scope: BrowserSyncScope, projectId: string, bootstrapId: string): Promise<BrowserProjectBinding> {
+  prepareMetadataCreate(scope: BrowserSyncScope, projectId: string, bootstrapId: string, eventId: string): Promise<BrowserProjectBinding> {
     scope = snapshotBrowserSyncScope(scope)
     return this.create(scope, { record_version: 1, account_id: scope.accountId, device_id: scope.deviceId,
-      project_id: projectId, bootstrap_id: bootstrapId, mode: 'upload_existing', phase: 'prepared',
+      project_id: projectId, bootstrap_id: bootstrapId, initial_metadata_event_id: eventId, mode: 'upload_existing', phase: 'prepared',
       remote_state: null, initial_event_count: 0, initial_local_ordinal_hi: 0, remote_high_water: null,
       initial_max_server_sequence: null, blocked_reason: null }, 'metadata_create')
   }

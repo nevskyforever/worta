@@ -2,6 +2,7 @@ import type { AuthoritativeAccountBinding } from '@/auth/accountBinding'
 import type { RuntimeKeyContext } from '@/auth/keyContext'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { V3Descriptor } from '@/api/encryptedSyncV3'
+import type { AccountMasterKey } from '@/crypto'
 import { decodeBase64Url } from '@/api/base64url'
 import { openProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
@@ -15,6 +16,31 @@ interface Plan { owner: BrowserSelfMetadataCreate; scope: BrowserSyncScope; line
 const plans = new WeakMap<object, Plan>()
 const same = (a: unknown, b: unknown) => immutableWireIdentity(a) === immutableWireIdentity(b)
 function fail(code: 'closed' | 'account_mismatch' | 'missing_history' | 'conflicting_record' | 'stale_authority' | 'stale_lineage' | 'metadata_rejected' | 'ineligible_lineage'): never { throw new BrowserPersistenceError(code) }
+
+/** Reproduce the owner proof from authenticated retained history, outside IDB. */
+export async function authenticateSelfMetadataCreate(
+  scope: BrowserSyncScope, lineage: BrowserProjectBinding, retained: BrowserRetainedEncryptedHistory, amk: AccountMasterKey,
+): Promise<BrowserMetadataProof> {
+  const { reference, inbox, outbox, receipt } = retained
+  if (!inbox || !outbox || !receipt || outbox.protocol_version !== 3 || inbox.protocol_version !== 3) fail('missing_history')
+  if ('scope' in reference || reference.project_id !== lineage.project_id
+    || (lineage.initial_metadata_event_id !== undefined && lineage.initial_metadata_event_id !== reference.event_id)) fail('metadata_rejected')
+  const raw = JSON.parse(inbox.wire_item)
+  const nonce = decodeBase64Url(raw.object.nonce), ciphertext = decodeBase64Url(raw.object.ciphertext)
+  try {
+    const event = await openProjectMetadataEvent(amk, {
+      account_id: scope.canonicalUserId, project_id: reference.project_id, entity_id: reference.entity_id, event_id: reference.event_id,
+    }, { crypto_version: raw.object.crypto_version, aad_version: raw.object.aad_version, nonce, ciphertext })
+    const identity = new TextEncoder().encode(immutableWireIdentity({ protocol_version: 3, event: reference, object: raw.object }))
+    let digest: Uint8Array
+    try { digest = new Uint8Array(await crypto.subtle.digest('SHA-256', identity)) } finally { identity.fill(0) }
+    const wireDigest = Array.from(digest, b => b.toString(16).padStart(2, '0')).join('')
+    digest.fill(0)
+    const proof = metadataProofFor(scope, reference, event, wireDigest, 3)
+    if (event.version !== 1 || proof.operation !== 'create' || proof.bootstrap_id !== lineage.bootstrap_id || proof.source_device_id !== scope.deviceId) fail('metadata_rejected')
+    return proof
+  } finally { nonce.fill(0); ciphertext.fill(0) }
+}
 
 /** Explicit local author proof; never declares device readiness or advances ACK. */
 export class BrowserSelfMetadataCreate {
@@ -38,22 +64,13 @@ export class BrowserSelfMetadataCreate {
     if (snapshot.lineage.mode !== 'upload_existing' || !['registered', 'captured', 'completing'].includes(snapshot.lineage.phase) || !['initializing', 'active'].includes(snapshot.lineage.remote_state!)) fail('ineligible_lineage')
     const [retained] = await this.durability.readRetainedHistory(scope, [reference])
     if (!retained?.outbox || !retained.receipt || !retained.inbox || retained.outbox.protocol_version !== 3 || retained.inbox.protocol_version !== 3) fail('missing_history')
-    const raw = JSON.parse(retained.inbox.wire_item), nonce = decodeBase64Url(raw.object.nonce), ciphertext = decodeBase64Url(raw.object.ciphertext)
-    try {
-      return await lease.use(async amk => {
-        const event = await openProjectMetadataEvent(amk, { account_id: scope.canonicalUserId, project_id: reference.project_id, entity_id: reference.entity_id, event_id: reference.event_id }, { crypto_version: raw.object.crypto_version, aad_version: raw.object.aad_version, nonce, ciphertext })
-        const identity = new TextEncoder().encode(immutableWireIdentity({ protocol_version: 3, event: reference, object: raw.object }))
-        let digest: Uint8Array
-        try { digest = new Uint8Array(await crypto.subtle.digest('SHA-256', identity)) } finally { identity.fill(0) }
-        const wireDigest = Array.from(digest, b => b.toString(16).padStart(2, '0')).join(''); digest.fill(0)
-        const proof = metadataProofFor(scope, reference, event, wireDigest, 3)
-        if (event.version !== 1 || proof.operation !== 'create' || proof.bootstrap_id !== snapshot.lineage.bootstrap_id || proof.source_device_id !== scope.deviceId) fail('metadata_rejected')
-        if (!current()) fail('closed')
-        const token = Object.freeze({}) as SelfMetadataCreatePlan
-        plans.set(token, { owner: this, scope, lineage: snapshot.lineage, expected: snapshot.head, retained: structuredClone(retained), proof, current, auth, keys, signal })
-        return token
-      })
-    } finally { nonce.fill(0); ciphertext.fill(0) }
+    return lease.use(async amk => {
+      const proof = await authenticateSelfMetadataCreate(scope, snapshot.lineage, retained, amk)
+      if (!current()) fail('closed')
+      const token = Object.freeze({}) as SelfMetadataCreatePlan
+      plans.set(token, { owner: this, scope, lineage: snapshot.lineage, expected: snapshot.head, retained: structuredClone(retained), proof, current, auth, keys, signal })
+      return token
+    })
   }
 
   async commit(scope: BrowserSyncScope, token: SelfMetadataCreatePlan): Promise<'applied' | 'already_applied'> {

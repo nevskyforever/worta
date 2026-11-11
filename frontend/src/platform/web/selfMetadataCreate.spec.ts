@@ -1,5 +1,7 @@
 // @vitest-environment node
-import { expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { cloudProjectsApi } from '@/api/cloudProjects'
+import type { BrowserProjectBinding } from './projectBindings'
 import { encodeV3MetadataPush, type V3Descriptor } from '@/api/encryptedSyncV3'
 import { createCloudProjectMetadata } from './cloudProjectMetadataCreate'
 import { amk, fixture, scope } from './bootstrap.testFixture'
@@ -12,7 +14,7 @@ async function setup({ receipt = true, history = true } = {}) {
   const descriptor = { event_id: h.event_id, project_id: h.project_id, entity_id: h.entity_id,
     entity_type: 'project_metadata', operation: 'upsert', revision: 1, updated_at: h.updated_at, deleted_at: null } as const
   const raw = encodeV3MetadataPush(scope.deviceId, [{ event: descriptor, object }])
-  const lineage = await f.projects.prepareMetadataCreate(scope, h.project_id, h.bootstrap_id)
+  const lineage = await f.projects.prepareMetadataCreate(scope, h.project_id, h.bootstrap_id, h.event_id)
   const registered = await f.projects.confirmRegistration(scope, lineage, { remote_state: 'initializing', remote_high_water: 0 })
   const [queued] = await f.sync.enqueue(scope, [raw])
   if (receipt) await f.sync.commitUploadAcceptance(scope, queued!.item, { protocol_version: 3,
@@ -97,4 +99,126 @@ it('rolls back the head and inbox together on a failed commit', async () => {
   f.abort(false)
   await expect(f.owner.commit(scope, plan)).resolves.toBe('applied')
   await expect(f.owner.commit(scope, plan)).resolves.toBe('already_applied')
+})
+
+describe('Metadata Create bootstrap', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  async function applied() {
+    const f = await setup()
+    await f.owner.commit(scope, await f.prepare())
+    return f
+  }
+
+  const activeResponse = (binding: BrowserProjectBinding) => ({
+    project: {
+      project_id: binding.project_id, bootstrap_id: binding.bootstrap_id, origin_device_id: binding.device_id,
+      state: 'active' as const, initial_event_count: 1, initial_max_server_sequence: 1,
+    },
+    current_cursor: 1,
+  })
+
+  it('captures exactly one proven event and completes using the existing API', async () => {
+    const f = await applied()
+    const captured = await f.completion.captureMetadataCreate(scope, f.registered)
+    expect(captured).toMatchObject({ phase: 'captured', initial_event_count: 1, initial_local_ordinal_hi: 1 })
+    expect(await f.completion.captureMetadataCreate(scope, f.registered)).toEqual(captured)
+    const completing = await f.completion.markCompleting(scope, captured)
+    expect(completing).toMatchObject({ phase: 'completing', initial_max_server_sequence: 1 })
+    expect(await f.completion.markCompleting(scope, captured)).toEqual(completing)
+    const complete = vi.spyOn(cloudProjectsApi, 'completeBootstrap').mockResolvedValue(activeResponse(completing))
+    const before = structuredClone(f.db)
+    const active = await f.completion.completeRemote(scope, completing)
+    expect(active).toMatchObject({ phase: 'completing', remote_state: 'active' })
+    expect(complete).toHaveBeenCalledExactlyOnceWith('fixture-token', completing.project_id, {
+      bootstrap_id: completing.bootstrap_id, device_id: scope.deviceId, initial_event_count: 1, initial_max_server_sequence: 1,
+    }, expect.any(AbortSignal))
+    expect({ ...f.db, projectBindings: before.projectBindings }).toEqual(before)
+    expect(await f.completion.completeRemote(scope, active)).toEqual(active)
+    expect(complete).toHaveBeenCalledOnce()
+  })
+
+  it.each(['receipt', 'history', 'owner'] as const)('refuses a missing %s at capture', async missing => {
+    const f = await applied()
+    if (missing === 'receipt') f.db.receipts.pop()
+    if (missing === 'history') f.db.inbox.pop()
+    if (missing === 'owner') f.db.ownerHeads!.pop()
+    const before = structuredClone(f.db)
+    await expect(f.completion.captureMetadataCreate(scope, f.registered)).rejects.toMatchObject({ code: 'bootstrap_incomplete' })
+    expect(f.db).toEqual(before)
+  })
+
+  it('requires Metadata owner proof and prevents Legacy capture of the marked lineage', async () => {
+    const f = await setup()
+    await expect(f.completion.captureMetadataCreate(scope, f.registered)).rejects.toMatchObject({ code: 'bootstrap_incomplete' })
+    await expect(f.capture.capture(scope, f.registered)).rejects.toMatchObject({ code: 'invalid_lineage_transition' })
+    expect(await f.projects.read(scope, f.registered.project_id)).toEqual(f.registered)
+  })
+
+  it.each(['bootstrap', 'event', 'ciphertext', 'receipt', 'digest'] as const)('rejects mismatched %s', async kind => {
+    const f = await applied()
+    if (kind === 'bootstrap') {
+      const row = f.db.projectBindings.find(row => (row as BrowserProjectBinding).project_id === f.registered.project_id)!
+      Object.assign(row as object, { bootstrap_id: crypto.randomUUID() })
+    } else if (kind === 'event') {
+      Object.assign(f.db.receipts[0] as object, { event_id: crypto.randomUUID() })
+    } else if (kind === 'ciphertext') {
+      const row = f.db.outbox[0] as { raw_body: string }
+      const wire = JSON.parse(row.raw_body)
+      const cipher: string = wire.items[0].object.ciphertext
+      wire.items[0].object.ciphertext = (cipher.startsWith('A') ? 'B' : 'A') + cipher.slice(1)
+      row.raw_body = JSON.stringify(wire)
+    } else if (kind === 'receipt') {
+      Object.assign(f.db.receipts[0] as object, { server_sequence: 2 })
+    } else {
+      const inbox = f.db.inbox[0] as { applied_proof: { wire_digest: string } }
+      const head = f.db.ownerHeads![0] as { history: Array<{ wire_digest: string }> }
+      inbox.applied_proof.wire_digest = head.history[0]!.wire_digest = '0'.repeat(64)
+    }
+    const before = structuredClone(f.db)
+    await expect(f.completion.captureMetadataCreate(scope, f.registered)).rejects.toThrow()
+    expect(f.db).toEqual(before)
+  })
+
+  it('retries an interrupted completion with the same immutable server cohort', async () => {
+    const f = await applied()
+    const captured = await f.completion.captureMetadataCreate(scope, f.registered)
+    const completing = await f.completion.markCompleting(scope, captured)
+    const complete = vi.spyOn(cloudProjectsApi, 'completeBootstrap')
+      .mockRejectedValueOnce(new Error('response lost')).mockResolvedValue(activeResponse(completing))
+    const before = structuredClone(f.db)
+    await expect(f.completion.completeRemote(scope, completing)).rejects.toMatchObject({ code: 'bootstrap_completion_failed' })
+    expect(f.db).toEqual(before)
+    await expect(f.completion.completeRemote(scope, completing)).resolves.toMatchObject({ remote_state: 'active' })
+    expect(complete.mock.calls[0]!.slice(0, 3)).toEqual(complete.mock.calls[1]!.slice(0, 3))
+    expect(f.db.outbox).toHaveLength(1)
+    expect(f.db.ownerHeads).toHaveLength(1)
+    expect(f.db.inbox).toHaveLength(1)
+  })
+
+  it('rejects stale capture CAS even when the Create proof is valid', async () => {
+    const f = await applied()
+    const fresh = await f.projects.confirmRegistration(scope, f.registered, { remote_state: 'initializing', remote_high_water: 1 })
+    await expect(f.completion.captureMetadataCreate(scope, f.registered)).rejects.toMatchObject({ code: 'stale_lineage' })
+    expect(await f.projects.read(scope, f.registered.project_id)).toEqual(fresh)
+  })
+
+  it.each(['lineage', 'receipt', 'response'] as const)('rejects changed %s during remote completion', async kind => {
+    const f = await applied()
+    const completing = await f.completion.markCompleting(scope, await f.completion.captureMetadataCreate(scope, f.registered))
+    vi.spyOn(cloudProjectsApi, 'completeBootstrap').mockImplementation(async () => {
+      const response = activeResponse(completing)
+      if (kind === 'lineage') {
+        const row = f.db.projectBindings.find(row => (row as BrowserProjectBinding).project_id === completing.project_id)!
+        Object.assign(row as object, { remote_high_water: 1 })
+      } else if (kind === 'receipt') {
+        Object.assign(f.db.receipts[0] as object, { server_sequence: 2 })
+      } else response.project.initial_event_count = 2
+      return response
+    })
+    await expect(f.completion.completeRemote(scope, completing)).rejects.toMatchObject({
+      code: kind === 'lineage' ? 'stale_lineage' : kind === 'receipt' ? 'conflicting_record' : 'bootstrap_response_rejected',
+    })
+    expect(await f.projects.read(scope, completing.project_id)).toMatchObject({ remote_state: 'initializing' })
+  })
 })

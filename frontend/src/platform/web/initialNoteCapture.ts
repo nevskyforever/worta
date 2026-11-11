@@ -26,10 +26,10 @@ const same = (a: unknown, b: unknown) => immutableWireIdentity(a) === immutableW
 const range = (account: string) => IDBKeyRange.bound([account], [account, []])
 function fail(code: 'corrupt_record' | 'conflicting_record' | 'stale_source' | 'stale_lineage' | 'invalid_lineage_transition' | 'closed' | 'unsupported_local_source' | 'source_limit' = 'corrupt_record'): never { throw new BrowserPersistenceError(code) }
 function eligible(row: BrowserProjectBinding): void {
-  if (row.mode !== 'upload_existing' || row.phase !== 'registered' || row.remote_state !== 'initializing') fail('invalid_lineage_transition')
+  if (row.initial_metadata_event_id || row.mode !== 'upload_existing' || row.phase !== 'registered' || row.remote_state !== 'initializing') fail('invalid_lineage_transition')
 }
 function matchesCaptured(current: BrowserProjectBinding, expected: BrowserProjectBinding): void {
-  if (current.mode !== 'upload_existing' || current.phase !== 'captured') fail('invalid_lineage_transition')
+  if (current.initial_metadata_event_id || current.mode !== 'upload_existing' || current.phase !== 'captured') fail('invalid_lineage_transition')
   if (!same({ ...current, phase: 'registered', initial_event_count: 0, initial_local_ordinal_hi: 0 }, expected.phase === 'captured' ? { ...expected, phase: 'registered', initial_event_count: 0, initial_local_ordinal_hi: 0 } : expected)) fail('stale_lineage')
   if (expected.phase === 'captured' && !same(current, expected)) fail('stale_lineage')
 }
@@ -40,7 +40,7 @@ function matchesCaptured(current: BrowserProjectBinding, expected: BrowserProjec
  */
 export function deriveInitialLegacyCohort(scope: BrowserSyncScope, value: unknown, outbound: unknown[], receipts: unknown[]): { status: InitialLegacyCohortStatus; rows: BrowserOutboxRecord[] } {
   const binding = validateBrowserProjectBinding(value, scope)
-  if (binding.mode !== 'upload_existing' || !['captured','completing'].includes(binding.phase)) fail('invalid_lineage_transition')
+  if (binding.initial_metadata_event_id || binding.mode !== 'upload_existing' || !['captured','completing'].includes(binding.phase)) fail('invalid_lineage_transition')
   const count = binding.initial_event_count, hi = binding.initial_local_ordinal_hi, lo = hi - count + 1
   const candidates = outbound.filter(v => { const r = v as BrowserOutboxRecord; return r.account_id === scope.accountId && r.device_id === scope.deviceId && count > 0 && r.local_ordinal >= lo && r.local_ordinal <= hi })
   if (candidates.length !== count) fail()
