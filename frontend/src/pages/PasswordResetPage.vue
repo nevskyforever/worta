@@ -19,13 +19,7 @@ const copy = {
 const locale = useLocaleStore()
 const t = locale.translate
 const words = computed(() => copy[locale.language])
-const fragment = new URLSearchParams(window.location.hash.slice(1))
-const query = new URLSearchParams(window.location.search)
-const token = shallowRef(fragment.get('token') ?? query.get('token'))
-if (fragment.has('token') || query.has('token')) {
-  window.history.replaceState(window.history.state, '', window.location.pathname)
-}
-
+const token = shallowRef<string | null>(null)
 const email = ref('')
 const password = ref<HTMLInputElement | null>(null)
 const confirmation = ref<HTMLInputElement | null>(null)
@@ -33,7 +27,22 @@ const busy = ref(false)
 const error = ref('')
 const result = ref<'sent' | 'done' | null>(null)
 const controller = new AbortController()
+
+function readResetLink(): void {
+  const fragment = new URLSearchParams(window.location.hash.slice(1))
+  const query = new URLSearchParams(window.location.search)
+  if (!fragment.has('token') && !query.has('token')) return
+  window.history.replaceState(window.history.state, '', window.location.pathname)
+  if (busy.value) return
+  token.value = fragment.get('token') ?? query.get('token')
+  result.value = null
+  error.value = token.value ? '' : words.value.invalid
+}
+
+readResetLink()
+window.addEventListener('hashchange', readResetLink)
 onBeforeUnmount(() => {
+  window.removeEventListener('hashchange', readResetLink)
   controller.abort()
   token.value = null
   if (password.value) password.value.value = ''
