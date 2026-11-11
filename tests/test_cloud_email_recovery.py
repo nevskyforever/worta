@@ -22,7 +22,8 @@ from test_cloud_auth import (AUTH_SECRET, cloud_client, create_user, login,
 
 
 def _token_from(sender, path: str) -> str:
-    match = re.search(rf'{path}\?token=([^\s]+)', sender.messages[-1].body)
+    separator = '#' if path == '/reset-password' else r'\?'
+    match = re.search(rf'{path}{separator}token=([^\s]+)', sender.messages[-1].body)
     assert match
     return match.group(1)
 

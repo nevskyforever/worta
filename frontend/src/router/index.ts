@@ -8,6 +8,7 @@ const router = createRouter({
     { path: '/admin/login', name: 'admin-login', component: () => import('@/pages/AdminLoginPage.vue'), meta: { admin: true, title: 'Администрирование' } },
     { path: '/admin', name: 'admin', component: () => import('@/pages/AdminPage.vue'), meta: { admin: true, requiresAdmin: true, title: 'Администрирование' } },
     { path: '/invite', name: 'invite', component: () => import('@/pages/InvitationPage.vue'), meta: { standalone: true, title: 'Приглашение' } },
+    { path: '/reset-password', name: 'web-password-reset', component: () => import('@/pages/PasswordResetPage.vue'), meta: { standalone: true, title: 'Восстановление пароля' } },
     { path: '/login', name: 'web-login', component: () => import('@/pages/WebAccountPage.vue'), meta: { standalone: true, webAccount: true, title: 'Вход' } },
     { path: '/cloud', name: 'web-workspace', component: () => import('@/pages/WebAccountPage.vue'), meta: { standalone: true, webAccount: true, title: 'Облачные проекты' } },
     { path: '/', redirect: () => currentPlatform() === 'web' ? '/login' : '/projects' },
@@ -92,6 +93,7 @@ const router = createRouter({
 router.beforeEach(async (to) => {
   if (to.meta.requiresAdmin && !adminSession.active()) return { name: 'admin-login' }
   if (currentPlatform() === 'web' && !to.meta.admin && !to.meta.standalone) return { name: 'web-login' }
+  if (to.name === 'web-password-reset' && currentPlatform() !== 'web') return { name: 'projects' }
   if (to.meta.webAccount) {
     if (currentPlatform() !== 'web') return { name: 'projects' }
     const { webAccountSession } = await import('@/platform/web/webAccountSession')

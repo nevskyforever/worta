@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { ApiError } from '@/api/client'
 import { invitationApi } from '@/api/invitations'
@@ -100,6 +101,7 @@ async function submit(): Promise<void> {
       <p>{{ words.detail }}</p>
       <p v-if="loading" role="status">{{ words.loading }}</p>
       <p v-if="complete" role="status">{{ words.done }}</p>
+      <RouterLink v-if="complete" :to="{ name: 'web-login' }">{{ locale.translate('Войти в облачный аккаунт') }}</RouterLink>
       <p v-if="error" role="alert">{{ error }}</p>
       <button v-if="hasInvitation && loadFailed" class="nf-button" type="button" @click="loadDocuments()">{{ words.retry }}</button>
       <form v-if="hasInvitation && !complete && !loading && documents.length" @submit.prevent="submit">
@@ -121,8 +123,8 @@ async function submit(): Promise<void> {
 </template>
 
 <style scoped>
-.invitation-page { min-height: 100dvh; display: grid; place-items: center; padding: 2rem; }
-.invitation-page > section { width: min(44rem, 100%); }
+.invitation-page { display: block; height: 100%; overflow: auto; padding: clamp(1rem, 4vw, 2rem); }
+.invitation-page > section { width: min(44rem, 100%); margin: 0 auto; }
 .invitation-page form, .invitation-page label { display: grid; gap: .7rem; }
 .invitation-page form { margin-top: 1.5rem; }
 .invitation-page input[type="password"] { padding: .65rem; border: 1px solid var(--nf-color-border); border-radius: .4rem; }

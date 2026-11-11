@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
 import type { CloudProjectsResponse } from '@/api/cloudProjects'
@@ -404,6 +405,7 @@ watch(status, next => {
       <label>{{ t('Имя пользователя или e-mail') }} <input v-model="username" autocomplete="username" /></label>
       <label>{{ t('Пароль аккаунта') }} <input ref="accountPasswordInput" type="password" autocomplete="current-password" required /></label>
       <button class="nf-button" type="submit" :disabled="busy || !username">{{ t('Войти в облачный аккаунт') }}</button>
+      <RouterLink v-if="props.session" :to="{ name: 'web-password-reset' }">{{ t('Восстановление пароля') }}</RouterLink>
     </form>
     <div v-else-if="status === 'legal_required'" class="browser-cloud-account__legal">
       <article v-for="document in session.legalDocuments" :key="`${document.document_id}:${document.revision}`">

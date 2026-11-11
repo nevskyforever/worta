@@ -114,11 +114,12 @@ def _registration_service(request: Request) -> RegistrationService:
     return RegistrationService(TokenService(request.app.state.runtime_config.require_auth_secret()))
 
 
-def _trusted_link(request: Request, path: str, token: str) -> str | None:
+def _trusted_link(request: Request, path: str, token: str, *, fragment: bool = False) -> str | None:
     base = request.app.state.runtime_config.public_web_url
     if base is None:
         return None
-    return f"{base.rstrip('/')}{path}?{urlencode({'token': token})}"
+    separator = "#" if fragment else "?"
+    return f"{base.rstrip('/')}{path}{separator}{urlencode({'token': token})}"
 
 
 def _send(sender: EmailSender, message: OutgoingEmail) -> None:
@@ -422,7 +423,7 @@ def request_password_reset(payload: PasswordResetRequest, background: Background
     issued = _email_service(request).issue_password_reset(session, payload.email)
     if issued is not None:
         email, token = issued
-        link = _trusted_link(request, '/reset-password', token)
+        link = _trusted_link(request, '/reset-password', token, fragment=True)
         if link:
             background.add_task(_send, sender, OutgoingEmail(email, 'Восстановление пароля',
                 f'Установите новый пароль: {link}\nСсылка действует 1 час. Если это были не вы, проигнорируйте письмо.'))
