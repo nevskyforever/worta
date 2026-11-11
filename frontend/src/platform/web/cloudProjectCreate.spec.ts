@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
+import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
 import { cloudProjectsApi } from '@/api/cloudProjects'
 import { encodeV3MetadataPush, encryptedSyncV3Api, type V3MetadataPushItem } from '@/api/encryptedSyncV3'
 import { encodeBase64Url } from '@/api/base64url'
@@ -19,6 +20,9 @@ async function setup() {
     setItem: (key: string, value: string) => pending.set(key, value),
   } }))
   const f = await fixture([])
+  const capabilities = vi.spyOn(encryptedSyncV2Api, 'capabilities').mockResolvedValue({
+    supported_transport_version: 2, writer_transport_version: 3, cutover_epoch: 2,
+  })
   const register = vi.spyOn(cloudProjectsApi, 'registerBootstrap').mockImplementation(async (_token, projectId, body) => ({
     project: { project_id: projectId, bootstrap_id: body.bootstrap_id, origin_device_id: body.device_id,
       state: 'initializing', initial_event_count: null, initial_max_server_sequence: null },
@@ -56,7 +60,7 @@ async function setup() {
   const stage = (name = 'Private project', signal?: AbortSignal) => stageCloudProjectMetadata(scope, name, {
     auth: f.auth, bindings: f.bindings as never, keys: f.keys as never, storage,
   }, signal)
-  return { ...f, register, push, pull, complete, stage, storage, pending }
+  return { ...f, register, push, pull, complete, stage, storage, pending, capabilities }
 
 }
 
@@ -193,4 +197,14 @@ it('creates two distinct active projects through the public unlocked session', a
     expect(f.complete).toHaveBeenCalledTimes(2)
     expect(f.pending.size).toBe(1)
   } finally { await session.dispose() }
+})
+
+it('refuses older transport modes before reserving a project or writing pending state', async () => {
+  const f = await setup()
+  f.capabilities.mockResolvedValueOnce({ supported_transport_version: 2, writer_transport_version: 1, cutover_epoch: 0 })
+  await expect(f.stage()).rejects.toMatchObject({ code: 'sync_transport_mode_incompatible' })
+  expect(f.register).not.toHaveBeenCalled()
+  expect(f.push).not.toHaveBeenCalled()
+  expect(f.pending.size).toBe(0)
+  expect(f.db.outbox).toHaveLength(0)
 })

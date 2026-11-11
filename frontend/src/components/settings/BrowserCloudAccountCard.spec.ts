@@ -10,7 +10,7 @@ const fixture = vi.hoisted(() => ({
   requireLegal: false,
   cloudResponse: { cloud_project_ids: ['server-project-1'], cloud_project_count: 1, max_cloud_projects: 8 },
   cloudFailure: false,
-  login: vi.fn(), acceptLegal: vi.fn(), unlock: vi.fn(), lock: vi.fn(), logout: vi.fn(), dispose: vi.fn(),
+  createCloudProject: vi.fn(), login: vi.fn(), acceptLegal: vi.fn(), unlock: vi.fn(), lock: vi.fn(), logout: vi.fn(), dispose: vi.fn(),
 }))
 
 vi.mock('@/platform/web/cloudAccountSession', () => ({
@@ -23,6 +23,7 @@ vi.mock('@/platform/web/cloudAccountSession', () => ({
       content: 'Возможны ошибки и потеря данных.', mandatory: true,
       requires_explicit_acceptance: true, accepted: false,
     }] : [] }
+    async createCloudProject(name: string, signal: AbortSignal) { return fixture.createCloudProject(name, signal) }
     async listCloudProjects() {
       if (fixture.cloudFailure) throw Error('network_failure')
       return structuredClone(fixture.cloudResponse)
@@ -55,6 +56,7 @@ beforeEach(() => {
   fixture.requireLegal = false
   fixture.cloudResponse = { cloud_project_ids: ['server-project-1'], cloud_project_count: 1, max_cloud_projects: 8 }
   fixture.cloudFailure = false
+  fixture.createCloudProject.mockReset()
   for (const name of ['login', 'acceptLegal', 'unlock', 'lock', 'logout', 'dispose'] as const) fixture[name].mockClear()
 })
 
@@ -128,4 +130,43 @@ it('shows the bounded Web account, unlock, lock and logout flow without Note act
   expect(wrapper.get('[data-status]').attributes('data-status')).toBe('logged_out')
   wrapper.unmount()
   expect(fixture.dispose).toHaveBeenCalledOnce()
+})
+
+it('offers keyboard submission only when unlocked, preserves a failed name, and refreshes the catalog after retry', async () => {
+  const pinia = createPinia()
+  useLocaleStore(pinia).language = 'ru'
+  fixture.status = 'authenticated'
+  fixture.cloudResponse = { cloud_project_ids: [], cloud_project_count: 0, max_cloud_projects: 8 }
+  const wrapper = mount(BrowserCloudAccountCard, { global: { plugins: [pinia] } })
+  expect(wrapper.find('[data-testid="cloud-project-create"]').exists()).toBe(false)
+  await wrapper.get('input[autocomplete="off"]').setValue('correct')
+  await wrapper.get('form').trigger('submit')
+  await flushPromises()
+  const form = wrapper.get('[data-testid="cloud-project-create"]')
+  expect(form.get('button').attributes('disabled')).toBeDefined()
+  await form.get('input').setValue('  Первый проект  ')
+  let fail!: (error: Error) => void
+  fixture.createCloudProject.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject }))
+  await form.trigger('submit')
+  expect(form.get('[role="status"]').text()).toContain('Сохраняем')
+  expect(form.get('button').attributes('disabled')).toBeDefined()
+  await form.trigger('submit')
+  expect(fixture.createCloudProject).toHaveBeenCalledExactlyOnceWith('Первый проект', expect.any(AbortSignal))
+  fail(new Error('network failure'))
+  await flushPromises()
+  expect(form.get('[role="alert"]').text()).toContain('с тем же названием')
+  expect(form.get('input').element.value).toBe('  Первый проект  ')
+  fixture.createCloudProject.mockImplementationOnce(async () => {
+    fixture.cloudResponse = { cloud_project_ids: ['new-cloud-project'], cloud_project_count: 1, max_cloud_projects: 8 }
+    return { projectId: 'new-cloud-project', serverSequence: 1 }
+  })
+  await form.trigger('submit')
+  await flushPromises()
+  expect(form.get('input').element.value).toBe('')
+  expect(form.get('[role="status"]').text()).toContain('Облачный проект создан')
+  expect(wrapper.get('[data-testid="server-cloud-project-catalog"]').text()).toContain('new-cloud-project')
+  await wrapper.get('[data-testid="cloud-account-lock"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.find('[data-testid="cloud-project-create"]').exists()).toBe(false)
+  wrapper.unmount()
 })

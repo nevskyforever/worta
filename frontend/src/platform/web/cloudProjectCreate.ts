@@ -1,6 +1,8 @@
 import type { AuthoritativeAccountBinding } from '@/auth/accountBinding'
 import type { RuntimeKeyContext } from '@/auth/keyContext'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
+import { ApiError } from '@/api/client'
+import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
 import { cloudProjectsApi } from '@/api/cloudProjects'
 import { encodeV3MetadataPush, encryptedSyncV3Api, type V3Descriptor, type V3MetadataPushItem } from '@/api/encryptedSyncV3'
 import { createCloudProjectMetadata } from './cloudProjectMetadataCreate'
@@ -101,6 +103,12 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
     return response.value
   }
 
+  // Registration reserves a cloud slot. Check transport before preparing a
+  // project so a mode-1 or mode-2 account cannot reserve a slot it cannot fill.
+  const capabilities = await request(token => encryptedSyncV2Api.capabilities(token, signal))
+  if (capabilities.writer_transport_version !== 3) {
+    throw new ApiError(409, 'sync_transport_mode_incompatible', 'Encrypted sync v3 is required.')
+  }
   const completion = storage.completion.bind(auth, bindings, keys)
   const requestedName = name.trim()
   check()

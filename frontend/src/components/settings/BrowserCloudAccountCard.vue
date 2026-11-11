@@ -24,9 +24,19 @@ const copy: Record<SupportedLanguage, Copy> = {
   pt_BR: { unlocked: 'Chave de criptografia desbloqueada.', badPassword: 'Não foi possível desbloquear a chave. Verifique a senha de criptografia.', writerBusy: 'Outra aba está usando o armazenamento seguro. Feche-a e tente novamente.', storageUnavailable: 'O armazenamento seguro do navegador não está disponível.', legalRequired: 'É necessário aceitar os termos atuais', acceptRevision: 'Li e aceito esta versão', acceptCurrent: 'Aceitar os termos atuais', stale: 'Os termos mudaram. Leia o novo texto e confirme novamente.', onlineOnly: 'A Web exige conexão com o servidor. O servidor mantém os dados; E2EE é executado neste navegador.', cloudProjects: 'Projetos na nuvem WORTA', refreshProjects: 'Atualizar lista', projectCount: 'Projetos no servidor: {count} de {limit}', noCloudProjects: 'Ainda não há projetos na nuvem no servidor.', projectIdsOnly: 'O servidor retorna apenas identificadores. Desbloqueie para ler as notas compatíveis.', localWorkspace: 'Abrir projetos locais de teste (não sincronizados)', connectionFailed: 'Não foi possível carregar a lista do servidor. Verifique a conexão e tente novamente.', openCloudProject: 'Abrir projeto na nuvem' },
 }
 
+const creationCopy = {
+  ru: { title: 'Создать облачный проект', name: 'Название проекта', saving: 'Сохраняем проект…', saved: 'Облачный проект создан.', failed: 'Не удалось подтвердить создание. Проверьте подключение и повторите с тем же названием.', invalid: 'Название должно занимать не более 512 байт.', limit: 'Достигнут лимит облачных проектов.', unavailable: 'Создание проектов пока недоступно для этого аккаунта.' },
+  en: { title: 'Create cloud project', name: 'Project name', saving: 'Saving project…', saved: 'Cloud project created.', failed: 'Could not confirm creation. Check your connection and retry with the same name.', invalid: 'Enter a name of at most 512 bytes.', limit: 'The cloud project limit has been reached.', unavailable: 'Project creation is not yet available for this account.' },
+  es: { title: 'Crear proyecto en la nube', name: 'Nombre del proyecto', saving: 'Guardando proyecto…', saved: 'Proyecto en la nube creado.', failed: 'No se pudo confirmar la creación. Comprueba tu conexión y vuelve a intentarlo con el mismo nombre.', invalid: 'Introduce un nombre de hasta 512 bytes.', limit: 'Se ha alcanzado el límite de proyectos en la nube.', unavailable: 'Esta cuenta aún no puede crear proyectos.' },
+  de: { title: 'Cloudprojekt erstellen', name: 'Projektname', saving: 'Projekt wird gespeichert…', saved: 'Cloudprojekt erstellt.', failed: 'Die Erstellung konnte nicht bestätigt werden. Prüfe die Verbindung und versuche es erneut mit demselben Namen.', invalid: 'Gib einen Namen mit höchstens 512 Byte ein.', limit: 'Das Limit für Cloudprojekte ist erreicht.', unavailable: 'Für dieses Konto ist das Erstellen von Projekten noch nicht verfügbar.' },
+  fr: { title: 'Créer un projet cloud', name: 'Nom du projet', saving: 'Enregistrement du projet…', saved: 'Projet cloud créé.', failed: 'Impossible de confirmer la création. Vérifiez votre connexion et réessayez avec le même nom.', invalid: 'Saisissez un nom de 512 octets maximum.', limit: 'La limite de projets cloud est atteinte.', unavailable: 'La création de projets n’est pas encore disponible pour ce compte.' },
+  pt_BR: { title: 'Criar projeto na nuvem', name: 'Nome do projeto', saving: 'Salvando projeto…', saved: 'Projeto na nuvem criado.', failed: 'Não foi possível confirmar a criação. Verifique a conexão e tente novamente com o mesmo nome.', invalid: 'Digite um nome de até 512 bytes.', limit: 'O limite de projetos na nuvem foi atingido.', unavailable: 'A criação de projetos ainda não está disponível para esta conta.' },
+} satisfies Record<SupportedLanguage, Record<'title' | 'name' | 'saving' | 'saved' | 'failed' | 'invalid' | 'limit' | 'unavailable', string>>
+
 const locale = useLocaleStore()
 const t = locale.translate
 const words = computed(() => copy[locale.language])
+const createWords = computed(() => creationCopy[locale.language])
 const session = new BrowserCloudAccountSession()
 const status = ref(session.status)
 const username = ref('')
@@ -52,6 +62,11 @@ const selectedCloudProject = ref<string | null>(null)
 const cloudCatalogOpen = ref(false)
 const cloudCatalogBusy = ref(false)
 const cloudCatalogError = ref<string | null>(null)
+const cloudProjectName = ref('')
+const cloudCreateBusy = ref(false)
+const cloudCreateSaved = ref(false)
+const cloudCreateError = ref<string | null>(null)
+let cloudCreateController: AbortController | null = null
 let cloudCatalogGeneration = 0
 let cloudCatalogController: AbortController | null = null
 
@@ -129,6 +144,54 @@ async function loadCloudCatalog(): Promise<void> {
   }
 }
 
+function resetCloudCreate(): void {
+  cloudCreateController?.abort()
+  cloudCreateController = null
+  cloudProjectName.value = ''
+  cloudCreateBusy.value = false
+  cloudCreateSaved.value = false
+  cloudCreateError.value = null
+}
+
+async function createCloudProject(): Promise<void> {
+  const name = cloudProjectName.value.trim()
+  if (session.status !== 'unlocked' || busy.value || cloudCreateBusy.value || !name) return
+  cloudCreateError.value = null
+  cloudCreateSaved.value = false
+  if (new TextEncoder().encode(name).length > 512) {
+    cloudCreateError.value = createWords.value.invalid
+    return
+  }
+  const controller = new AbortController()
+  cloudCreateController = controller
+  cloudCreateBusy.value = true
+  try {
+    await session.createCloudProject(name, controller.signal)
+    if (controller.signal.aborted || session.status !== 'unlocked') return
+    cloudProjectName.value = ''
+    cloudCreateSaved.value = true
+    cloudCatalogOpen.value = true
+    await loadCloudCatalog()
+  } catch (cause) {
+    if (controller.signal.aborted || session.status !== 'unlocked') return
+    if (cause instanceof ApiError && cause.code === 'cloud_project_limit_reached') {
+      cloudCreateError.value = createWords.value.limit
+    } else if (cause instanceof ApiError && cause.code === 'sync_transport_mode_incompatible') {
+      cloudCreateError.value = createWords.value.unavailable
+    } else if (cause instanceof BrowserPersistenceError && cause.code === 'writer_busy') {
+      cloudCreateError.value = words.value.writerBusy
+    } else {
+      cloudCreateError.value = createWords.value.failed
+    }
+  } finally {
+    if (cloudCreateController === controller) {
+      cloudCreateController = null
+      cloudCreateBusy.value = false
+      refresh()
+    }
+  }
+}
+
 function toggleCloudCatalog(): void {
   cloudCatalogOpen.value = !cloudCatalogOpen.value
   if (cloudCatalogOpen.value) void loadCloudCatalog()
@@ -153,7 +216,7 @@ function safeError(value: unknown, action: 'login' | 'unlock'): string {
 async function act(action: 'login' | 'unlock' | 'lock' | 'logout', operation: () => Promise<unknown>): Promise<void> {
   if (busy.value) return
   if ((action === 'lock' || action === 'logout') && workspaceOpen.value && !workspace.value?.canLeave()) return
-  if (action === 'lock' || action === 'logout') { workspaceOpen.value = false; selectedCloudProject.value = null }
+  if (action === 'lock' || action === 'logout') { resetCloudCreate(); workspaceOpen.value = false; selectedCloudProject.value = null }
   busy.value = true
   error.value = null
   try { await operation() }
@@ -242,13 +305,17 @@ watch([status, cloudProjects], ([nextStatus, projects]) => {
 })
 
 onBeforeUnmount(() => {
+  resetCloudCreate()
   clearCloudCatalog()
   if (accountPasswordInput.value) accountPasswordInput.value.value = ''
   if (encryptionPasswordInput.value) encryptionPasswordInput.value.value = ''
   void session.dispose().catch(() => undefined)
 })
 
-watch(status, next => { if (next === 'logged_out' || next === 'legal_required') clearCloudCatalog() })
+watch(status, next => {
+  if (next !== 'unlocked') resetCloudCreate()
+  if (next === 'logged_out' || next === 'legal_required') clearCloudCatalog()
+})
 </script>
 
 <template>
@@ -290,6 +357,14 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
       <button class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
       </button>
+      <form v-if="status === 'unlocked'" class="browser-cloud-account__inputs browser-cloud-account__create"
+        data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
+        <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
+        <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || !cloudProjectName.trim()">{{ createWords.title }}</button>
+        <p v-if="cloudCreateBusy" role="status">{{ createWords.saving }}</p>
+        <p v-else-if="cloudCreateSaved" role="status">{{ createWords.saved }}</p>
+        <p v-if="cloudCreateError" role="alert">{{ cloudCreateError }}</p>
+      </form>
       <section v-if="cloudCatalogOpen" class="browser-cloud-account__catalog" :aria-label="words.cloudProjects" data-testid="server-cloud-project-catalog">
         <div class="browser-cloud-account__catalog-heading">
           <h3>{{ words.cloudProjects }}</h3>
@@ -349,6 +424,7 @@ watch(status, next => { if (next === 'logged_out' || next === 'legal_required') 
 .browser-cloud-account__legal { display: grid; gap: 1rem; }
 .browser-cloud-account__legal article { padding: 1rem; border: 1px solid var(--nf-color-border); border-radius: .5rem; }
 .browser-cloud-account__legal-text { white-space: pre-line; }
+.browser-cloud-account__create { flex-basis: 100%; }
 .browser-cloud-account__online-policy { flex-basis: 100%; }
 .browser-cloud-account__catalog { flex-basis: 100%; display: grid; gap: .5rem; padding: 1rem; border: 1px solid var(--nf-color-border); border-radius: .5rem; }
 .browser-cloud-account__catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
