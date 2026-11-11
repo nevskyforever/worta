@@ -113,17 +113,17 @@ export function encodeV2Ack(request:V2AckRequest):V2AckRequest {
 }
 export const encryptedSyncV2Api={
   capabilities:(token:string,signal?:AbortSignal)=>apiRequest<unknown>('/api/v2/sync/encrypted/capabilities',{headers:headers(token),signal}).then(parseV2Capabilities),
-  cutover:(token:string,expectedCutoverEpoch:number):Promise<V2CutoverResponse>=>{
+  cutover:(token:string,expectedCutoverEpoch:number, initialWebDeviceId?: string, signal?: AbortSignal):Promise<V2CutoverResponse>=>{
     safe(expectedCutoverEpoch,0)
-    return apiRequest<unknown>('/api/v2/sync/encrypted/cutover',{method:'POST',headers:headers(token),body:{expected_cutover_epoch:expectedCutoverEpoch}}).then(parseV2CutoverResponse)
+    return apiRequest<unknown>('/api/v2/sync/encrypted/cutover',{method:'POST',headers:headers(token),body:{expected_cutover_epoch:expectedCutoverEpoch, initial_web_device_id:initialWebDeviceId},signal}).then(parseV2CutoverResponse)
   },
   push:(token:string,request:V2PushRequest)=>apiRequest<unknown>('/api/v2/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV2Push(request)}).then(value=>parseV2PushResponse(value,request.items.map(i=>i.event.event_id))),
-  async pull(token:string,deviceId:string,since:number,limit=200):Promise<V2PullResponse>{
+  async pull(token:string,deviceId:string,since:number,limit=200,signal?:AbortSignal):Promise<V2PullResponse>{
     if(!Number.isSafeInteger(since)||since<0||!Number.isSafeInteger(limit)||limit<1||limit>500)throw new RangeError('Invalid encrypted sync v2 pagination.')
     if(uuid(deviceId)!==deviceId)fail()
     const query=new URLSearchParams({device_id:deviceId,since:String(since),limit:String(limit),protocol_version:'2',encrypted_sync_version:'2'})
     let response:unknown
-    try { response=await apiRequest<unknown>(`/api/v2/sync/encrypted/pull?${query}`,{headers:headers(token),maxResponseBytes:MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES}) }
+    try { response=await apiRequest<unknown>(`/api/v2/sync/encrypted/pull?${query}`,{headers:headers(token),signal,maxResponseBytes:MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES}) }
     catch(error) { if(error instanceof ApiError&&error.code==='encrypted_sync_event_incomplete')throw new V2UnsupportedEventError();if(error instanceof SyntaxError)throw new V2MalformedPullResponseError();throw error }
     try { return parseV2PullResponse(response,since,limit) }
     catch(error) { if(error instanceof V2UnsupportedEventError)throw error;throw new V2MalformedPullResponseError() }

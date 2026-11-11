@@ -72,8 +72,13 @@ async def _read_encrypted_push_body(request: Request) -> bytes:
 
 @router.put('/devices/{device_id}', response_model=SyncDeviceResponse)
 def register_device(device_id: UUID, current: AuthenticatedUser = Depends(get_current_accepted_user),
-                    session: Session = Depends(get_cloud_session)) -> SyncDeviceResponse:
-    device_id, ack, _cursor = SyncService().register_device(session, current.user.id, device_id)
+                    session: Session = Depends(get_cloud_session), initial_web_setup: bool = False) -> SyncDeviceResponse:
+    try:
+        device_id, ack, _cursor = SyncService().register_device(
+            session, current.user.id, device_id, initial_web_setup=initial_web_setup,
+        )
+    except SyncProtocolError as error:
+        raise _error(error) from None
     return SyncDeviceResponse(device_id=device_id, last_ack_cursor=ack)
 
 

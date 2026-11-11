@@ -72,7 +72,9 @@ def reader_ready(request: V3ReaderReadyRequest,
                  current: AuthenticatedUser = Depends(get_current_accepted_user),
                  session: Session = Depends(get_cloud_session)) -> None:
     try:
-        SyncService().declare_v3_reader_ready(session, current.user.id, request.device_id)
+        SyncService().declare_v3_reader_ready(
+            session, current.user.id, request.device_id, initial_web_setup=request.initial_web_setup,
+        )
     except SyncProtocolError as error:
         raise _error(error) from None
 
@@ -82,7 +84,10 @@ def cutover(request: V3CutoverRequest,
             current: AuthenticatedUser = Depends(get_current_accepted_user),
             session: Session = Depends(get_cloud_session)) -> V3CutoverResponse:
     try:
-        mode, epoch = SyncService().cutover_to_v3(session, current.user.id, request.expected_cutover_epoch)
+        mode, epoch = SyncService().cutover_to_v3(
+            session, current.user.id, request.expected_cutover_epoch,
+            initial_web_device_id=request.initial_web_device_id,
+        )
     except SyncProtocolError as error:
         raise _error(error) from None
     return V3CutoverResponse(writer_transport_version=mode, cutover_epoch=epoch)

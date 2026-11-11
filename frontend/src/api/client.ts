@@ -25,6 +25,12 @@ export class ApiResponseTooLargeError extends Error {
   readonly name = 'ApiResponseTooLargeError'
 }
 
+function connectionMessage(): string {
+  return typeof document !== 'undefined' && document.documentElement.dataset.platform === 'web'
+    ? 'Не удалось подключиться к серверу worta.'
+    : 'Не удалось подключиться к nfprogress API.'
+}
+
 type ApiRequestOptions = Omit<RequestInit, 'body' | 'headers'> & {
   body?: unknown
   rawBody?: BodyInit
@@ -44,7 +50,7 @@ async function readResponseBody<T>(read: () => Promise<T>): Promise<T> {
       const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
       const disconnected = typeof code === 'string' && ['UND_ERR_SOCKET', 'ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'EPIPE'].includes(code)
         || /^(load failed|failed to fetch|networkerror.*|network request failed)$/i.test(error.message)
-      if (disconnected) throw new ApiError(0, 'network_error', 'Не удалось подключиться к nfprogress API.', error)
+      if (disconnected) throw new ApiError(0, 'network_error', connectionMessage(), error)
     }
     throw error
   }
@@ -166,7 +172,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     throw new ApiError(
       0,
       'network_error',
-      'Не удалось подключиться к nfprogress API.',
+      connectionMessage(),
       error,
     )
   }
@@ -191,7 +197,7 @@ export async function apiBinaryRequest(path: string, options: ApiRequestOptions 
     response = await fetch(requestUrl(path), { ...requestOptions, headers })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new ApiError(0, 'network_error', 'Не удалось подключиться к nfprogress API.', error)
+    throw new ApiError(0, 'network_error', connectionMessage(), error)
   }
   if (!response.ok) throw await errorFromResponse(response)
   return { bytes: new Uint8Array(await readResponseBody(() => response.arrayBuffer())), headers: response.headers }

@@ -9,6 +9,8 @@ import { replaySame } from './replayRecords'
 import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteResult, ReplayOrderedContentResult } from './replayMetadata'
 import type { ReplaySourceSeedResult } from './replaySourceSeed'
 import { accountCryptoApi, type AccountCryptoTransport, type AccountCryptoProvisioningTransport } from '@/api/accountCrypto'
+import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
+import { prepareInitialWebSync } from './initialWebSync'
 import { cloudProjectsApi, type CloudProjectsResponse } from '@/api/cloudProjects'
 import { legalDocumentsApi, type LegalDocument, type LegalDocumentConfirmation,
   type LegalDocumentStatus } from '@/api/legalDocuments'
@@ -199,6 +201,47 @@ export class BrowserCloudAccountSession {
       if (!current() || !replaySame(snapshot, await storage.read())) throw new BrowserCloudReadError('unsupported_history')
       return result
     })
+  }
+
+  private unlockedSync(signal?: AbortSignal) {
+    this.assertWebRuntime()
+    const identity = this.identity, storage = this.storage, bindings = this.bindings
+    const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
+    const controller = this.controller
+    if (this.status !== 'unlocked' || !identity || !lease || !storage || !bindings || !controller) {
+      throw new BrowserCloudReadError('key_locked')
+    }
+    const context = this.auth.requireContext()
+    const operationSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
+    const scope = { canonicalUserId: context.userId, accountId: identity.local_account_id, deviceId: identity.device_id }
+    const check = () => {
+      if (operationSignal.aborted || !lease.isCurrent() || !this.auth.isCurrent(context)) throw new StaleAuthContextError()
+    }
+    const request = async <T>(send: (token: string) => Promise<T>): Promise<T> => {
+      const result = await this.auth.authorized(token => { check(); return send(token) })
+      check()
+      return result.value
+    }
+    check()
+    return { scope, lease, check, request, signal: operationSignal, storage, bindings }
+  }
+
+  async cloudSyncMode(signal?: AbortSignal): Promise<1 | 2 | 3> {
+    const operation = this.unlockedSync(signal)
+    return (await operation.request(token => encryptedSyncV2Api.capabilities(token, operation.signal))).writer_transport_version
+  }
+
+  /** Explicit setup for an unused account, with no other registered devices. */
+  async setupInitialCloudSync(signal?: AbortSignal): Promise<void> {
+    const operation = this.unlockedSync(signal)
+    const register = async () => {
+      operation.check()
+      const result = await operation.storage.device.bind(this.auth, operation.bindings).registerOnce(operation.scope, true)
+      operation.check()
+      return result
+    }
+    await prepareInitialWebSync(operation.scope, operation.lease, operation.request, register, operation.signal)
+    operation.check()
   }
 
   /** Create a new encrypted cloud project through the production sync v3 writer. */

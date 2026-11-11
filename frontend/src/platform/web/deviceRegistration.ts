@@ -65,7 +65,7 @@ export class BrowserDeviceRegistrationRuntime {
     return token
   }
 
-  async registerOnce(input: BrowserSyncScope): Promise<{ deviceId: string; serverAckCursor: number; ready: false }> {
+  async registerOnce(input: BrowserSyncScope, initialWebSetup?: boolean): Promise<{ deviceId: string; serverAckCursor: number; ready: false }> {
     const scope = snapshotBrowserSyncScope(input)
     if (!this.sessionCurrent()) throw new BrowserPersistenceError('closed')
     const { context } = await this.bindings.ensureForCurrentUser(scope.accountId)
@@ -78,7 +78,7 @@ export class BrowserDeviceRegistrationRuntime {
       try { check(); result(undefined) } catch (error) { abort(error) }
     })
     await ownership(); check()
-    const registered = await this.auth.authorized(token => { check(); return syncApi.registerDevice(token, scope.deviceId) })
+    const registered = await this.auth.authorized(token => { check(); return initialWebSetup ? syncApi.registerDevice(token, scope.deviceId, true) : syncApi.registerDevice(token, scope.deviceId) })
     check()
     if (registered.context.userId !== context.userId || registered.context.authEpoch !== context.authEpoch) throw new BrowserPersistenceError('closed')
     const response = validateBrowserDeviceRegistration(registered.value, scope.deviceId)

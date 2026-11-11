@@ -532,6 +532,7 @@ class V2EncryptedSyncCapabilitiesResponse(BaseModel):
 class V2EncryptedSyncCutoverRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     expected_cutover_epoch: int = Field(ge=0, le=SYNC_MAX_WIRE_INTEGER, strict=True)
+    initial_web_device_id: UUID | None = None
 
 
 class V2EncryptedSyncCutoverResponse(BaseModel):
@@ -546,11 +547,13 @@ class V3ReaderReadyRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     device_id: UUID
     reader_transport_version: Literal[3]
+    initial_web_setup: bool = Field(default=False, strict=True)
 
 
 class V3CutoverRequest(BaseModel):
     model_config = ConfigDict(extra='forbid')
     expected_cutover_epoch: int = Field(ge=0, le=SYNC_MAX_WIRE_INTEGER, strict=True)
+    initial_web_device_id: UUID | None = None
 
 
 class V3CutoverResponse(BaseModel):

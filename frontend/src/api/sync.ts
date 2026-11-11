@@ -23,8 +23,8 @@ export interface SyncDeviceResponse {
 
 /** Typed C9 client only. Production UI deliberately does not call this yet. */
 export const syncApi = {
-  registerDevice(accessToken: string, deviceId: string): Promise<SyncDeviceResponse> {
-    return apiRequest(`/api/v1/sync/devices/${encodeURIComponent(deviceId)}`, {
+  registerDevice(accessToken: string, deviceId: string, initialWebSetup?: boolean): Promise<SyncDeviceResponse> {
+    return apiRequest(`/api/v1/sync/devices/${encodeURIComponent(deviceId)}${initialWebSetup ? '?initial_web_setup=true' : ''}`, {
       method: 'PUT', headers: authorization(accessToken),
     })
   },

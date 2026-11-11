@@ -33,10 +33,20 @@ const creationCopy = {
   pt_BR: { title: 'Criar projeto na nuvem', name: 'Nome do projeto', saving: 'Salvando projeto…', saved: 'Projeto na nuvem criado.', failed: 'Não foi possível confirmar a criação. Verifique a conexão e tente novamente com o mesmo nome.', invalid: 'Digite um nome de até 512 bytes.', limit: 'O limite de projetos na nuvem foi atingido.', unavailable: 'A criação de projetos ainda não está disponível para esta conta.' },
 } satisfies Record<SupportedLanguage, Record<'title' | 'name' | 'saving' | 'saved' | 'failed' | 'invalid' | 'limit' | 'unavailable', string>>
 
+const setupCopy = {
+  ru: { action: 'Настроить облачную синхронизацию', hint: 'Это действие доступно для пустого аккаунта без других устройств.', busy: 'Проверяем облачную синхронизацию…', failed: 'Не удалось настроить синхронизацию. Повторите попытку.', used: 'Первоначальная настройка недоступна: в аккаунте уже есть проекты, история или другое устройство.' },
+  en: { action: 'Set up cloud sync', hint: 'Available for an empty account with no other devices.', busy: 'Checking cloud sync…', failed: 'Could not set up sync. Try again.', used: 'Initial setup is unavailable because the account already has projects, history, or another device.' },
+  es: { action: 'Configurar sincronización en la nube', hint: 'Disponible para una cuenta vacía sin otros dispositivos.', busy: 'Comprobando la sincronización…', failed: 'No se pudo configurar la sincronización. Inténtalo de nuevo.', used: 'La cuenta ya tiene proyectos, historial u otro dispositivo.' },
+  de: { action: 'Cloud-Synchronisierung einrichten', hint: 'Für ein leeres Konto ohne weitere Geräte verfügbar.', busy: 'Cloud-Synchronisierung wird geprüft…', failed: 'Synchronisierung konnte nicht eingerichtet werden. Versuche es erneut.', used: 'Das Konto hat bereits Projekte, einen Verlauf oder ein weiteres Gerät.' },
+  fr: { action: 'Configurer la synchronisation cloud', hint: 'Disponible pour un compte vide sans autre appareil.', busy: 'Vérification de la synchronisation…', failed: 'Impossible de configurer la synchronisation. Réessayez.', used: 'Le compte contient déjà des projets, un historique ou un autre appareil.' },
+  pt_BR: { action: 'Configurar sincronização na nuvem', hint: 'Disponível para uma conta vazia sem outros dispositivos.', busy: 'Verificando sincronização…', failed: 'Não foi possível configurar a sincronização. Tente novamente.', used: 'A conta já contém projetos, histórico ou outro dispositivo.' },
+} satisfies Record<SupportedLanguage, Record<'action' | 'hint' | 'busy' | 'failed' | 'used', string>>
+
 const locale = useLocaleStore()
 const t = locale.translate
 const words = computed(() => copy[locale.language])
 const createWords = computed(() => creationCopy[locale.language])
+const setupWords = computed(() => setupCopy[locale.language])
 const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean }>()
 const emit = defineEmits<{ statusChange: [status: BrowserCloudAccountSession['status']] }>()
 const session = props.session ?? new BrowserCloudAccountSession()
@@ -69,6 +79,10 @@ const cloudCreateBusy = ref(false)
 const cloudCreateSaved = ref(false)
 const cloudCreateError = ref<string | null>(null)
 let cloudCreateController: AbortController | null = null
+const syncMode = ref<1 | 2 | 3 | null>(null)
+const syncBusy = ref(false)
+const syncError = ref<string | null>(null)
+let syncController: AbortController | null = null
 let cloudCatalogGeneration = 0
 let cloudCatalogController: AbortController | null = null
 
@@ -146,6 +160,37 @@ async function loadCloudCatalog(): Promise<void> {
   }
 }
 
+function resetSyncSetup(): void {
+  syncController?.abort()
+  syncController = null
+  syncMode.value = null
+  syncBusy.value = false
+  syncError.value = null
+}
+
+async function checkSyncMode(activate = false): Promise<void> {
+  if (!props.session || session.status !== 'unlocked' || syncBusy.value) return
+  const controller = new AbortController()
+  syncController = controller
+  syncBusy.value = true
+  syncError.value = null
+  try {
+    if (activate) await session.setupInitialCloudSync(controller.signal)
+    const mode = await session.cloudSyncMode(controller.signal)
+    if (!controller.signal.aborted) syncMode.value = mode
+  } catch (cause) {
+    if (!controller.signal.aborted) {
+      syncError.value = cause instanceof ApiError && cause.code === 'initial_web_sync_requires_empty_account'
+        ? setupWords.value.used : setupWords.value.failed
+    }
+  } finally {
+    if (syncController === controller) {
+      syncController = null
+      syncBusy.value = false
+    }
+  }
+}
+
 function resetCloudCreate(): void {
   cloudCreateController?.abort()
   cloudCreateController = null
@@ -157,7 +202,7 @@ function resetCloudCreate(): void {
 
 async function createCloudProject(): Promise<void> {
   const name = cloudProjectName.value.trim()
-  if (session.status !== 'unlocked' || busy.value || cloudCreateBusy.value || !name) return
+  if (session.status !== 'unlocked' || (props.session && syncMode.value !== 3) || busy.value || cloudCreateBusy.value || !name) return
   cloudCreateError.value = null
   cloudCreateSaved.value = false
   if (new TextEncoder().encode(name).length > 512) {
@@ -218,7 +263,7 @@ function safeError(value: unknown, action: 'login' | 'unlock'): string {
 async function act(action: 'login' | 'unlock' | 'lock' | 'logout', operation: () => Promise<unknown>): Promise<void> {
   if (busy.value) return
   if ((action === 'lock' || action === 'logout') && workspaceOpen.value && !workspace.value?.canLeave()) return
-  if (action === 'lock' || action === 'logout') { resetCloudCreate(); workspaceOpen.value = false; selectedCloudProject.value = null }
+  if (action === 'lock' || action === 'logout') { resetSyncSetup(); resetCloudCreate(); workspaceOpen.value = false; selectedCloudProject.value = null }
   busy.value = true
   error.value = null
   try { await operation() }
@@ -260,7 +305,14 @@ async function signIn(): Promise<void> {
 function acceptLegal(): Promise<void> {
   const required = session.legalDocuments.filter(document => document.mandatory)
   if (!required.length || !required.every(document => legalConfirmed.value[document.document_id])) return Promise.resolve()
-  return act('login', () => session.acceptLegalDocuments(locale.language, required.map(confirmationFor)))
+  return act('login', async () => {
+    try {
+      await session.acceptLegalDocuments(locale.language, required.map(confirmationFor))
+    } catch (cause) {
+      if (!(cause instanceof KeyNotProvisionedError)) throw cause
+      needsProvisioning.value = true
+    }
+  })
 }
 async function provisionEncryption(): Promise<void> {
   const input = provisioningPasswordInput.value
@@ -307,6 +359,7 @@ watch([status, cloudProjects], ([nextStatus, projects]) => {
 })
 
 onBeforeUnmount(() => {
+  resetSyncSetup()
   resetCloudCreate()
   clearCloudCatalog()
   if (accountPasswordInput.value) accountPasswordInput.value.value = ''
@@ -326,7 +379,8 @@ watch(() => props.workspacePage, workspacePage => {
 
 watch(status, next => {
   emit('statusChange', next)
-  if (next !== 'unlocked') resetCloudCreate()
+  if (next === 'unlocked') void checkSyncMode()
+  else { resetSyncSetup(); resetCloudCreate() }
   if (next === 'logged_out' || next === 'legal_required') clearCloudCatalog()
 }, { immediate: true })
 </script>
@@ -370,7 +424,14 @@ watch(status, next => {
       <button class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
       </button>
-      <form v-if="status === 'unlocked'" class="browser-cloud-account__inputs browser-cloud-account__create"
+      <div v-if="props.session && status === 'unlocked' && syncMode !== 3" class="browser-cloud-account__create">
+        <p v-if="syncBusy" role="status">{{ setupWords.busy }}</p>
+        <p v-else-if="syncError" role="alert">{{ syncError }}</p>
+        <p v-else-if="syncMode !== null">{{ setupWords.hint }}</p>
+        <button v-if="!syncBusy" class="nf-button" type="button" :disabled="busy" data-testid="cloud-sync-setup"
+          @click="checkSyncMode(syncMode !== null)">{{ syncMode === null ? t('Повторить') : setupWords.action }}</button>
+      </div>
+      <form v-if="status === 'unlocked' && (!props.session || syncMode === 3)" class="browser-cloud-account__inputs browser-cloud-account__create"
         data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
         <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
         <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || !cloudProjectName.trim()">{{ createWords.title }}</button>

@@ -42,6 +42,7 @@ def cutover(request: V2EncryptedSyncCutoverRequest,
     try:
         writer_transport_version, cutover_epoch = SyncService().cutover_to_v2(
             session, current.user.id, request.expected_cutover_epoch,
+            initial_web_device_id=request.initial_web_device_id,
         )
     except SyncProtocolError as error:
         raise _error(error) from None

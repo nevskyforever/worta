@@ -143,3 +143,44 @@ def test_metadata_v3_all_registered_readers_and_strict_note_pairing(cloud_client
         'protocol_version': 2, 'encrypted_sync_version': 2, 'device_id': first,
         'items': [{'event': _event(entity_type='project_metadata'), 'object': _object()}],
     }).status_code == 422
+
+
+def test_initial_web_setup_requires_empty_scope_and_actual_reader(cloud_client):
+    client, engine = cloud_client
+    create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    v2 = '/api/v2/sync/encrypted'
+    v3 = '/api/v3/sync/encrypted'
+    device, other = str(uuid4()), str(uuid4())
+    assert client.get(f'{v2}/capabilities', headers=headers).json()['writer_transport_version'] == 1
+    assert client.post(f'{v2}/cutover', headers=headers, json={
+        'initial_web_device_id': device, 'expected_cutover_epoch': 99,
+    }).json()['detail']['code'] == 'sync_transport_cutover_stale'
+    assert client.post(f'{v2}/cutover', headers=headers, json={
+        'initial_web_device_id': device, 'expected_cutover_epoch': 0,
+    }).json()['writer_transport_version'] == 2
+    assert client.put(f'/api/v1/sync/devices/{device}?initial_web_setup=true', headers=headers).status_code == 200
+    assert client.put(f'/api/v1/sync/devices/{other}?initial_web_setup=true', headers=headers).json()[
+        'detail']['code'] == 'initial_web_sync_requires_empty_account'
+    assert client.post(f'{v3}/cutover', headers=headers, json={
+        'initial_web_device_id': device, 'expected_cutover_epoch': 1,
+    }).json()['detail']['code'] == 'sync_transport_readers_not_ready'
+    assert client.post(f'{v3}/reader-ready', headers=headers, json={
+        'initial_web_setup': True, 'device_id': device, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post(f'{v3}/cutover', headers=headers, json={
+        'initial_web_device_id': device, 'expected_cutover_epoch': 1,
+    }).json() == {'writer_transport_version': 3, 'cutover_epoch': 2}
+
+
+def test_initial_web_setup_rejects_account_with_project(cloud_client):
+    client, engine = cloud_client
+    create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    assert client.post('/api/v1/cloud/projects/project-1', headers=headers).status_code == 200
+    result = client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={
+        'initial_web_device_id': str(uuid4()), 'expected_cutover_epoch': 0,
+    })
+    assert result.status_code == 409
+    assert result.json()['detail']['code'] == 'initial_web_sync_requires_empty_account'
+    assert client.get('/api/v2/sync/encrypted/capabilities', headers=headers).json()['writer_transport_version'] == 1

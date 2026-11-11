@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import (AuthRefreshToken, AuthSession, CloudProject, EmailVerificationToken, SyncDevice, SyncEvent,
-                     GlobalLimits, PasswordResetToken, RegistrationSettings,
+                     GlobalLimits, PasswordResetToken, RegistrationSettings, SyncUserState,
                      ReservedUsername, User, UserLimitOverrides)
 from .passwords import PasswordService
 from .repositories import (AuthRepository, CloudProjectRepository, GlobalLimitsRepository,
@@ -341,11 +341,14 @@ class SyncService:
         if version != ENCRYPTED_SYNC_VERSION:
             raise SyncProtocolError('encrypted_sync_version_unsupported', 'Unsupported encrypted sync version.', 422)
 
-    def register_device(self, session: Session, user_id: object, device_id: object):
+    def register_device(self, session: Session, user_id: object, device_id: object, *, initial_web_setup: bool = False):
         try:
             session.commit()
             with session.begin():
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
+                if initial_web_setup:
+                    self._require_transport_mode(state, 2)
+                    self._require_initial_web_setup(session, user_id, state, device_id)
                 device = self._sync.register_device(session, user_id, device_id)
                 device.last_seen_at = utc_now()
                 session.flush()
@@ -382,13 +385,29 @@ class SyncService:
             return 1, 0
         return state.writer_transport_version, state.cutover_epoch
 
-    def cutover_to_v2(self, session: Session, user_id: object, expected_cutover_epoch: int) -> tuple[int, int]:
+    def _require_initial_web_setup(self, session: Session, user_id: object,
+                                   state: SyncUserState, device_id: object) -> None:
+        # Called under the account-state lock shared by registration and sync.
+        other_device = session.scalar(select(SyncDevice.device_id).where(
+            SyncDevice.user_id == user_id, SyncDevice.device_id != device_id,
+        ).limit(1))
+        if (state.current_sequence != 0 or state.compression_id1_required
+                or self._projects.count(session, user_id) != 0 or other_device is not None):
+            raise SyncProtocolError(
+                'initial_web_sync_requires_empty_account',
+                'Initial Web sync requires an empty account and no other registered devices.', 409,
+            )
+
+    def cutover_to_v2(self, session: Session, user_id: object, expected_cutover_epoch: int, *,
+                      initial_web_device_id: object | None = None) -> tuple[int, int]:
         try:
             session.commit()
             with session.begin():
                 # Push and bootstrap writers use this same row lock. Nothing can append
                 # an event between the complete-history check and the mode change.
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
+                if initial_web_device_id is not None:
+                    self._require_initial_web_setup(session, user_id, state, initial_web_device_id)
                 if state.writer_transport_version == 2:
                     return 2, state.cutover_epoch
                 if state.writer_transport_version != 1:
@@ -450,11 +469,14 @@ class SyncService:
         if state.compression_id1_required and not device.compression_id1:
             raise SyncProtocolError('compression_reader_required', 'Explicit ID1 reader support is required for retained account history.', 409)
 
-    def declare_v3_reader_ready(self, session: Session, user_id: object, device_id: object) -> None:
+    def declare_v3_reader_ready(self, session: Session, user_id: object, device_id: object, *,
+                                initial_web_setup: bool = False) -> None:
         try:
             session.commit()
             with session.begin():
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
+                if initial_web_setup:
+                    self._require_initial_web_setup(session, user_id, state, device_id)
                 if state.writer_transport_version not in (2, 3):
                     raise SyncProtocolError('sync_transport_mode_incompatible', 'Mode 2 is required before reader readiness.', 409)
                 device = self._registered_device(session, user_id, device_id)
@@ -625,14 +647,19 @@ class SyncService:
             session.rollback()
             raise
 
-    def cutover_to_v3(self, session: Session, user_id: object, expected_cutover_epoch: int) -> tuple[int, int]:
+    def cutover_to_v3(self, session: Session, user_id: object, expected_cutover_epoch: int, *,
+                      initial_web_device_id: object | None = None) -> tuple[int, int]:
         try:
             session.commit()
             with session.begin():
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
+                if initial_web_device_id is not None:
+                    self._require_initial_web_setup(session, user_id, state, initial_web_device_id)
                 if state.writer_transport_version == 3:
                     return 3, state.cutover_epoch
                 self._require_transport_mode(state, 2)
+                if initial_web_device_id is not None:
+                    self._registered_device(session, user_id, initial_web_device_id)
                 if state.cutover_epoch != expected_cutover_epoch:
                     raise SyncProtocolError('sync_transport_cutover_stale', 'Transport cutover epoch is stale.', 409)
                 if state.cutover_epoch >= SYNC_MAX_WIRE_INTEGER:

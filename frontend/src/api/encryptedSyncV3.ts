@@ -218,13 +218,13 @@ export const encryptedSyncV3Api = {
     return result
   }),
   pushAccount:(token:string,deviceId:string,items:readonly AccountPushItem[]):Promise<V3PushResponse> => apiRequest<unknown>('/api/v3/sync/encrypted/account/push',{method:'POST',headers:headers(token),rawBody:encodeAccountPush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
-  readerReady: (token: string, deviceId: string): Promise<void> => {
+  readerReady: (token: string, deviceId: string, initialWebSetup?: boolean, signal?: AbortSignal): Promise<void> => {
     if (!UUID.test(deviceId)) fail()
-    return apiRequest<void>('/api/v3/sync/encrypted/reader-ready', { method: 'POST', headers: headers(token), body: { device_id: deviceId, reader_transport_version: 3 } })
+    return apiRequest<void>('/api/v3/sync/encrypted/reader-ready', { method: 'POST', headers: headers(token), body: { device_id: deviceId, reader_transport_version: 3, initial_web_setup: initialWebSetup }, signal })
   },
-  cutover: (token: string, epoch: number): Promise<{ writer_transport_version: 3; cutover_epoch: number }> => {
+  cutover: (token: string, epoch: number, initialWebDeviceId?: string, signal?: AbortSignal): Promise<{ writer_transport_version: 3; cutover_epoch: number }> => {
     if (!safe(epoch, 0)) fail()
-    return apiRequest<unknown>('/api/v3/sync/encrypted/cutover', { method: 'POST', headers: headers(token), body: { expected_cutover_epoch: epoch } }).then(value => {
+    return apiRequest<unknown>('/api/v3/sync/encrypted/cutover', { method: 'POST', headers: headers(token), body: { expected_cutover_epoch: epoch, initial_web_device_id: initialWebDeviceId }, signal }).then(value => {
       if (!exact(value, ['writer_transport_version', 'cutover_epoch'])) fail()
       const result = value as { writer_transport_version: 3; cutover_epoch: number }
       if (result.writer_transport_version !== 3 || !safe(result.cutover_epoch, epoch + 1)) fail()

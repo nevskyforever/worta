@@ -11,7 +11,8 @@ export const contentApi = {
   },
 
   locale(language: SupportedLanguage): Promise<Record<string, string>> {
-    if (currentPlatform() === 'tauri') return Promise.resolve(bundledLocale(language))
+    // The closed Web Beta serves the account API without legacy content routes.
+    if (currentPlatform() === 'tauri' || currentPlatform() === 'web') return Promise.resolve(bundledLocale(language))
     return apiRequest<Record<string, string>>(
       `/api/content/locales/${encodeURIComponent(language)}`,
     )
