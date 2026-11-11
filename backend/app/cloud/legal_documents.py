@@ -56,7 +56,7 @@ class LegalDocumentError(Exception):
         super().__init__(code)
 
 
-BETA_WARNING_RU = """Вы участвуете в закрытом тестировании WORTA.
+BETA_WARNING_RU = """Вы участвуете в закрытом тестировании worta.
 
 Приложение находится в разработке. Возможны ошибки, временная недоступность функций и сервиса, проблемы с синхронизацией, повреждение или потеря данных.
 
@@ -90,9 +90,9 @@ DEFAULT_LEGAL_DOCUMENTS: tuple[LegalDocumentVersion, ...] = (
     LegalDocumentVersion(
         document_id='wotra.beta_terms',
         document_type='beta_terms',
-        revision='private-beta-warning-1',
+        revision='private-beta-warning-brand-2',
         language='ru',
-        title='Закрытое тестирование WORTA',
+        title='Закрытое тестирование worta',
         content=BETA_WARNING_RU,
         mandatory=True,
         requires_explicit_acceptance=True,

@@ -19,7 +19,7 @@ vi.mock('@/platform/web/cloudAccountSession', () => ({
     get username() { return fixture.username }
     get legalDocuments() { return fixture.status === 'legal_required' ? [{
       document_id: 'wotra.beta_terms', document_type: 'beta_terms', revision: '1',
-      content_checksum: 'a'.repeat(64), language: 'ru', title: 'Закрытое тестирование WORTA',
+      content_checksum: 'a'.repeat(64), language: 'ru', title: 'Закрытое тестирование worta',
       content: 'Возможны ошибки и потеря данных.', mandatory: true,
       requires_explicit_acceptance: true, accepted: false,
     }] : [] }
@@ -70,7 +70,7 @@ it('checks legal status at login and gates the encrypted account until explicit 
   await wrapper.get('form').trigger('submit')
   await flushPromises()
   expect(wrapper.get('[data-status]').attributes('data-status')).toBe('legal_required')
-  expect(wrapper.text()).toContain('Закрытое тестирование WORTA')
+  expect(wrapper.text()).toContain('Закрытое тестирование worta')
   expect(wrapper.text()).toContain('потеря данных')
   const accept = wrapper.findAll('button').find(button => button.text().includes('Принять действующие'))!
   expect(accept.attributes('disabled')).toBeDefined()
@@ -86,7 +86,7 @@ it('shows the bounded Web account, unlock, lock and logout flow without Note act
   const pinia = createPinia()
   useLocaleStore(pinia).language = 'ru'
   const wrapper = mount(BrowserCloudAccountCard, { global: { plugins: [pinia] } })
-  expect(wrapper.text()).toContain('Облачные проекты WORTA')
+  expect(wrapper.text()).toContain('Облачные проекты worta')
   expect(wrapper.get('[data-status]').attributes('data-status')).toBe('logged_out')
   await wrapper.get('input[autocomplete="username"]').setValue('one')
   await wrapper.get('input[autocomplete="current-password"]').setValue('account-pass')

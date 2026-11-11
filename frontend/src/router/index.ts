@@ -103,7 +103,8 @@ router.beforeEach(async (to) => {
 
 router.afterEach((route) => {
   const pageTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
-  document.title = pageTitle ? `${pageTitle} · nfprogress` : 'nfprogress'
+  const product = currentPlatform() === 'web' ? 'worta' : 'nfprogress'
+  document.title = pageTitle ? `${pageTitle} · ${product}` : product
 })
 
 export default router

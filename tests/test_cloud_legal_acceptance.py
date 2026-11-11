@@ -27,7 +27,7 @@ def _second_registry() -> LegalDocumentRegistry:
         document_type='beta_terms',
         revision='private-beta-warning-2',
         language='ru',
-        title='Закрытое тестирование WORTA',
+        title='Закрытое тестирование worta',
         content=f'{BETA_WARNING_RU}\n\nРедакция для проверки повторного подтверждения.',
         mandatory=True,
         requires_explicit_acceptance=True,
@@ -47,7 +47,7 @@ def test_invitation_requires_exact_documents_and_records_server_evidence(cloud_c
     }).json()['documents']
     assert [item['document_type'] for item in documents] == ['beta_terms']
     assert documents[0]['language'] == 'ru'
-    assert documents[0]['title'] == 'Закрытое тестирование WORTA'
+    assert documents[0]['title'] == 'Закрытое тестирование worta'
     assert documents[0]['content'] == BETA_WARNING_RU
 
     missing = client.post('/api/v1/auth/invitations/accept', json={
@@ -122,7 +122,7 @@ def test_old_account_is_gated_then_new_revision_is_append_only(cloud_client):
             UserDocumentAcceptance.user_id == user_id).order_by(
                 UserDocumentAcceptance.accepted_at)).all()
         assert [row.revision for row in rows] == [
-            'private-beta-warning-1', 'private-beta-warning-2',
+            'private-beta-warning-brand-2', 'private-beta-warning-2',
         ]
 
 
@@ -134,7 +134,7 @@ def test_current_revision_acceptance_survives_interface_language_change(cloud_cl
         LegalDocumentVersion(
             document_id='wotra.beta_terms',
             document_type='beta_terms',
-            revision='private-beta-warning-1',
+            revision='private-beta-warning-brand-2',
             language='en',
             title='Private beta fixture translation',
             content='Test-only approved translation fixture.',
@@ -227,7 +227,7 @@ def test_unapproved_mandatory_registry_fails_closed(cloud_client):
         document_type='beta_terms',
         revision='owner-review-required',
         language='ru',
-        title='Закрытое тестирование WORTA',
+        title='Закрытое тестирование worta',
         content='DRAFT',
         mandatory=True,
         requires_explicit_acceptance=True,

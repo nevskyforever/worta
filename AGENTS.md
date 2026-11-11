@@ -1,5 +1,9 @@
 ## About the project
 
+The user-facing product name is always **worta**, lowercase in every language.
+Keep compatibility identifiers such as API paths, storage keys, and database
+names unchanged unless the task explicitly calls for a migration.
+
 This is a Python desktop application with a PySide6 GUI for writers to track their writing progress, with optional gamification features.
 
 > **Current UI:** the user-facing interface is implemented in Vue (`frontend/`).

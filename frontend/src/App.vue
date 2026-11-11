@@ -31,6 +31,10 @@ const notifications = useNotificationsStore()
 const updater = useUpdaterStore()
 const cloudSession = useCloudSessionStore()
 const t = locale.translate
+function bootstrapText(source: string): string {
+  const label = t(source)
+  return currentPlatform() === 'web' ? label.replace(/nfprogress|worta/gi, 'worta') : label
+}
 const appIcon = '/icons/icon-192.webp'
 const bootstrapState = ref<BootstrapState>('loading')
 const bootstrapError = ref<string | null>(null)
@@ -114,7 +118,7 @@ onBeforeUnmount(() => {
       aria-live="polite"
     >
       <img class="application-bootstrap__mark" :src="appIcon" alt="" />
-      <p>{{ t('Запускаем nfprogress…') }}</p>
+      <p>{{ bootstrapText('Запускаем nfprogress…') }}</p>
     </div>
 
     <div
@@ -123,7 +127,7 @@ onBeforeUnmount(() => {
       role="alert"
     >
       <img class="application-bootstrap__mark" :src="appIcon" alt="" />
-      <h1>{{ t('Не удалось открыть nfprogress') }}</h1>
+      <h1>{{ bootstrapText('Не удалось открыть nfprogress') }}</h1>
       <p>{{ bootstrapError ?? t('Не удалось подключиться к приложению.') }}</p>
       <button class="nf-button" type="button" @click="bootstrapApplication">
         {{ t('Повторить') }}

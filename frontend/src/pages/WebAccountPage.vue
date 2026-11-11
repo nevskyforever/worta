@@ -21,6 +21,6 @@ function syncRoute(status: typeof session.status): void {
 </template>
 
 <style scoped>
-.web-account { max-width: 58rem; width: 100%; margin: 0 auto; padding: clamp(1rem, 4vw, 3rem); }
+.web-account { max-width: 58rem; width: 100%; height: 100%; overflow: auto; margin: 0 auto; padding: clamp(1rem, 4vw, 3rem); }
 .web-account > h1 { font-family: var(--nf-font-serif); font-size: clamp(2rem, 6vw, 3.5rem); }
 </style>
