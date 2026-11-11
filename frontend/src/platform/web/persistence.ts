@@ -19,6 +19,7 @@ import { BrowserLocalStages } from './localStages'
 import { BrowserLocalDocuments } from './localDocuments'
 import { validateBrowserV5State } from './localAuthorityMigration'
 import { BrowserImportedMetadataApply } from './importedMetadataApply'
+import { BrowserSelfMetadataCreate } from './selfMetadataCreate'
 import { BrowserProjectBindings, validateBrowserProjectBinding } from './projectBindings'
 import type { CloudIdentity, CloudIdentityRepository } from '@/infrastructure/sqlite/cloudIdentityRepository'
 import type { CloudAccountBindingRepository, EnsureCloudAccountBindingResult } from '@/infrastructure/sqlite/cloudAccountBindingRepository'
@@ -226,6 +227,7 @@ class BrowserPersistence implements CloudIdentityRepository, CloudAccountBinding
   readonly stageOrder: BrowserStageOrderApply
   readonly stages: BrowserStageApply
   readonly metadata: BrowserImportedMetadataApply
+  readonly selfMetadataCreate: BrowserSelfMetadataCreate
   readonly localSource: BrowserLocalAuthority
   readonly localStages: BrowserLocalStages
   readonly localDocuments: BrowserLocalDocuments
@@ -267,6 +269,7 @@ class BrowserPersistence implements CloudIdentityRepository, CloudAccountBinding
     this.stageOrder = new BrowserStageOrderApply((scope,stores,mode,schedule)=>this.syncTransaction(scope,stores,mode,schedule),()=>this.active)
     this.stages = new BrowserStageApply((scope, stores, mode, schedule) => this.syncTransaction(scope, stores, mode, schedule), () => this.active)
     this.metadata = new BrowserImportedMetadataApply((scope, stores, mode, schedule) => this.syncTransaction(scope, stores, mode, schedule), this.sync)
+    this.selfMetadataCreate = new BrowserSelfMetadataCreate((scope, stores, mode, schedule) => this.syncTransaction(scope, stores, mode, schedule), this.sync)
     database.onversionchange = () => { void this.close() }
     database.onclose = () => { void this.close() }
     signal.addEventListener('abort', this.abort, { once: true })

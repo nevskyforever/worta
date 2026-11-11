@@ -71,9 +71,9 @@ export const cloudProjectsApi = {
     })
   },
 
-  registerBootstrap(accessToken: string, projectId: string, body: CloudProjectBootstrapRegistration): Promise<CloudProjectBootstrapResponse> {
+  registerBootstrap(accessToken: string, projectId: string, body: CloudProjectBootstrapRegistration, signal?: AbortSignal): Promise<CloudProjectBootstrapResponse> {
     return apiRequest<CloudProjectBootstrapResponse>(`/api/v1/cloud/projects/${encodeURIComponent(projectId)}/bootstrap`, {
-      method: 'POST', headers: authorization(accessToken), body,
+      method: 'POST', headers: authorization(accessToken), body, signal,
     })
   },
 

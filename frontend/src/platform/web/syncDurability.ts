@@ -13,6 +13,7 @@ import type { AccountDescriptor, V3Descriptor } from '@/api/encryptedSyncV3'
 import { MAX_ENCRYPTED_SYNC_BATCH_CIPHERTEXT_BYTES, MAX_ENCRYPTED_SYNC_WIRE_BODY_BYTES } from '@/api/encryptedSync'
 import { parseV2PullResponse, parseV2PushResponse, validateV2PushItem } from '@/api/encryptedSyncV2'
 import { parseV3Pull, parseV3PushResponse } from '@/api/encryptedSyncV3'
+import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
 import type { CommitInboundPageResult, NoteSyncPullState } from '@/infrastructure/sqlite/noteSyncInboxRepository'
 import { BrowserPersistenceError, type runBrowserTransaction } from './persistence'
 
@@ -286,7 +287,17 @@ export function validateBrowserInboxRecord(value: unknown, scope: BrowserSyncSco
 function assertOwnEcho(outbound: BrowserOutboxRecord, incoming: WireItem): void {
   const { device_id, server_sequence: _sequence, ...descriptor } = incoming.event
   const body = wireJSON(outbound.raw_body) as WirePage
-  if (device_id !== outbound.device_id || immutableWireIdentity(body.items[0]) !== immutableWireIdentity({ event: descriptor, object: incoming.object })) failure('conflicting_record')
+  const sent = body.items[0]!
+  const normalize = (event: WireItem['event']) => {
+    const project = event as Partial<V3Descriptor>
+    // The server can serialize the same UTC instant with different fractional precision.
+    return outbound.protocol_version === 3 && project.entity_type === 'project_metadata'
+      && project.operation === 'upsert' && project.revision === 1 && project.deleted_at === null
+      ? { ...event, updated_at: canonicalizeSyncTimestamp(project.updated_at!) }
+      : event
+  }
+  if (device_id !== outbound.device_id || immutableWireIdentity({ ...sent, event: normalize(sent.event) })
+    !== immutableWireIdentity({ event: normalize(descriptor), object: incoming.object })) failure('conflicting_record')
 }
 
 function historyReference(value: BrowserEncryptedHistoryReference, scope: BrowserSyncScope): BrowserEncryptedHistoryReference {
@@ -484,6 +495,18 @@ export class BrowserSyncDurability {
     scope = snapshotScope(scope)
     return this.transaction(scope, ['outbox', 'inbox', 'cursors'], 'readonly', (tx, result, fail) => {
       readBrowserSyncCursor(tx, scope, row => result({ pull_cursor: row.pull_cursor, ack_cursor: row.ack_cursor, proven_prefix: row.proven_prefix, next_local_ordinal: row.next_local_ordinal }), fail)
+    })
+  }
+
+  readInboxEvent(scope: BrowserSyncScope, sequence: number): Promise<BrowserInboxRecord | null> {
+    scope = snapshotScope(scope)
+    if (!safe(sequence, 1)) failure()
+    return this.transaction(scope, ['inbox'], 'readonly', (tx, result, fail) => {
+      const read = tx.objectStore('inbox').get([scope.accountId, sequence])
+      read.onsuccess = () => {
+        try { result(read.result === undefined ? null : validateBrowserInboxRecord(read.result, scope)) }
+        catch (error) { fail(error) }
+      }
     })
   }
 

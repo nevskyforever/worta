@@ -240,8 +240,8 @@ export const encryptedSyncV3Api = {
   }),
   pushCoverMetadata: (token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse> =>
     apiRequest<unknown>('/api/v3/sync/encrypted/cover-metadata/push',{method:'POST',headers:headers(token),rawBody:encodeV3MetadataPush(deviceId,items)}).then(value=>parsePush(value,items.map(item=>item.event.event_id))),
-  pushMetadata: (token: string, deviceId: string, items: readonly V3MetadataPushItem[]): Promise<V3PushResponse> =>
-    apiRequest<unknown>('/api/v3/sync/encrypted/push', { method: 'POST', headers: headers(token), rawBody: encodeV3MetadataPush(deviceId, items) })
+  pushMetadata: (token: string, deviceId: string, items: readonly V3MetadataPushItem[], signal?: AbortSignal): Promise<V3PushResponse> =>
+    apiRequest<unknown>('/api/v3/sync/encrypted/push', { method: 'POST', headers: headers(token), rawBody: encodeV3MetadataPush(deviceId, items), signal })
       .then(value => parsePush(value, items.map(item => item.event.event_id))),
   async pull(token: string, deviceId: string, since: number, limit = 200, signal?: AbortSignal): Promise<V3PullResponse> {
     return parseV3Pull(await requestV3Pull(token, deviceId, since, limit, signal), since, limit)

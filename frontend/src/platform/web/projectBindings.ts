@@ -82,7 +82,7 @@ export function browserProjectReadiness(row: BrowserProjectBinding | null): Brow
 /** Dormant installation lineage only. Trusted future coordinator owns project preflight and remote provenance. */
 export class BrowserProjectBindings {
   constructor(private readonly transaction: BrowserSyncTransaction) {}
-  private create(scope: BrowserSyncScope, candidate: BrowserProjectBinding, replay: 'preparation' | 'import'): Promise<BrowserProjectBinding> {
+  private create(scope: BrowserSyncScope, candidate: BrowserProjectBinding, replay: 'preparation' | 'import' | 'metadata_create'): Promise<BrowserProjectBinding> {
     candidate = validateBrowserProjectBinding(candidate, scope)
     return this.transaction(scope, ['projectBindings'], 'readwrite', (tx, result, abort) => {
       const store = tx.objectStore('projectBindings'), existing = store.get([scope.accountId, candidate.project_id])
@@ -93,7 +93,7 @@ export class BrowserProjectBindings {
         try {
           if (existing.result !== undefined) {
             const old = validateBrowserProjectBinding(existing.result, scope)
-            if (old.mode !== candidate.mode || replay === 'import' && old.bootstrap_id !== candidate.bootstrap_id) fail('conflicting_record')
+            if (old.mode !== candidate.mode || replay !== 'preparation' && old.bootstrap_id !== candidate.bootstrap_id) fail('conflicting_record')
             result(old); return // Native prepare/import retry preserves original record; never resets phase/high-water.
           }
           if (lineage.result !== undefined && validateBrowserProjectBinding(lineage.result, scope).project_id !== candidate.project_id) fail('conflicting_record')
@@ -110,6 +110,14 @@ export class BrowserProjectBindings {
     return this.create(scope, { record_version: 1, account_id: scope.accountId, device_id: scope.deviceId, project_id: command.project_id,
       bootstrap_id: crypto.randomUUID(), mode: 'upload_existing', phase: 'prepared', remote_state: null,
       initial_event_count: 0, initial_local_ordinal_hi: 0, remote_high_water: null, initial_max_server_sequence: null, blocked_reason: null }, 'preparation')
+  }
+  /** Retain the lineage already authenticated by the Metadata Create author. */
+  prepareMetadataCreate(scope: BrowserSyncScope, projectId: string, bootstrapId: string): Promise<BrowserProjectBinding> {
+    scope = snapshotBrowserSyncScope(scope)
+    return this.create(scope, { record_version: 1, account_id: scope.accountId, device_id: scope.deviceId,
+      project_id: projectId, bootstrap_id: bootstrapId, mode: 'upload_existing', phase: 'prepared',
+      remote_state: null, initial_event_count: 0, initial_local_ordinal_hi: 0, remote_high_water: null,
+      initial_max_server_sequence: null, blocked_reason: null }, 'metadata_create')
   }
   /** Explicit authenticated-registry import primitive, not authentication of a caller's DTO; no network/shell creation. */
   importRemote(scope: BrowserSyncScope, descriptor: BrowserRemoteProjectImport): Promise<BrowserProjectBinding> {

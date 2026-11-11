@@ -27,10 +27,16 @@ import { readBrowserCloudProject, BrowserCloudReadError, type BrowserCloudProjec
 import { generateAccountMasterKey, generateRecoveryKey } from '@/crypto/keys'
 import { wrapAmkWithPassphrase, wrapAmkWithRecoveryKey } from '@/crypto/wrapping'
 import { encodeBase64Url } from '@/api/base64url'
+import { stageCloudProjectMetadata, type CloudProjectCreateScope } from './cloudProjectCreate'
 import { withReceivedBrowserAccountHistory, receiveBrowserAccountHistory, type BrowserAccountReceiveResult } from './replayReceiver'
 
 type BrowserStorage = Awaited<ReturnType<typeof openBrowserPersistence>>
 type BrowserIdentity = { readonly local_account_id: string; readonly device_id: string }
+
+function requireMetadataCreateOwnerProof(): void {
+  // The Metadata Create owner/receipt proof is not yet part of the bootstrap cohort.
+  throw new BrowserPersistenceError('bootstrap_incomplete')
+}
 
 export interface BrowserLocalNoteRepository {
   /** Account/device scope derived from the authenticated, unlocked Web session. */
@@ -198,6 +204,28 @@ export class BrowserCloudAccountSession {
       if (!current() || !replaySame(snapshot, await storage.read())) throw new BrowserCloudReadError('unsupported_history')
       return result
     })
+  }
+
+  /** Create a new encrypted cloud project through the production sync v3 writer. */
+  async createCloudProject(name: string, signal?: AbortSignal): Promise<{ projectId: string; serverSequence: number }> {
+    this.assertWebRuntime()
+    requireMetadataCreateOwnerProof()
+    const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
+    const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
+    if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.storage || !this.controller) {
+      throw new BrowserCloudReadError('key_locked')
+    }
+    const scope: CloudProjectCreateScope = {
+      accountId: identity.local_account_id,
+      canonicalUserId: context.userId,
+      deviceId: identity.device_id,
+    }
+    const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context)
+    if (!current()) throw new BrowserCloudReadError('key_locked')
+    return stageCloudProjectMetadata(scope, name, {
+      auth: this.auth, bindings, keys,
+      storage: this.storage,
+    }, signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal)
   }
 
   /** Bounded peer Metadata only. Fresh server reconciliation is mandatory on every call. */
