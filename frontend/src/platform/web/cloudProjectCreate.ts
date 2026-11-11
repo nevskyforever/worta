@@ -7,6 +7,7 @@ import { createCloudProjectMetadata } from './cloudProjectMetadataCreate'
 import { BrowserPersistenceError } from './persistence'
 import { encodeBase64Url, decodeBase64Url } from '@/api/base64url'
 import { openProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
+import type { BrowserBootstrapCompletion } from './bootstrapCompletion'
 import type { BrowserProjectBindings } from './projectBindings'
 import type { BrowserSelfMetadataCreate } from './selfMetadataCreate'
 import { snapshotBrowserSyncScope, type BrowserSyncDurability } from './syncDurability'
@@ -24,6 +25,7 @@ export interface CloudProjectCreateDependencies {
   readonly storage: {
     readonly sync: BrowserSyncDurability
     readonly projects: BrowserProjectBindings
+    readonly completion: BrowserBootstrapCompletion
     readonly selfMetadataCreate: BrowserSelfMetadataCreate
     readonly device: {
       bind(auth: NormalUserAuthRuntime, bindings: AuthoritativeAccountBinding): {
@@ -65,7 +67,7 @@ function writePending(accountId: string, pending: PendingCloudProject): void {
 
 const inFlight = new Set<string>()
 
-/** Internal writer slice. Success means Metadata applied; bootstrap is still pending. */
+/** Complete a single cloud create, resuming the retained operation when requested again. */
 export async function stageCloudProjectMetadata(
   input: CloudProjectCreateScope,
   name: string,
@@ -99,12 +101,40 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
     return response.value
   }
 
+  const completion = storage.completion.bind(auth, bindings, keys)
+  const requestedName = name.trim()
   check()
   let pending = readPending(scope.accountId)
+  if (pending) {
+    const previous = pending
+    const item = pendingItem(previous)
+    try {
+      const event = await lease.use(amk => openProjectMetadataEvent(amk, {
+        account_id: scope.canonicalUserId, project_id: previous.projectId,
+        entity_id: previous.projectId, event_id: previous.eventId,
+      }, item.object))
+      check()
+      const h = event.header
+      if (event.version !== 1 || h.operation !== 'create' || h.bootstrap_id !== previous.bootstrapId
+        || h.device_id !== scope.deviceId || h.updated_at !== previous.updatedAt) throw new BrowserPersistenceError('metadata_rejected')
+      if (event.metadata?.name !== requestedName) {
+        const completed = await storage.projects.read(scope, previous.projectId)
+        check()
+        if (completed?.remote_state !== 'active' || completed.phase !== 'completing'
+          || completed.bootstrap_id !== previous.bootstrapId || completed.initial_metadata_event_id !== previous.eventId) {
+          throw new BrowserPersistenceError('metadata_rejected')
+        }
+        await completion.completeRemote(scope, completed, signal)
+        check()
+        // Replace the previous retry slot only after its durable active proof is verified.
+        pending = null
+      }
+    } finally { item.object.nonce.fill(0); item.object.ciphertext.fill(0) }
+  }
   if (!pending) {
     const created = await lease.use(amk => createCloudProjectMetadata({
       accountId: scope.canonicalUserId, canonicalUserId: scope.canonicalUserId, deviceId: scope.deviceId,
-    }, name, amk))
+    }, requestedName, amk))
     try {
       const { project_id, bootstrap_id, event_id, updated_at } = created.event.header
       pending = { projectId: project_id, bootstrapId: bootstrap_id, eventId: event_id, updatedAt: updated_at,
@@ -114,25 +144,13 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
       writePending(scope.accountId, pending)
     } finally { created.object.nonce.fill(0); created.object.ciphertext.fill(0) }
   }
-  const { projectId, bootstrapId, eventId, updatedAt } = pending
-  const item: V3MetadataPushItem = {
-    event: { event_id: eventId, project_id: projectId, entity_id: projectId, entity_type: 'project_metadata',
-      operation: 'upsert', revision: 1, updated_at: updatedAt, deleted_at: null },
-    object: { crypto_version: 1, aad_version: 1, nonce: decodeBase64Url(pending.nonce), ciphertext: decodeBase64Url(pending.ciphertext) },
-  }
+  const { projectId, bootstrapId, eventId } = pending
+  const item = pendingItem(pending)
   try {
-    const event = await lease.use(amk => openProjectMetadataEvent(amk, {
-      account_id: scope.canonicalUserId, project_id: projectId, entity_id: projectId, event_id: eventId,
-    }, item.object))
-    check()
-    const h = event.header
-    if (event.version !== 1 || h.operation !== 'create' || h.bootstrap_id !== bootstrapId || h.device_id !== scope.deviceId
-      || h.updated_at !== updatedAt || event.metadata?.name !== name.trim()) throw new BrowserPersistenceError('metadata_rejected')
-
     const [queued] = await storage.sync.enqueue(scope, [encodeV3MetadataPush(scope.deviceId, [item])])
     if (!queued) throw new BrowserPersistenceError('corrupt_record')
     check()
-    const lineage = await storage.projects.prepareMetadataCreate(scope, projectId, bootstrapId, eventId)
+    let lineage = await storage.projects.prepareMetadataCreate(scope, projectId, bootstrapId, eventId)
     check()
     const device = await storage.device.bind(auth, bindings).registerOnce(scope)
     check()
@@ -146,7 +164,7 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
         || project.state !== 'initializing' || project.initial_event_count !== null || project.initial_max_server_sequence !== null) {
         throw new BrowserPersistenceError('registry_rejected')
       }
-      await storage.projects.confirmRegistration(scope, lineage, {
+      lineage = await storage.projects.confirmRegistration(scope, lineage, {
         remote_state: 'initializing', remote_high_water: registration.current_cursor,
       })
       check()
@@ -179,7 +197,25 @@ async function stage(scope: CloudProjectCreateScope, name: string, dependencies:
     check()
     await storage.selfMetadataCreate.commit(scope, plan)
     check()
-    // Keep the retry identity until a future, proof-backed bootstrap completion.
+    if (lineage.phase === 'registered') lineage = await completion.captureMetadataCreate(scope, lineage, signal)
+    check()
+    if (lineage.phase === 'captured') lineage = await completion.markCompleting(scope, lineage, signal)
+    check()
+    const active = await completion.completeRemote(scope, lineage, signal)
+    check()
+    if (active.remote_state !== 'active' || active.initial_max_server_sequence !== sequence) {
+      throw new BrowserPersistenceError('bootstrap_incomplete')
+    }
+    // Keep one encrypted retry slot. A different name may replace it after active is verified.
     return { projectId, serverSequence: sequence }
   } finally { item.object.nonce.fill(0); item.object.ciphertext.fill(0) }
+}
+
+function pendingItem(pending: PendingCloudProject): V3MetadataPushItem {
+  const { eventId, projectId, updatedAt, nonce, ciphertext } = pending
+  return {
+    event: { event_id: eventId, project_id: projectId, entity_id: projectId, entity_type: 'project_metadata',
+      operation: 'upsert', revision: 1, updated_at: updatedAt, deleted_at: null },
+    object: { crypto_version: 1, aad_version: 1, nonce: decodeBase64Url(nonce), ciphertext: decodeBase64Url(ciphertext) },
+  }
 }

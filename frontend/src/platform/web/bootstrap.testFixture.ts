@@ -29,7 +29,7 @@ export async function fixture(ids = ['z','a']) {
   const key = (name: string, value: unknown) => { const r = value as Record<string,unknown>; return name === 'ownerHeads' ? [r.account_id,r.owner_kind,r.owner_id] : name === 'legacyNoteHistory' ? [r.account_id,r.project_id,r.note_id,r.record_kind,r.record_id] : name === 'localNotes' ? [r.account_id,r.project_id,r.note_id] : ['outbox','receipts','legacyNoteIntents'].includes(name) ? [r.account_id,r.event_id] : name === 'inbox' ? [r.account_id,r.server_sequence] : name === 'cursors' ? [r.account_id,r.device_id] : [r.account_id,r.project_id] }
   const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const transaction: BrowserSyncTransaction = (s, stores, mode, schedule) => new Promise((resolve,reject) => {
-    calls.push({ mode, stores }); if (closed) { reject(new BrowserPersistenceError('closed')); return }; if (!eq(s,scope)) { reject(new BrowserPersistenceError('account_mismatch')); return }
+    calls.push({ mode, stores }); if (closed) { reject(new BrowserPersistenceError('closed')); return }; if (s.accountId !== scope.accountId || s.canonicalUserId !== scope.canonicalUserId || s.deviceId !== scope.deviceId) { reject(new BrowserPersistenceError('account_mismatch')); return }
     const pending = structuredClone(db), requests: {result: unknown;onsuccess: (() => void) | null}[] = []; let result: unknown, error: unknown
     const read = (value: unknown) => { const r = { result: structuredClone(value), onsuccess: null as (() => void) | null }; requests.push(r); return r }
     const select = (name: string, range: {lower: unknown[]}) => pending[name]!.filter(v => range.lower.every((part,i) => key(name,v)[i] === part))

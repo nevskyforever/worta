@@ -33,11 +33,6 @@ import { withReceivedBrowserAccountHistory, receiveBrowserAccountHistory, type B
 type BrowserStorage = Awaited<ReturnType<typeof openBrowserPersistence>>
 type BrowserIdentity = { readonly local_account_id: string; readonly device_id: string }
 
-function requireMetadataCreateOwnerProof(): void {
-  // The Metadata Create owner/receipt proof is not yet part of the bootstrap cohort.
-  throw new BrowserPersistenceError('bootstrap_incomplete')
-}
-
 export interface BrowserLocalNoteRepository {
   /** Account/device scope derived from the authenticated, unlocked Web session. */
   readonly scope: BrowserSyncScope
@@ -209,7 +204,6 @@ export class BrowserCloudAccountSession {
   /** Create a new encrypted cloud project through the production sync v3 writer. */
   async createCloudProject(name: string, signal?: AbortSignal): Promise<{ projectId: string; serverSequence: number }> {
     this.assertWebRuntime()
-    requireMetadataCreateOwnerProof()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.storage || !this.controller) {

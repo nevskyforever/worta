@@ -85,10 +85,10 @@ export class BrowserBootstrapCompletion {
 }
 export class BrowserBootstrapCompletionRuntime {
   constructor(private readonly transaction: BrowserSyncTransaction, private readonly sessionCurrent: () => boolean, private readonly auth: NormalUserAuthRuntime, private readonly bindings: AuthoritativeAccountBinding, private readonly keys: RuntimeKeyContext) {}
-  private async guard(scope: BrowserSyncScope) {
-    if (!this.sessionCurrent() || this.auth.state !== 'authenticated') fail('closed')
+  private async guard(scope: BrowserSyncScope, signal?: AbortSignal) {
+    if (signal?.aborted || !this.sessionCurrent() || this.auth.state !== 'authenticated') fail('closed')
     const {context} = await this.bindings.ensureForCurrentUser(scope.accountId), lease = this.keys.leaseForAccount(scope.accountId)
-    const current = () => this.sessionCurrent() && this.auth.isCurrent(context) && !!lease?.isCurrent()
+    const current = () => !signal?.aborted && this.sessionCurrent() && this.auth.isCurrent(context) && !!lease?.isCurrent()
     if (!lease || context.userId !== scope.canonicalUserId || lease.canonicalUserId !== context.userId || lease.localAccountId !== scope.accountId || lease.authEpoch !== context.authEpoch) throw new BrowserPersistenceError('account_mismatch')
     if (!current()) fail('closed')
     return { current, lease }
@@ -107,12 +107,15 @@ export class BrowserBootstrapCompletionRuntime {
 
   private async commitMetadata(
     scope: BrowserSyncScope, expected: BrowserProjectBinding, target: BrowserProjectBinding,
-    verified: MetadataCohort, current: () => boolean,
+    verified: MetadataCohort, current: () => boolean, signal?: AbortSignal,
   ): Promise<BrowserProjectBinding> {
     const cleanup: Array<() => void> = []
     return this.transaction<BrowserProjectBinding>(scope, metadataStores, 'readwrite', (tx, result, abort) => {
       const revoke = () => abort(new BrowserPersistenceError('closed'))
       cleanup.push(this.auth.onInvalidated(revoke), this.keys.onInvalidated(revoke))
+      signal?.addEventListener('abort', revoke, { once: true })
+      cleanup.push(() => signal?.removeEventListener('abort', revoke))
+      if (!current()) { revoke(); return }
       readMetadataCohort(tx, scope, expected, actual => {
         if (!current()) fail('closed')
         if (!same(actual.retained, verified.retained)) fail('stale_lineage')
@@ -126,15 +129,15 @@ export class BrowserBootstrapCompletionRuntime {
   }
 
   /** Freeze the one authenticated Create as the initial cohort. */
-  async captureMetadataCreate(scope: BrowserSyncScope, expected: BrowserProjectBinding): Promise<BrowserProjectBinding> {
+  async captureMetadataCreate(scope: BrowserSyncScope, expected: BrowserProjectBinding, signal?: AbortSignal): Promise<BrowserProjectBinding> {
     scope = snapshotBrowserSyncScope(scope)
     expected = validateBrowserProjectBinding(expected, scope)
     if (!expected.initial_metadata_event_id || !['registered', 'captured'].includes(expected.phase)) fail('invalid_lineage_transition')
-    const { current, lease } = await this.guard(scope)
+    const { current, lease } = await this.guard(scope, signal)
     const verified = await this.metadataProof(scope, expected, lease, current)
     const target = validateBrowserProjectBinding({ ...expected, phase: 'captured', initial_event_count: 1,
       initial_local_ordinal_hi: verified.ordinal }, scope)
-    return this.commitMetadata(scope, expected, target, verified, current)
+    return this.commitMetadata(scope, expected, target, verified, current, signal)
   }
 
   private async proof(scope: BrowserSyncScope, expected: BrowserProjectBinding, current: () => boolean): Promise<BrowserProjectBinding> {
@@ -152,16 +155,16 @@ export class BrowserBootstrapCompletionRuntime {
     const finish = () => { if (++count !== 3) return; try {consume(validateBrowserProjectBinding(binding.result,scope),out.result,receipts.result)} catch(e){abort(e)} }
     binding.onsuccess=finish;out.onsuccess=finish;receipts.onsuccess=finish
   }
-  async markCompleting(scope: BrowserSyncScope, expected: BrowserProjectBinding): Promise<BrowserProjectBinding> {
+  async markCompleting(scope: BrowserSyncScope, expected: BrowserProjectBinding, signal?: AbortSignal): Promise<BrowserProjectBinding> {
     scope=snapshotBrowserSyncScope(scope);expected=validateBrowserProjectBinding(expected,scope)
     if (expected.mode !== 'upload_existing' || !['captured','completing'].includes(expected.phase)) fail('invalid_lineage_transition')
-    const { current, lease } = await this.guard(scope)
+    const { current, lease } = await this.guard(scope, signal)
     if (expected.initial_metadata_event_id) {
       const verified = await this.metadataProof(scope, expected, lease, current)
       const target = validateBrowserProjectBinding({ ...expected, phase: 'completing',
         initial_max_server_sequence: verified.sequence }, scope)
       if (expected.phase === 'completing' && !same(target, expected)) fail('stale_lineage')
-      return this.commitMetadata(scope, expected, target, verified, current)
+      return this.commitMetadata(scope, expected, target, verified, current, signal)
     }
     let unsubscribe:(()=>void)|undefined
     return this.transaction<BrowserProjectBinding>(scope,['projectBindings','outbox','receipts'],'readwrite',(tx,result,abort)=>{
@@ -183,27 +186,28 @@ export class BrowserBootstrapCompletionRuntime {
       }catch(e){abort(e)}},abort,expected.project_id)
     }).finally(()=>unsubscribe?.())
   }
-  async completeRemote(scope: BrowserSyncScope, expected: BrowserProjectBinding): Promise<BrowserProjectBinding> {
+  async completeRemote(scope: BrowserSyncScope, expected: BrowserProjectBinding, signal?: AbortSignal): Promise<BrowserProjectBinding> {
     scope=snapshotBrowserSyncScope(scope);expected=validateBrowserProjectBinding(expected,scope);completing(expected)
-    const { current, lease } = await this.guard(scope)
+    const { current, lease } = await this.guard(scope, signal)
     const metadata = expected.initial_metadata_event_id ? await this.metadataProof(scope, expected, lease, current) : null
     const old = metadata ? metadata.binding : await this.proof(scope, expected, current)
     if (!same(old, expected)) fail('stale_lineage')
     if(old.remote_state==='active')return old // Exact durable replay; no repeat HTTP/ready.
     const body:CloudProjectBootstrapCompletion={bootstrap_id:old.bootstrap_id,device_id:old.device_id,initial_event_count:old.initial_event_count,initial_max_server_sequence:old.initial_max_server_sequence!}
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),BOOTSTRAP_COMPLETION_TIMEOUT_MS)
+    const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal
     const unsubscribe=this.auth.onInvalidated(()=>controller.abort())
     const unsubscribeKey = metadata ? this.keys.onInvalidated(() => controller.abort()) : undefined
     let target:BrowserProjectBinding
     try{
       if(!current())fail('closed')
-      const response=await this.auth.authorized(token=>{if(!current())fail('closed');return cloudProjectsApi.completeBootstrap(token,old.project_id,body,controller.signal)})
+      const response=await this.auth.authorized(token=>{if(!current())fail('closed');return cloudProjectsApi.completeBootstrap(token,old.project_id,body,requestSignal)})
       if(!current()||response.context.userId!==scope.canonicalUserId)fail('closed')
       target=validateBootstrapCompletionResponse(scope,old,response.value)
     }catch(e){if(!current())fail('closed');if(e instanceof BrowserPersistenceError)throw e;fail('bootstrap_completion_failed')}
     finally{clearTimeout(timeout);unsubscribe();unsubscribeKey?.()}
     // HTTP has finished. Never keep a transaction alive across the request.
-    if (metadata) return this.commitMetadata(scope, old, target, metadata, current)
+    if (metadata) return this.commitMetadata(scope, old, target, metadata, current, signal)
     let unsub:(()=>void)|undefined
     return this.transaction<BrowserProjectBinding>(scope,['projectBindings','outbox','receipts'],'readwrite',(tx,result,abort)=>{
       unsub=this.auth.onInvalidated(()=>abort(new BrowserPersistenceError('closed')))
