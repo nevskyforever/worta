@@ -37,7 +37,9 @@ const locale = useLocaleStore()
 const t = locale.translate
 const words = computed(() => copy[locale.language])
 const createWords = computed(() => creationCopy[locale.language])
-const session = new BrowserCloudAccountSession()
+const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean }>()
+const emit = defineEmits<{ statusChange: [status: BrowserCloudAccountSession['status']] }>()
+const session = props.session ?? new BrowserCloudAccountSession()
 const status = ref(session.status)
 const username = ref('')
 const accountPasswordInput = ref<HTMLInputElement | null>(null)
@@ -309,19 +311,30 @@ onBeforeUnmount(() => {
   clearCloudCatalog()
   if (accountPasswordInput.value) accountPasswordInput.value.value = ''
   if (encryptionPasswordInput.value) encryptionPasswordInput.value.value = ''
-  void session.dispose().catch(() => undefined)
+  unsubscribeRevoked?.()
+  if (!props.session) void session.dispose().catch(() => undefined)
 })
 
+const unsubscribeRevoked = session.onRevoked?.(refresh)
+
+watch(() => props.workspacePage, workspacePage => {
+  if (workspacePage && session.status === 'unlocked' && !cloudCatalogOpen.value) {
+    cloudCatalogOpen.value = true
+    void loadCloudCatalog()
+  }
+}, { immediate: true })
+
 watch(status, next => {
+  emit('statusChange', next)
   if (next !== 'unlocked') resetCloudCreate()
   if (next === 'logged_out' || next === 'legal_required') clearCloudCatalog()
-})
+}, { immediate: true })
 </script>
 
 <template>
   <section class="settings-card" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
     <div class="settings-card__heading">
-      <h2 id="browser-cloud-account-title">{{ t('Режим разработчика') }} · {{ t('Зашифрованное рабочее пространство') }}</h2>
+      <h2 id="browser-cloud-account-title">{{ t('Зашифрованное рабочее пространство') }}</h2>
       <p>{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
     </div>
     <p :data-status="status" aria-live="polite">
@@ -409,7 +422,7 @@ watch(status, next => {
         <button class="nf-button" type="button" @click="recoveryKey = null">{{ t('Закрыть') }}</button>
       </section>
       <button v-if="status === 'unlocked'" class="nf-button nf-button--secondary" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
-      <button v-if="status === 'unlocked'" class="nf-button" type="button" :disabled="busy" @click="toggleWorkspace">
+      <button v-if="status === 'unlocked' && !props.session" class="nf-button" type="button" :disabled="busy" @click="toggleWorkspace">
         {{ workspaceOpen ? t('Закрыть рабочее пространство') : words.localWorkspace }}
       </button>
       <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>

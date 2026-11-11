@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { IonApp, IonRouterOutlet } from '@ionic/vue'
 
 import { apiErrorMessage } from '@/api/client'
@@ -35,6 +35,7 @@ const appIcon = '/icons/icon-192.webp'
 const bootstrapState = ref<BootstrapState>('loading')
 const bootstrapError = ref<string | null>(null)
 let updateTimer: number | null = null
+const WebAccountPage = defineAsyncComponent(() => import('@/pages/WebAccountPage.vue'))
 const workspaceWindow = isWorkspaceWindow()
 const isStandaloneRoute = computed(() => router.currentRoute.value.meta.admin === true
   || router.currentRoute.value.meta.standalone === true)
@@ -104,7 +105,8 @@ onBeforeUnmount(() => {
 
 <template>
   <IonApp>
-    <IonRouterOutlet v-if="isStandaloneRoute" />
+    <WebAccountPage v-if="router.currentRoute.value.meta.webAccount" />
+    <IonRouterOutlet v-else-if="isStandaloneRoute" />
     <div
       v-else-if="bootstrapState === 'loading'"
       class="application-bootstrap"

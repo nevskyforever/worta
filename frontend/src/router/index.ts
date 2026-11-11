@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router'
+import { currentPlatform } from '@/platform/runtime'
 import { adminSession } from '@/api/admin'
 
 const router = createRouter({
@@ -7,7 +8,9 @@ const router = createRouter({
     { path: '/admin/login', name: 'admin-login', component: () => import('@/pages/AdminLoginPage.vue'), meta: { admin: true, title: 'Администрирование' } },
     { path: '/admin', name: 'admin', component: () => import('@/pages/AdminPage.vue'), meta: { admin: true, requiresAdmin: true, title: 'Администрирование' } },
     { path: '/invite', name: 'invite', component: () => import('@/pages/InvitationPage.vue'), meta: { standalone: true, title: 'Приглашение' } },
-    { path: '/', redirect: '/projects' },
+    { path: '/login', name: 'web-login', component: () => import('@/pages/WebAccountPage.vue'), meta: { standalone: true, webAccount: true, title: 'Вход' } },
+    { path: '/cloud', name: 'web-workspace', component: () => import('@/pages/WebAccountPage.vue'), meta: { standalone: true, webAccount: true, title: 'Облачные проекты' } },
+    { path: '/', redirect: () => currentPlatform() === 'web' ? '/login' : '/projects' },
     {
       path: '/projects',
       name: 'projects',
@@ -86,8 +89,15 @@ const router = createRouter({
   ],
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   if (to.meta.requiresAdmin && !adminSession.active()) return { name: 'admin-login' }
+  if (currentPlatform() === 'web' && !to.meta.admin && !to.meta.standalone) return { name: 'web-login' }
+  if (to.meta.webAccount) {
+    if (currentPlatform() !== 'web') return { name: 'projects' }
+    const { webAccountSession } = await import('@/platform/web/webAccountSession')
+    const target = webAccountSession().status === 'unlocked' ? 'web-workspace' : 'web-login'
+    if (to.name !== target) return { name: target }
+  }
   return true
 })
 
