@@ -1147,6 +1147,19 @@ fn validate_stage_order(connection: &Connection) -> Result<(), StorageError> {
     Ok(())
 }
 
+pub(crate) fn compact_progress_order(connection: &Connection) -> rusqlite::Result<()> {
+    let mut query = connection.prepare("SELECT entry_id FROM progress_order ORDER BY position")?;
+    let ids = query
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut update = connection
+        .prepare("UPDATE progress_order SET position=?1 WHERE entry_id=?2 AND position<>?1")?;
+    for (position, id) in ids.iter().enumerate() {
+        update.execute(rusqlite::params![position as i64, id])?;
+    }
+    Ok(())
+}
+
 fn validate_progress_order(connection: &Connection) -> Result<(), StorageError> {
     let progress_ids: HashSet<String> = connection
         .prepare("SELECT id FROM progress_entries")?

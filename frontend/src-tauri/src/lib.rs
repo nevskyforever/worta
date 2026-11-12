@@ -6285,12 +6285,21 @@ fn delete_progress_sqlite(
     stage_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let mut connection = open_projects_database()?;
-    require_projects_owner(&connection)?;
-    if progress_sync::local_heads(&connection, &project_id, stage_id.as_deref())?.is_some() {
+    delete_progress_in_connection(&mut connection, project_id, entry_id, stage_id)
+}
+
+fn delete_progress_in_connection(
+    connection: &mut rusqlite::Connection,
+    project_id: String,
+    entry_id: String,
+    stage_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    require_projects_owner(connection)?;
+    if progress_sync::local_heads(connection, &project_id, stage_id.as_deref())?.is_some() {
         return Err("progress_descendant_rebase_required".into());
     }
-    let now = now_from_database(&connection)?;
-    let mut repository = ProjectsRepository::new(&mut connection);
+    let now = now_from_database(connection)?;
+    let mut repository = ProjectsRepository::new(connection);
     let project = repository
         .get_project(&project_id)
         .map_err(|error| error.to_string())?
@@ -6344,14 +6353,25 @@ fn delete_progress_sqlite(
     } else {
         (total / entity.goal.unwrap_or(1.0) * 100.0).into()
     };
+    payload["remaining"] = entity
+        .goal
+        .filter(|_| !entity.infinite)
+        .map(|goal| (goal - total).max(0.0))
+        .into();
     drop(repository);
     let tx = connection
         .transaction()
         .map_err(|error| error.to_string())?;
-    let deleted = tx.execute("DELETE FROM progress_entries WHERE id=?1 AND project_id=?2 AND (?3 IS NULL OR stage_id=?3)", rusqlite::params![entry_id, project_id, stage_id]).map_err(|error| error.to_string())?;
+    let deleted = tx
+        .execute(
+            "DELETE FROM progress_entries WHERE id=?1 AND project_id=?2 AND stage_id IS ?3",
+            rusqlite::params![entry_id, project_id, stage_id],
+        )
+        .map_err(|error| error.to_string())?;
     if deleted != 1 {
         return Err("Запись прогресса не найдена.".to_string());
     }
+    sqlite::compact_progress_order(&tx).map_err(|error| error.to_string())?;
     let table = if stage_id.is_some() {
         "stages"
     } else {
@@ -6367,7 +6387,7 @@ fn delete_progress_sqlite(
     }
     tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,context_json,created_at) VALUES(?1,'ProgressDeleted',?2,?3,?4,?5,?6)", rusqlite::params![format!("progress-deleted:{entry_id}"), project_id, stage_id, entry_id, serde_json::json!({"source":"desktop","version":1}).to_string(), now]).map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
-    Ok(project_payload(&mut connection, &project_id)?)
+    Ok(project_payload(connection, &project_id)?)
 }
 
 fn sqlite_data_root() -> Result<PathBuf, String> {
@@ -6603,6 +6623,85 @@ mod tests {
             "nfprogress-note-sync-lifecycle-{label}-{}-{sequence}",
             std::process::id(),
         ))
+    }
+
+    #[test]
+    fn deleting_project_and_stage_progress_keeps_the_profile_reopenable() {
+        use serde_json::json;
+
+        let root = lifecycle_database_root("progress-deletion");
+        fs::create_dir(&root).unwrap();
+        let path = root.join("nfprogress.db");
+        let mut db = super::sqlite::open_database(&path).unwrap();
+        super::initialize_fresh_desktop_database(&db, &root).unwrap();
+
+        let first = json!({"id":"first","new_total":10,"added_symbols":10});
+        let last = json!({"id":"last","new_total":30,"added_symbols":20});
+        let stage_entry = json!({"id":"stage-entry","new_total":25,"added_symbols":25});
+        for (id, total, entries) in [
+            ("book", 30, json!([first, last])),
+            ("parent", 25, json!([])),
+        ] {
+            db.execute(
+                "INSERT INTO projects(id,name,goal,infinite,unit,status,payload_json) VALUES(?1,?1,100,0,'symbols','активен',?2)",
+                rusqlite::params![id, json!({"id":id,"total":total,"goal":100,"unit":"symbols","status":"активен","progress_entries":entries}).to_string()],
+            ).unwrap();
+        }
+        db.execute(
+            "INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,payload_json) VALUES('chapter','parent','chapter',100,0,'symbols','активен',?1)",
+            [json!({"id":"chapter","total":25,"goal":100,"unit":"symbols","status":"активен","progress_entries":[stage_entry]}).to_string()],
+        ).unwrap();
+        db.execute_batch(
+            "INSERT INTO project_order VALUES('book',0),('parent',1);
+            INSERT INTO stage_order(stage_id,project_id,position) VALUES('chapter','parent',0);",
+        )
+        .unwrap();
+        for (position, project, stage, entry) in [
+            (0, "book", None, &first),
+            (1, "parent", Some("chapter"), &stage_entry),
+            (2, "book", None, &last),
+        ] {
+            let id = entry["id"].as_str().unwrap();
+            db.execute(
+                "INSERT INTO progress_entries(id,project_id,stage_id,added_symbols,payload_json) VALUES(?1,?2,?3,?4,?5)",
+                rusqlite::params![id, project, stage, entry["added_symbols"].as_f64(), entry.to_string()],
+            ).unwrap();
+            db.execute(
+                "INSERT INTO progress_order VALUES(?1,?2)",
+                rusqlite::params![id, position],
+            )
+            .unwrap();
+        }
+
+        let updated =
+            super::delete_progress_in_connection(&mut db, "book".into(), "first".into(), None)
+                .unwrap();
+        assert_eq!(updated["total"], 30.0);
+        assert_eq!(updated["progress_entries"], json!([last]));
+        drop(db);
+
+        let mut db = super::sqlite::open_database(&path).unwrap();
+        let updated = super::delete_progress_in_connection(
+            &mut db,
+            "parent".into(),
+            "stage-entry".into(),
+            Some("chapter".into()),
+        )
+        .unwrap();
+        assert_eq!(updated["total"], 0.0);
+        assert_eq!(updated["stages"][0]["remaining"], 100.0);
+        assert_eq!(updated["stages"][0]["progress_entries"], json!([]));
+        drop(db);
+
+        let db = super::sqlite::open_database(&path).unwrap();
+        let remaining: (String, i64) = db
+            .query_row("SELECT entry_id, position FROM progress_order", [], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(remaining, ("last".into(), 0));
+        drop(db);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { diagnostics } from '@/diagnostics/service'
 import { apiRequest } from './client'
 import { invoke } from '@tauri-apps/api/core'
 import { getProjectReadRepository } from '@/infrastructure/projects/projectReadRepository'
+import { TauriProgressRepository } from '@/infrastructure/tauri/progressRepository'
 import { settingsApi } from './settings'
 import type { ProjectMetadataPatch } from '@/core/repositories/projectMetadata'
 import type {
@@ -268,7 +269,7 @@ export const projectsApi = {
 
   deleteProgress(projectId: string, entryId: string, stageId?: string): Promise<Project> {
     if (desktopRuntime()) {
-      return invoke<Project>('delete_progress', { projectId, entryId, stageId: stageId ?? null })
+      return new TauriProgressRepository().remove({ projectId, entryId, stageId })
     }
     const params = new URLSearchParams()
     if (stageId) params.set('stage_id', stageId)

@@ -26,13 +26,17 @@ describe('TauriProgressRepository', () => {
     } })
   })
 
-  it('passes stable entry identity and optional stage to the delete command', async () => {
+  it('wraps the project and stage deletion arguments in the native command', async () => {
     vi.mocked(invoke).mockResolvedValue({})
-    await new TauriProgressRepository().remove({
-      projectId: 'p', entryId: 'entry/1', stageId: 'stage',
+    const repository = new TauriProgressRepository()
+    await repository.remove({ projectId: 'p', entryId: 'entry/1' })
+    expect(invoke).toHaveBeenLastCalledWith('delete_progress', {
+      command: { projectId: 'p', entryId: 'entry/1', stageId: null },
     })
-    expect(invoke).toHaveBeenCalledWith('delete_progress', {
-      projectId: 'p', entryId: 'entry/1', stageId: 'stage',
+
+    await repository.remove({ projectId: 'p', entryId: 'entry/2', stageId: 'stage' })
+    expect(invoke).toHaveBeenLastCalledWith('delete_progress', {
+      command: { projectId: 'p', entryId: 'entry/2', stageId: 'stage' },
     })
   })
 })

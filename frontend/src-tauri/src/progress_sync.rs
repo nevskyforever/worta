@@ -1055,18 +1055,7 @@ fn write_projection(
         params![h.project_id, h.stage_id],
     )?;
     // Compact only gaps, preserving every unaffected scope's relative sequence.
-    let remaining = rows(
-        tx,
-        "SELECT entry_id FROM progress_order ORDER BY position",
-        [],
-    )?;
-    for (position, id) in remaining.iter().enumerate() {
-        exec(
-            tx,
-            "UPDATE progress_order SET position=?1 WHERE entry_id=?2 AND position<>?1",
-            params![position as i64, id],
-        )?;
-    }
+    crate::sqlite::compact_progress_order(tx).map_err(sql)?;
     let mut pos: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(position),-1)+1 FROM progress_order",
