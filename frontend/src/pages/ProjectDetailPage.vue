@@ -40,7 +40,7 @@ import { gameApi } from '@/api/game'
 import { integrationsApi } from '@/api/integrations'
 import { documentsApi } from '@/api/documents'
 import { settingsApi } from '@/api/settings'
-import { onDataChange } from '@/services/dataChanges'
+import { announceDataChange, onDataChange } from '@/services/dataChanges'
 import { useProjectPresentation } from '@/composables/useProjectPresentation'
 import {
   copyProgressImage,
@@ -49,7 +49,7 @@ import {
 } from '@/platform/progressShare'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
-import { gameResponseMessages } from '@/utils/gameNotifications'
+import { progressGameMessages } from '@/utils/gameNotifications'
 import { progressChangeNotification } from '@/utils/progressNotifications'
 import { useProjectsStore } from '@/stores/projects'
 import type {
@@ -353,7 +353,8 @@ function announceSuccess(message: string, area: 'global' | 'progress' = 'global'
 function applyGameFeedback(game: ProgressResult['game']): void {
   if (!game) return
   notifications.setGameHistory(game.state.notifications)
-  for (const message of gameResponseMessages(game)) notifications.success(t(message))
+  for (const message of progressGameMessages(game, t, locale.formatNumber)) notifications.success(message)
+  announceDataChange('game')
 }
 
 async function refreshGameHistory(): Promise<void> {

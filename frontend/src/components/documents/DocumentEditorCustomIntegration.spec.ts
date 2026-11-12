@@ -4,7 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { documentsApi } from '@/api/documents'
 import { projectsApi } from '@/api/projects'
+import { useNotificationsStore } from '@/stores/notifications'
 import { projectFixture } from '@/test/fixtures'
+import { gameStateFixture } from '@/test/gameFixtures'
 import type { ProjectDocument, TiptapDocument } from '@/types/documents'
 import NFDocumentEditor from './editor/NFDocumentEditor.vue'
 import DocumentEditorView from './DocumentEditorView.vue'
@@ -385,7 +387,18 @@ describe('DocumentEditorView custom editor integration', () => {
         project: recordedProject,
         entry: { id: 'entry', added: 4, added_symbols: 4, added_progress: 4, new_total: 18, new_total_symbols: 18, created_at: '2026-11-12T09:00:00Z' },
         added_symbols: 4,
-        game: null,
+        game: {
+          ok: true,
+          message: null,
+          messages: [],
+          result: {
+            progress_rewards: [
+              { kind: 'writing', coins: 1, experience: 20 },
+              { kind: 'local_streak_started', coins: 50, experience: 0 },
+            ],
+          },
+          state: gameStateFixture(),
+        },
         warning: null,
       },
     })
@@ -405,6 +418,12 @@ describe('DocumentEditorView custom editor integration', () => {
     expect(wrapper.get('.document-editor-view__today-goal').text()).toContain('Цель на день выполнена!')
     expect(progress()).toBe('100')
     expect(record.attributes('disabled')).toBeDefined()
+    expect(useNotificationsStore().notifications.map(notification => notification.message)).toEqual(
+      expect.arrayContaining([
+        'Вы получили награду 1 монет и 20 оп.',
+        'Получен бонус 50 монет за старт стрика в проекте.',
+      ]),
+    )
 
     wrapper.unmount()
     const reopened = mountEditor(recordedProject, savedDocument, stage.id)

@@ -351,7 +351,7 @@ pub(crate) fn record_from_storage(
     day: &str,
     now: &str,
     positive: bool,
-) -> Result<(), String> {
+) -> Result<Vec<crate::game::ProgressReward>, String> {
     // The transaction has already updated the entity, its entries and, for a
     // stage write, the parent's aggregate. Read that snapshot before commit.
     let raw: String = db
@@ -383,7 +383,8 @@ fn record(
     day: &str,
     now: &str,
     positive: bool,
-) -> Result<(), String> {
+) -> Result<Vec<crate::game::ProgressReward>, String> {
+    let mut rewards = Vec::new();
     // The parent without a deadline only displays the aggregate stage plan.
     // It has no independent streak or plan anchor.
     if stage_id.is_none() || has_own_plan(project) {
@@ -400,11 +401,11 @@ fn record(
     }
 
     if !positive || !setting(db, "global_streak")? {
-        return Ok(());
+        return Ok(rewards);
     }
     let mut state = game_state(db)?;
     if state.is_null() {
-        return Ok(());
+        return Ok(rewards);
     }
     let before = state.clone();
     let portable_account = portable_account(db)?;
@@ -463,14 +464,14 @@ fn record(
         }
         if let Some((length, lost)) = complete(&mut fields, false, day) {
             if game_mode && primary {
-                crate::game::award_desktop_streak(
+                rewards.extend(crate::game::award_desktop_streak(
                     &mut state["gamer"],
                     &mut fields,
                     &format!("local:{key}"),
                     day,
                     length,
                     lost,
-                );
+                ));
             }
         }
         state["project_game_state"][&key] = fields;
@@ -494,14 +495,14 @@ fn record(
         }
         if let Some((length, lost)) = complete(&mut global, true, day) {
             if game_mode {
-                crate::game::award_desktop_streak(
+                rewards.extend(crate::game::award_desktop_streak(
                     &mut state["gamer"],
                     &mut global,
                     "global",
                     day,
                     length,
                     lost,
-                );
+                ));
             }
         }
         state["global_streak"] = global;
@@ -513,7 +514,7 @@ fn record(
         )
         .map_err(|error| error.to_string())?;
     }
-    Ok(())
+    Ok(rewards)
 }
 
 fn global_fields(state: &Value) -> Value {
@@ -536,7 +537,7 @@ fn global_fields(state: &Value) -> Value {
     fields
 }
 
-fn portable_account(db: &Connection) -> Result<bool, String> {
+pub(crate) fn portable_account(db: &Connection) -> Result<bool, String> {
     db.query_row(
         "SELECT EXISTS(SELECT 1 FROM cloud_game_migrations WHERE owner_key='account')",
         [],
@@ -639,7 +640,7 @@ fn freeze_count(gamer: &Value) -> u64 {
         .max(items["❄️Заморозка"].as_u64().unwrap_or(0))
 }
 
-fn setting(db: &Connection, key: &str) -> Result<bool, String> {
+pub(crate) fn setting(db: &Connection, key: &str) -> Result<bool, String> {
     db.query_row(
         "SELECT value_json FROM settings WHERE key=?1",
         [key],

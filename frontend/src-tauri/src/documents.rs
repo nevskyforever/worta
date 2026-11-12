@@ -646,7 +646,7 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let source_key = format!("local-document:{document_id}:{revision}");
-    let (project, entry) = record_document_or_sync_progress(
+    let (project, entry, feedback) = record_document_or_sync_progress(
         &mut connection,
         &command.project_id,
         command.stage_id.as_deref(),
@@ -659,7 +659,15 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
     Ok(serde_json::json!({
         "changed": !entry.is_null(),
         "symbols": symbol_count,
-        "progress": (!entry.is_null()).then(|| progress_result(project, entry)),
+        "progress": (!entry.is_null()).then(|| {
+            let mut progress = progress_result(project, entry);
+            match feedback {
+                Ok(Some(game)) => progress["game"] = serde_json::json!(game),
+                Err(warning) => progress["warning"] = serde_json::json!(warning),
+                Ok(None) => {}
+            }
+            progress
+        }),
         "document": document,
     }))
 }
@@ -3116,8 +3124,22 @@ mod tests {
             )?);
             assert_eq!(stage_view()?["streak_status"], "Active");
             drop(db);
-            record(40)?;
-            let (db, _) = open()?;
+            let result = record(40)?;
+            let rewards = &result["progress"]["game"]["result"]["progress_rewards"];
+            assert_eq!(
+                rewards,
+                &json!([
+                    {"kind":"writing","coins":4.0,"experience":200.0},
+                    {"kind":"local_streak_continued","coins":30.0,"experience":300.0},
+                    {"kind":"global_streak_continued","coins":30.0,"experience":3000.0}
+                ])
+            );
+            assert_eq!(
+                result["progress"]["game"]["state"]["profile"]["coins"],
+                106.0
+            );
+            let (mut db, _) = open()?;
+            assert_eq!(crate::game::process_pending_events(&mut db, 100)?.failed, 0);
             let frozen = crate::daily_goals::game_state(&db)?;
             assert_eq!(
                 frozen["global_streak"]["global_streaks"]
@@ -3132,8 +3154,13 @@ mod tests {
                 "freeze"
             );
             assert_eq!(frozen["gamer"]["items"]["Предметы"]["Заморозка"], 0);
-            assert_eq!(frozen["gamer"]["coins"], 102.0);
+            assert_eq!(frozen["gamer"]["coins"], 106.0);
             drop(db);
+            let same_day = record(41)?;
+            assert_eq!(
+                same_day["progress"]["game"]["result"]["progress_rewards"],
+                json!([{"kind":"writing","coins":0.1,"experience":5.0}])
+            );
 
             set_clock("2026-09-26T11:00:00")?;
             record(50)?;
@@ -3145,7 +3172,7 @@ mod tests {
                 "Lose 3 Start"
             );
             assert_eq!(restarted["gamer"]["health"], 85.0);
-            assert_eq!(restarted["gamer"]["coins"], 122.0);
+            assert_eq!(restarted["gamer"]["coins"], 127.0);
             Ok(())
         })();
         if let Some(previous) = previous {
@@ -3631,6 +3658,7 @@ fn record_sync_progress(
         proposal,
         None,
     )
+    .map(|(project, entry, _)| (project, entry))
 }
 
 fn record_document_or_sync_progress(
@@ -3642,8 +3670,15 @@ fn record_document_or_sync_progress(
     created_at: &str,
     proposal: Option<&Value>,
     document_revision: Option<i64>,
-) -> Result<(Value, Value), String> {
-    let tx = connection
+) -> Result<
+    (
+        Value,
+        Value,
+        Result<Option<crate::game::GameCommandResponse>, String>,
+    ),
+    String,
+> {
+    let mut tx = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     if let Some(proposal) = proposal {
@@ -3675,7 +3710,11 @@ fn record_document_or_sync_progress(
         .flatten();
     if proposal.is_none() && last.as_deref() == Some(source_hash) {
         tx.commit().map_err(|e| e.to_string())?;
-        return Ok((crate::project_payload(connection, project_id)?, Value::Null));
+        return Ok((
+            crate::project_payload(connection, project_id)?,
+            Value::Null,
+            Ok(None),
+        ));
     }
     let (entity_id, payload, _) = project_entity(&tx, project_id, stage_id)?;
     let previous = payload.get("total").and_then(Value::as_f64).unwrap_or(0.0);
@@ -3696,7 +3735,11 @@ fn record_document_or_sync_progress(
             tx.execute("UPDATE document_bindings SET last_external_hash=?,last_synced_at=?,sync_state='synced' WHERE document_id=?",params![source_hash,now(),document_id]).map_err(|e|e.to_string())?;
         }
         tx.commit().map_err(|e| e.to_string())?;
-        return Ok((crate::project_payload(connection, project_id)?, Value::Null));
+        return Ok((
+            crate::project_payload(connection, project_id)?,
+            Value::Null,
+            Ok(None),
+        ));
     }
     let entry_id = crate::new_note_id()?;
     let goal = payload.get("goal").and_then(Value::as_f64).unwrap_or(0.0);
@@ -3773,22 +3816,35 @@ fn record_document_or_sync_progress(
             crate::refresh_project_totals_in_transaction(&tx, project_id)?
         }
     }
-    if let Some(day) = day.filter(|_| !handled) {
+    let local_day = day.filter(|_| !handled);
+    let rewards = if let Some(day) = &local_day {
         crate::daily_goals::record_from_storage(
             &tx,
             project_id,
             stage_id,
-            &day,
+            day,
             created_at,
             delta > 0.0,
-        )?;
-    }
-    tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,delta_symbols,context_json,created_at) VALUES(?,'ProgressAdded',?,?,?,?,?,?)",params![format!("sync-progress:{document_id}:{source_hash}"),project_id,stage_id,entry_id,delta,serde_json::json!({"source":"trusted_document_sync","version":1,"key":format!("document:{}:{}",project_id,stage_id.unwrap_or("project"))}).to_string(),created_at]).map_err(|e|e.to_string())?;
+        )?
+    } else {
+        Vec::new()
+    };
+    let event_id = format!("sync-progress:{document_id}:{source_hash}");
+    tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,delta_symbols,context_json,created_at) VALUES(?,'ProgressAdded',?,?,?,?,?,?)",params![event_id,project_id,stage_id,entry_id,delta,serde_json::json!({"source":"trusted_document_sync","version":1,"key":format!("document:{}:{}",project_id,stage_id.unwrap_or("project"))}).to_string(),created_at]).map_err(|e|e.to_string())?;
+    let feedback = if local_day.is_some() {
+        crate::game::settle_local_progress(&mut tx, &event_id, project_id, delta, rewards)
+    } else {
+        Ok(None)
+    };
     if proposal.is_none() {
         tx.execute("UPDATE document_bindings SET last_external_hash=?,last_synced_at=?,last_synced_revision=(SELECT revision FROM documents WHERE id=?),sync_state='synced',expected_external_hash=? WHERE document_id=?",params![source_hash,now(),document_id,source_hash,document_id]).map_err(|e|e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
-    Ok((crate::project_payload(connection, project_id)?, entry))
+    Ok((
+        crate::project_payload(connection, project_id)?,
+        entry,
+        feedback,
+    ))
 }
 
 #[derive(Deserialize)]

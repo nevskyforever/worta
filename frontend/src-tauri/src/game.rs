@@ -91,6 +91,13 @@ fn rounded_increment(value: f64) -> f64 {
     ((value - 1e-9) * 10.0).ceil() / 10.0
 }
 
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct ProgressReward {
+    pub kind: &'static str,
+    pub coins: f64,
+    pub experience: f64,
+}
+
 fn apply_event(
     state: &mut Value,
     event_type: &str,
@@ -98,7 +105,7 @@ fn apply_event(
     delta: f64,
     context: &Map<String, Value>,
     project_id: &str,
-) -> Result<(), String> {
+) -> Result<Option<ProgressReward>, String> {
     let root = state
         .as_object_mut()
         .ok_or_else(|| "canonical Game state is not an object".to_string())?;
@@ -111,17 +118,15 @@ fn apply_event(
         "ProgressAdded" if delta > 0.0 => {
             let multiplier = (1.0 + number(gamer.get("inspiration")) / 100.0 * 0.1)
                 * (1.0 + number(gamer.get("writing_reward_bonus")));
-            let coins = rounded_increment(
-                number(gamer.get("coins"))
-                    + rounded_increment(
-                        delta / 100.0 * 10.0 * gamer_cf(gamer, "coins") * multiplier,
-                    ),
+            let coins =
+                rounded_increment(delta / 100.0 * 10.0 * gamer_cf(gamer, "coins") * multiplier);
+            let experience =
+                rounded_increment(delta / 100.0 * 500.0 * gamer_cf(gamer, "exp") * multiplier);
+            gamer.insert(
+                "coins".to_string(),
+                json!(rounded_increment(number(gamer.get("coins")) + coins)),
             );
-            gamer.insert("coins".to_string(), json!(coins));
-            add_experience(
-                gamer,
-                rounded_increment(delta / 100.0 * 500.0 * gamer_cf(gamer, "exp") * multiplier),
-            );
+            add_experience(gamer, experience);
             gamer.insert("writing_reward_bonus".to_string(), json!(0.0));
             if let Some(session) = gamer
                 .get_mut("writing_session")
@@ -177,7 +182,13 @@ fn apply_event(
             } else {
                 gamer.insert("productive_actions_since_event".into(), json!(productive));
             }
+            return Ok(Some(ProgressReward {
+                kind: "writing",
+                coins,
+                experience,
+            }));
         }
+        "ProgressAdded" => {}
         "ProgressDeleted" => {
             root.entry("extensions")
                 .or_insert_with(|| Value::Object(Map::new()))
@@ -228,7 +239,7 @@ fn apply_event(
         }
         other => return Err(format!("unsupported Game event: {other}")),
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -246,6 +257,7 @@ pub(crate) fn apply_ledger_rule_fixture(
         context,
         "p",
     )
+    .map(|_| ())
 }
 
 /// The immutable loss identity also keys notifications, including remote replay.
@@ -3428,10 +3440,8 @@ pub(crate) fn award_desktop_streak(
     day: &str,
     length: usize,
     lost: usize,
-) {
-    let Some(gamer) = gamer.as_object_mut() else {
-        return;
-    };
+) -> Option<ProgressReward> {
+    let gamer = gamer.as_object_mut()?;
     let global = marker == "global";
     let key = if global {
         "last_global_streak_bonus"
@@ -3447,7 +3457,7 @@ pub(crate) fn award_desktop_streak(
             .and_then(|days| days.get(marker))
             .is_some_and(|day| !due(day));
     if already_rewarded {
-        return;
+        return None;
     }
     let level = integer_field(gamer, "level", 1).max(1) as f64;
     let inflation = 1.0 + (level - 1.0) * 0.15;
@@ -3458,9 +3468,14 @@ pub(crate) fn award_desktop_streak(
     };
     let coins = rounded_increment(base * gamer_cf(gamer, "coins"));
     add_number(gamer, "coins", coins);
-    if length > 1 {
+    let experience = if length > 1 {
         let base = if global { 1000.0 } else { 100.0 };
-        add_experience(gamer, base * length as f64 * gamer_cf(gamer, "exp"));
+        rounded_increment(base * length as f64 * gamer_cf(gamer, "exp"))
+    } else {
+        0.0
+    };
+    if length > 1 {
+        add_experience(gamer, experience);
     }
     let date = json!({"__type__":"date","value":day});
     fields[key] = date.clone();
@@ -3470,6 +3485,76 @@ pub(crate) fn award_desktop_streak(
     if let Some(days) = days.as_object_mut() {
         days.insert(marker.into(), date);
     }
+    let kind = match (global, length > 1, lost > 0) {
+        (true, true, _) => "global_streak_continued",
+        (true, false, _) => "global_streak_started",
+        (false, true, _) => "local_streak_continued",
+        (false, false, true) => "local_streak_restarted",
+        (false, false, false) => "local_streak_started",
+    };
+    Some(ProgressReward {
+        kind,
+        coins,
+        experience,
+    })
+}
+
+// The progress row and its event already exist in this transaction. Apply the
+// reward before replying, with the same event marker used by background replay.
+pub(crate) fn settle_local_progress(
+    tx: &mut rusqlite::Transaction<'_>,
+    event_id: &str,
+    project_id: &str,
+    delta: f64,
+    mut rewards: Vec<ProgressReward>,
+) -> Result<Option<GameCommandResponse>, String> {
+    if delta <= 0.0 || crate::daily_goals::portable_account(tx)? {
+        return Ok(None);
+    }
+    let savepoint = tx.savepoint().map_err(|e| e.to_string())?;
+    let mut state = crate::daily_goals::game_state(&savepoint)?;
+    if state.is_null() {
+        return Ok(None);
+    }
+    let claimed = savepoint.execute(
+        "UPDATE domain_events SET status='processed',processed_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE event_id=?1 AND processed_at IS NULL AND status='pending'",
+        [event_id],
+    ).map_err(|e| e.to_string())?;
+    if claimed == 0 {
+        return Ok(None);
+    }
+    if !crate::daily_goals::setting(&savepoint, "game_mode")? {
+        savepoint.commit().map_err(|e| e.to_string())?;
+        return Ok(None);
+    }
+    if let Some(reward) = apply_event(
+        &mut state,
+        "ProgressAdded",
+        event_id,
+        delta,
+        &Map::new(),
+        project_id,
+    )? {
+        rewards.insert(0, reward);
+    }
+    let now = GameApplicationService::now(&savepoint).map_err(|e| e.to_string())?;
+    let local_now = GameApplicationService::local_now(&savepoint).map_err(|e| e.to_string())?;
+    let day = crate::streaks::logical_writing_day(&savepoint)?;
+    let view = project_state(&state, &now, &local_now, &day, true).map_err(|e| e.to_string())?;
+    savepoint
+        .execute(
+            "UPDATE game_state SET schema_version=?1,payload_json=?2,updated_at=?3 WHERE id=1",
+            params![STATE_VERSION, state.to_string(), now],
+        )
+        .map_err(|e| e.to_string())?;
+    savepoint.commit().map_err(|e| e.to_string())?;
+    Ok(Some(GameCommandResponse {
+        ok: true,
+        message: None,
+        messages: Vec::new(),
+        result: Some(json!({"progress_rewards":rewards})),
+        state: view,
+    }))
 }
 
 fn validate_developer_streak_target(

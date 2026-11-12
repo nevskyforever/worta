@@ -6175,7 +6175,7 @@ fn add_progress_sqlite(
         delta / goal_symbols * 100.0
     };
     drop(repository);
-    let tx = connection
+    let mut tx = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let day = daily_goals::local_project(&tx, &project_id)?
@@ -6245,25 +6245,37 @@ fn add_progress_sqlite(
             refresh_project_totals_in_transaction(&tx, &project_id)?;
         }
     }
-    if let Some(day) = day.filter(|_| !handled) {
+    let local_day = day.filter(|_| !handled);
+    let rewards = if let Some(day) = &local_day {
         daily_goals::record_from_storage(
             &tx,
             &project_id,
             stage_id.as_deref(),
-            &day,
+            day,
             &now,
             delta > 0.0,
-        )?;
-    }
+        )?
+    } else {
+        Vec::new()
+    };
     let game_key = stage_id
         .as_deref()
         .map(|stage| format!("stage:{project_id}:{stage}"))
         .unwrap_or_else(|| format!("project:{project_id}"));
-    tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,delta_symbols,context_json,created_at) VALUES(?1,'ProgressAdded',?2,?3,?4,?5,?6,?7)", rusqlite::params![format!("progress-added:{entry_id}"), project_id, stage_id, entry_id, delta, serde_json::json!({"source":"desktop","version":1,"key":game_key,"project_progress":payload["progress"]}).to_string(), now]).map_err(|error| error.to_string())?;
+    let event_id = format!("progress-added:{entry_id}");
+    tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,delta_symbols,context_json,created_at) VALUES(?1,'ProgressAdded',?2,?3,?4,?5,?6,?7)", rusqlite::params![event_id, project_id, stage_id, entry_id, delta, serde_json::json!({"source":"desktop","version":1,"key":game_key,"project_progress":payload["progress"]}).to_string(), now]).map_err(|error| error.to_string())?;
+    let (game, warning) = if local_day.is_some() {
+        match game::settle_local_progress(&mut tx, &event_id, &project_id, delta, rewards) {
+            Ok(game) => (game, None),
+            Err(warning) => (None, Some(warning)),
+        }
+    } else {
+        (None, None)
+    };
     tx.commit().map_err(|error| error.to_string())?;
     let project_value = project_payload(&mut connection, &project_id)?;
     Ok(
-        serde_json::json!({"project": project_value, "entry": entry, "added_symbols": delta, "game": null, "warning": null}),
+        serde_json::json!({"project": project_value, "entry": entry, "added_symbols": delta, "game": game, "warning": warning}),
     )
 }
 

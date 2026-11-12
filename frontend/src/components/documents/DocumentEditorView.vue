@@ -13,7 +13,7 @@ import { convertProjectUnit } from '@/utils/projectPlanning'
 import { UNIT_FACTORS } from '@/core/projects/units'
 import { announceDataChange, onDataChange } from '@/services/dataChanges'
 import { progressChangeNotification } from '@/utils/progressNotifications'
-import { gameResponseMessages } from '@/utils/gameNotifications'
+import { progressGameMessages } from '@/utils/gameNotifications'
 import LocalWordBindingPanel from './LocalWordBindingPanel.vue'
 import DocumentConflictResolver from './DocumentConflictResolver.vue'
 import NFDocumentEditor from './editor/NFDocumentEditor.vue'
@@ -312,7 +312,7 @@ async function recordTextProgress(force = false, snapshot = captureEditorContent
     }
     if (progress.game) {
       notifications.setGameHistory(progress.game.state.notifications)
-      for (const message of gameResponseMessages(progress.game)) notifications.success(t(message))
+      for (const message of progressGameMessages(progress.game, t, locale.formatNumber)) notifications.success(message)
       announceDataChange('game')
     }
     if (progress.warning) notifications.warning(progress.warning)
