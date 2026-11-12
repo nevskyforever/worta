@@ -18,6 +18,7 @@ mod account_sync;
 mod c15_headless_test_bridge;
 mod content_note_sync;
 mod content_note_writer;
+mod daily_goals;
 mod diagnostics;
 mod document_codec;
 mod document_sync;
@@ -877,6 +878,19 @@ fn project_payload(
             if let Some(heads) = progress_sync::local_heads(connection, project_id, Some(&id))? {
                 stage["progress_heads"] = serde_json::json!(heads);
             }
+        }
+    }
+    if daily_goals::local_project(connection, project_id)? {
+        let day = streaks::logical_writing_day(connection)?;
+        daily_goals::project(connection, &mut payload, &day)?;
+        let state = daily_goals::game_state(connection)?;
+        daily_goals::overlay_streak(&mut payload, &state, &format!("project:{project_id}"), &day);
+        for stage in payload["stages"].as_array_mut().into_iter().flatten() {
+            let key = format!(
+                "stage:{project_id}:{}",
+                stage["id"].as_str().unwrap_or_default()
+            );
+            daily_goals::overlay_streak(stage, &state, &key, &day);
         }
     }
     Ok(payload)
@@ -5160,6 +5174,7 @@ fn create_project(command: CreateProjectCommand) -> Result<serde_json::Value, St
     let personal_goal = normalized_total(command.personal_goal, &command.unit)?;
     let id = new_note_id()?;
     let now = now_from_database(&connection)?;
+    let day = streaks::logical_writing_day_at(&connection, &now)?;
     let mut payload = entity_payload(
         id.clone(),
         name.clone(),
@@ -5228,6 +5243,7 @@ fn create_project(command: CreateProjectCommand) -> Result<serde_json::Value, St
         stage_payload["updated_at"] = serde_json::Value::String(now.clone());
         stage_payload["streak_enabled"] = serde_json::Value::Bool(stage.streak_enabled);
         stage_payload["auto_freeze"] = serde_json::Value::Bool(stage.auto_freeze);
+        daily_goals::project(&connection, &mut stage_payload, &day)?;
         stages.push(stage_payload.clone());
         stage_records.push(StageRecord {
             id: stage_id,
@@ -5245,7 +5261,16 @@ fn create_project(command: CreateProjectCommand) -> Result<serde_json::Value, St
             payload: stage_payload,
         });
     }
+    if !stages.is_empty() {
+        payload["total"] = serde_json::json!(stages
+            .iter()
+            .filter_map(|stage| stage["total"].as_f64())
+            .sum::<f64>());
+    }
     payload["stages"] = serde_json::Value::Array(stages);
+    if command.deadline.is_some() || personal_goal > 0.0 || stage_records.is_empty() {
+        daily_goals::project(&connection, &mut payload, &day)?;
+    }
     let order_position: i64 = connection
         .query_row(
             "SELECT COALESCE(MAX(position), -1) + 1 FROM project_order",
@@ -5303,7 +5328,7 @@ fn update_project(
         }
     }
     let old_folder = current.payload["folder_id"].clone();
-    let mut payload = current.payload;
+    let mut payload = current.payload.clone();
     let object = payload
         .as_object_mut()
         .ok_or_else(|| "Некорректный payload проекта.".to_string())?;
@@ -5382,6 +5407,7 @@ fn update_project(
     if payload["infinite"] == true {
         payload["goal"] = serde_json::Value::Null;
     }
+    daily_goals::reset_if_changed(&current.payload, &mut payload);
     drop(repository);
     let metadata_now = connection
         .query_row(
@@ -5436,6 +5462,8 @@ fn create_stage(
     let mut connection = open_projects_database()?;
     require_projects_owner(&connection)?;
     let now = now_from_database(&connection)?;
+    let day = streaks::logical_writing_day_at(&connection, &now)?;
+    let local_project = daily_goals::local_project(&connection, &project_id)?;
     let mut repository = ProjectsRepository::new(&mut connection);
     let project = repository
         .get_project(&project_id)
@@ -5495,6 +5523,10 @@ fn create_stage(
     payload["updated_at"] = now.clone().into();
     payload["streak_enabled"] = command.streak_enabled.into();
     payload["auto_freeze"] = command.auto_freeze.into();
+    drop(repository);
+    if local_project {
+        daily_goals::project(&connection, &mut payload, &day)?;
+    }
     let stage = StageRecord {
         id: stage_id.clone(),
         project_id: project_id.clone(),
@@ -5507,7 +5539,6 @@ fn create_stage(
         updated_at: Some(now),
         payload,
     };
-    drop(repository);
     let portable = stage.payload.clone();
     let now = stage_sync::event_now(&connection).map_err(|e| e.to_string())?;
     if stage_sync::normal_edit(&mut connection, &project_id, &stage_id, portable, &now)
@@ -5560,7 +5591,7 @@ fn update_stage(
     if current.project_id != project_id {
         return Err("Этап не относится к указанному проекту.".to_string());
     }
-    let mut payload = current.payload;
+    let mut payload = current.payload.clone();
     if let Some(name) = patch.name {
         if name.trim().is_empty() {
             return Err("Название этапа не может быть пустым.".to_string());
@@ -5610,6 +5641,7 @@ fn update_stage(
             .and_then(|value| value.as_f64())
             .or(current.goal)
     };
+    daily_goals::reset_if_changed(&current.payload, &mut payload);
     let update = StageUpdate {
         name: payload
             .get("name")
@@ -6142,7 +6174,17 @@ fn add_progress_sqlite(
     } else {
         delta / goal_symbols * 100.0
     };
-    let entry = serde_json::json!({"id": entry_id, "new_total": total, "new_total_symbols": next_symbols, "added": total - previous, "added_symbols": delta, "added_progress": added_progress, "created_at": now});
+    drop(repository);
+    let tx = connection
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|error| error.to_string())?;
+    let day = daily_goals::local_project(&tx, &project_id)?
+        .then(|| streaks::logical_writing_day_at(&tx, &now))
+        .transpose()?;
+    let mut entry = serde_json::json!({"id": entry_id, "new_total": total, "new_total_symbols": next_symbols, "added": total - previous, "added_symbols": delta, "added_progress": added_progress, "created_at": now});
+    if let Some(day) = &day {
+        entry["writing_day"] = serde_json::json!(day);
+    }
     let mut payload = entity.payload;
     let entries = payload
         .get("progress_entries")
@@ -6159,10 +6201,7 @@ fn add_progress_sqlite(
         (total / entity.goal.unwrap_or(1.0) * 100.0).into()
     };
     payload["updated_at"] = now.clone().into();
-    drop(repository);
-    let tx = connection
-        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-        .map_err(|error| error.to_string())?;
+
     if stage_id.is_none()
         && tx
             .query_row(
@@ -6205,6 +6244,16 @@ fn add_progress_sqlite(
         if stage_id.is_some() {
             refresh_project_totals_in_transaction(&tx, &project_id)?;
         }
+    }
+    if let Some(day) = day.filter(|_| !handled) {
+        daily_goals::record_from_storage(
+            &tx,
+            &project_id,
+            stage_id.as_deref(),
+            &day,
+            &now,
+            delta > 0.0,
+        )?;
     }
     let game_key = stage_id
         .as_deref()
@@ -6445,6 +6494,12 @@ fn read_sqlite_projects() -> Result<SqliteProjectReadModel, String> {
         overlay_game_streak_state(&mut project_rows, game_state, false, &logical_day);
         overlay_game_streak_state(&mut stage_rows, game_state, true, &logical_day);
     }
+    daily_goals::project_rows(
+        &connection,
+        &mut project_rows,
+        &mut stage_rows,
+        &progress_entries,
+    )?;
     Ok(SqliteProjectReadModel {
         mirror_status: status,
         project_order,

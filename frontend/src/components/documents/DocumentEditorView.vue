@@ -10,6 +10,7 @@ import type { DocumentScope, TiptapDocument } from '@/types/documents'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/types/api'
 import { convertProjectUnit } from '@/utils/projectPlanning'
+import { UNIT_FACTORS } from '@/core/projects/units'
 import { announceDataChange, onDataChange } from '@/services/dataChanges'
 import { progressChangeNotification } from '@/utils/progressNotifications'
 import { gameResponseMessages } from '@/utils/gameNotifications'
@@ -100,9 +101,14 @@ let hasRestoredEditorPosition = false
 const linked = computed(() => Boolean(documentState.value?.docx_path))
 const showWordBindingPanel = computed(() => canLinkWord && (!linked.value || documentState.value?.sync_state !== 'synced'))
 const textSymbols = computed(() => countTextSymbols(editorContent.value))
-const textUnits = computed(() => projectEntity.value
-  ? convertProjectUnit(textSymbols.value, 'symbols', projectEntity.value.unit)
-  : null)
+const textUnits = computed(() => {
+  const entity = projectEntity.value
+  if (!entity) return null
+  // Desktop records fractional author sheets from the exact symbol count.
+  if (canLinkWord && entity.unit === 'author_list') return textSymbols.value / UNIT_FACTORS.author_list
+  return convertProjectUnit(textSymbols.value, 'symbols', entity.unit)
+})
+const hasRecordableDocument = computed(() => textSymbols.value > 0 || Boolean(canLinkWord && documentState.value?.exists))
 const entityFractionDigits = computed(() => projectEntity.value?.unit === 'symbols' ? 0 : 2)
 const entityProgressLabel = computed(() => {
   const entity = projectEntity.value
@@ -117,15 +123,27 @@ const entityProgressLabel = computed(() => {
 const todayGoalCurrentValue = computed(() => {
   const entity = projectEntity.value
   if (!entity) return 0
-  const unsavedChange = textSymbols.value > 0
+  const unsavedChange = hasRecordableDocument.value
     ? (textUnits.value ?? entity.total) - entity.total
     : 0
   return Math.max(0, entity.added_today + unsavedChange)
 })
-const todayGoalCompleted = computed(() => {
+const todayGoalRequired = computed(() => {
   const entity = projectEntity.value
-  if (!entity || entity.plan_daily_goal === null) return false
-  return todayGoalCurrentValue.value >= entity.plan_daily_goal
+  if (!entity) return null
+  if (!canLinkWord) return entity.plan_daily_goal
+  if (entity.today_goal === null) return null
+  return entity.today_goal - Math.max(0, entity.total - entity.added_today)
+})
+const todayGoalCompleted = computed(() => {
+  const target = todayGoalRequired.value
+  if (target === null) return false
+  if (canLinkWord) {
+    const entity = projectEntity.value
+    const projectedTotal = hasRecordableDocument.value ? textUnits.value : entity?.total
+    return projectedTotal != null && projectedTotal + 1e-9 >= (entity?.today_goal ?? Infinity)
+  }
+  return todayGoalCurrentValue.value >= target
 })
 const todayGoalLabel = computed(() => {
   const entity = projectEntity.value
@@ -133,13 +151,14 @@ const todayGoalLabel = computed(() => {
   return `${locale.formatNumber(entity.today_goal, entityFractionDigits.value)} ${locale.formatUnit(entity.unit, entity.today_goal)}`
 })
 const todayGoalProgressPercent = computed(() => {
-  const target = projectEntity.value?.plan_daily_goal
-  if (target === null || target === undefined || target <= 0) return 0
+  const target = todayGoalRequired.value
+  if (canLinkWord && todayGoalCompleted.value) return 100
+  if (target === null || target <= 0) return 0
   return Math.min(100, Math.max(0, (todayGoalCurrentValue.value / target) * 100))
 })
 const canRecordText = computed(() => Boolean(
   projectEntity.value
-  && textSymbols.value > 0
+  && hasRecordableDocument.value
   && textUnits.value !== null
   && Math.abs(textUnits.value - projectEntity.value.total) >= 0.009,
 ))
@@ -273,7 +292,7 @@ function chooseExternalVersion(): Promise<ConflictChoice> {
   return new Promise<ConflictChoice>((resolve) => { pendingConflictResolve.value = resolve })
 }
 async function recordTextProgress(force = false, snapshot = captureEditorContent()): Promise<boolean> {
-  if (recording.value || countTextSymbols(snapshot) <= 0 || (!force && !canRecordText.value)) return false
+  if (recording.value || !hasRecordableDocument.value || (!force && !canRecordText.value)) return false
   recording.value = true
   try {
     const result = await saveAndRecord(snapshot)

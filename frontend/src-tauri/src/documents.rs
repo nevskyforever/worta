@@ -579,13 +579,10 @@ pub fn save_document(command: DocumentSaveCommand) -> Result<Value, String> {
     )
     .map_err(|e| e.to_string())?
     {
+        let document = document_row(&tx, &command.project_id, command.stage_id.as_deref())?
+            .ok_or_else(|| "document_missing".to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
-        return document_row(
-            &connection,
-            &command.project_id,
-            command.stage_id.as_deref(),
-        )?
-        .ok_or_else(|| "document_missing".to_string());
+        return Ok(document);
     }
     tx.execute(
         "INSERT INTO documents(id,scope_key,project_id,stage_id,title,content_json,content_format,created_at,updated_at,revision,extensions_json) VALUES(?1,?2,?3,?4,?5,?6,'tiptap-json/v1',?7,?7,0,'{}') ON CONFLICT(scope_key) DO UPDATE SET content_json=excluded.content_json,updated_at=excluded.updated_at,revision=documents.revision+1,title=excluded.title",
@@ -595,40 +592,38 @@ pub fn save_document(command: DocumentSaveCommand) -> Result<Value, String> {
         "UPDATE document_bindings SET sync_state='local_changed',expected_external_hash=NULL WHERE document_id=?1",
         [&document_id],
     ).map_err(|error| error.to_string())?;
+    let document = document_row(&tx, &command.project_id, command.stage_id.as_deref())?
+        .ok_or_else(|| "Документ не сохранён.".to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
-    document_row(
-        &connection,
-        &command.project_id,
-        command.stage_id.as_deref(),
-    )?
-    .ok_or_else(|| "Документ не сохранён.".to_string())
+    Ok(document)
 }
 
 pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Value, String> {
-    if let Some(content) = command.content.clone() {
-        save_document(DocumentSaveCommand {
-            project_id: command.project_id.clone(),
-            stage_id: command.stage_id.clone(),
-            content,
-            expected_heads: command.expected_heads.clone(),
-        })?;
-    }
     let (mut connection, _) = open()?;
     let (_, payload) = validate_scope(
         &connection,
         &command.project_id,
         command.stage_id.as_deref(),
     )?;
-    let document = document_row(
-        &connection,
-        &command.project_id,
-        command.stage_id.as_deref(),
-    )?
-    .ok_or_else(|| "Сначала добавьте текст в документ.".to_string())?;
-    let symbol_count = document.get("symbols").and_then(Value::as_u64).unwrap_or(0);
-    if symbol_count == 0 {
-        return Err("Сначала добавьте текст в документ.".to_string());
+    if matches!(payload["status"].as_str(), Some("в архиве" | "завершен")) {
+        return Err("Архивные и завершённые сущности доступны только для просмотра.".to_string());
     }
+    let document = if let Some(content) = command.content {
+        save_document(DocumentSaveCommand {
+            project_id: command.project_id.clone(),
+            stage_id: command.stage_id.clone(),
+            content,
+            expected_heads: command.expected_heads,
+        })?
+    } else {
+        document_row(
+            &connection,
+            &command.project_id,
+            command.stage_id.as_deref(),
+        )?
+        .ok_or_else(|| "Сначала добавьте текст в документ.".to_string())?
+    };
+    let symbol_count = document.get("symbols").and_then(Value::as_u64).unwrap_or(0);
     let total = normalize_total(
         symbol_count as f64,
         payload
@@ -651,7 +646,7 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
         .and_then(Value::as_i64)
         .unwrap_or(0);
     let source_key = format!("local-document:{document_id}:{revision}");
-    let (project, entry) = record_sync_progress(
+    let (project, entry) = record_document_or_sync_progress(
         &mut connection,
         &command.project_id,
         command.stage_id.as_deref(),
@@ -659,11 +654,12 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
         &source_key,
         &now(),
         None,
+        Some(revision),
     )?;
     Ok(serde_json::json!({
-        "changed": true,
+        "changed": !entry.is_null(),
         "symbols": symbol_count,
-        "progress": progress_result(project, entry),
+        "progress": (!entry.is_null()).then(|| progress_result(project, entry)),
         "document": document,
     }))
 }
@@ -2980,6 +2976,188 @@ mod tests {
     }
 
     #[test]
+    fn stage_document_daily_goal_keeps_legacy_history_and_records_each_writing_day_once() {
+        use serde_json::json;
+
+        let _guard = DATA_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root =
+            std::env::temp_dir().join(format!("worta-stage-writing-day-{}", std::process::id()));
+        let previous = std::env::var_os("NFPROGRESS_DATA_DIR");
+        fs::create_dir_all(&root).unwrap();
+        std::env::set_var("NFPROGRESS_DATA_DIR", &root);
+        let result = (|| -> Result<(), String> {
+            let (db, _) = open()?;
+            crate::initialize_fresh_desktop_database(&db, &root)?;
+            let history = json!([{"__type__":"date","value":"2026-09-17"},"freeze"]);
+            let project = json!({"id":"p","name":"Book","status":"активен","work_method":"manual","unit":"symbols","goal":100,"total":10,"streak_enabled":true});
+            let stage = json!({"id":"s","name":"Chapter","status":"активен","work_method":"app","unit":"symbols","goal":100,"total":10,"deadline":"2026-10-06","personal_goal":5,"planning_date":"2026-09-18","today_goal":10,"plan_daily_goal":5,"streak_enabled":true});
+            db.execute("INSERT INTO projects(id,name,goal,infinite,unit,status,payload_json) VALUES('p','Book',100,0,'symbols','активен',?1)", [project.to_string()]).map_err(|e| e.to_string())?;
+            db.execute("INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,payload_json) VALUES('s','p','Chapter',100,0,'symbols','активен',?1)", [stage.to_string()]).map_err(|e| e.to_string())?;
+            db.execute_batch(r#"INSERT INTO project_order(project_id,position) VALUES('p',0);
+                INSERT INTO stage_order(stage_id,project_id,position) VALUES('s','p',0);
+                INSERT INTO settings(key,value_json) VALUES('global_streak','true'),('game_mode','false'),('start_day_time','"04:00:00"');
+                INSERT INTO progress_entries(id,project_id,stage_id,created_at,added_symbols,payload_json)
+                  VALUES('legacy','p','s','2026-09-18T02:00:00',10,'{"id":"legacy","new_total":10,"added_symbols":10,"created_at":"2026-09-18T02:00:00"}');
+                INSERT INTO progress_order(entry_id,position) VALUES('legacy',0);
+            "#).map_err(|e| e.to_string())?;
+            db.execute("UPDATE game_state SET payload_json=?1 WHERE id=1", [json!({
+                "gamer": {"coins":42},
+                "game": {},
+                "project_game_state": {"stage:p:s":{"streaks":history,"streak_status":"Freeze","max_streak":7,"last_streak_bonus":{"__type__":"date","value":"2026-09-17"},"legacy_extra":"keep"}},
+                "global_streak": {"global_streaks":history,"global_streak_status":"Freeze","max_global_streak":8},
+            }).to_string()]).map_err(|e| e.to_string())?;
+            drop(db);
+
+            let set_clock = |time: &str| -> Result<(), String> {
+                let (db, _) = open()?;
+                db.execute("UPDATE game_state SET payload_json=json_set(payload_json,'$.game.extensions.developer_clock',json(?1)) WHERE id=1",
+                    [json!({"enabled":true,"datetime":time}).to_string()]).map_err(|e| e.to_string())?;
+                Ok(())
+            };
+            let content = |size: usize| {
+                if size == 0 {
+                    json!({"type":"doc","content":[{"type":"paragraph"}]})
+                } else {
+                    json!({"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"x".repeat(size)}]}]})
+                }
+            };
+            let record = |size| {
+                record_document_progress(DocumentProgressCommand {
+                    project_id: "p".into(),
+                    stage_id: Some("s".into()),
+                    content: Some(content(size)),
+                    expected_heads: None,
+                })
+            };
+            let stage_view = || -> Result<Value, String> {
+                let model = crate::read_sqlite_projects()?;
+                serde_json::from_str(&model.stages[0].payload_json).map_err(|e| e.to_string())
+            };
+
+            set_clock("2026-09-20T03:59:59")?;
+            let initial = stage_view()?;
+            assert_eq!(initial["planning_date"], "2026-09-19");
+            assert_eq!(initial["today_goal"], 15.0);
+            assert_eq!(initial["added_today"], 0.0);
+            assert_eq!(initial["streak_status"], "Active");
+            assert_eq!(initial["streaks"], history);
+
+            let partial = record(12)?;
+            assert_eq!(partial["progress"]["entry"]["writing_day"], "2026-09-19");
+            assert_eq!(stage_view()?["added_today"], 2.0);
+            assert_eq!(stage_view()?["streak_length"], 2);
+            let done = record(15)?;
+            assert_eq!(done["progress"]["project"]["stages"][0]["streak_length"], 3);
+            assert_eq!(stage_view()?["added_today"], 5.0);
+            assert_eq!(stage_view()?["streak_status"], "Go");
+            assert!(record(15)?["progress"].is_null());
+
+            set_clock("2026-09-20T04:00:00")?;
+            assert_eq!(stage_view()?["today_goal"], 20.0);
+            assert_eq!(stage_view()?["added_today"], 0.0);
+            assert_eq!(stage_view()?["streak_status"], "Active");
+            assert_eq!(
+                record(20)?["progress"]["entry"]["writing_day"],
+                "2026-09-20"
+            );
+            assert_eq!(stage_view()?["streak_length"], 4);
+
+            set_clock("2026-09-22T11:00:00")?;
+            assert_eq!(stage_view()?["streak_status"], "Lose 4");
+            assert_eq!(stage_view()?["streak_length"], 0);
+            assert_eq!(stage_view()?["today_goal"], 30.0);
+            record(30)?;
+            assert_eq!(stage_view()?["streak_status"], "Lose 4 Start");
+            assert_eq!(stage_view()?["streak_length"], 1);
+            assert_eq!(stage_view()?["max_streak"], 7);
+            assert_eq!(record(28)?["progress"]["entry"]["added_symbols"], -2.0);
+            assert_eq!(stage_view()?["added_today"], 8.0);
+            assert_eq!(record(0)?["progress"]["entry"]["added_symbols"], -28.0);
+            assert_eq!(stage_view()?["added_today"], -20.0);
+            assert_eq!(stage_view()?["today_goal"], 30.0);
+            assert!(record(0)?["progress"].is_null());
+            assert_eq!(
+                get_document(DocumentScope {
+                    project_id: "p".into(),
+                    stage_id: Some("s".into()),
+                    expected_heads: None
+                })?["content"],
+                content(0)
+            );
+
+            let (db, _) = open()?;
+            let state = crate::daily_goals::game_state(&db)?;
+            assert_eq!(
+                state["global_streak"]["global_streak_status"],
+                "Lose 4 Start"
+            );
+            assert_eq!(state["global_streak"]["max_global_streak"], 8);
+            assert_eq!(
+                state["project_game_state"]["stage:p:s"]["legacy_extra"],
+                "keep"
+            );
+            assert_eq!(state["gamer"]["coins"], 42);
+            assert_eq!(crate::read_sqlite_projects()?.progress_entries.len(), 7);
+
+            db.execute(
+                "UPDATE settings SET value_json='true' WHERE key='game_mode'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+            db.execute("UPDATE game_state SET payload_json=json_set(payload_json,'$.gamer.items',json(?1)) WHERE id=1",
+                [json!({"Предметы":{"Заморозка":1}}).to_string()]).map_err(|e| e.to_string())?;
+            drop(db);
+            set_clock("2026-09-24T11:00:00")?;
+            let (db, _) = open()?;
+            assert!(!crate::game::refresh_global_loss(
+                &db,
+                "2026-09-24",
+                "2026-09-24T11:00:00Z"
+            )?);
+            assert_eq!(stage_view()?["streak_status"], "Active");
+            drop(db);
+            record(40)?;
+            let (db, _) = open()?;
+            let frozen = crate::daily_goals::game_state(&db)?;
+            assert_eq!(
+                frozen["global_streak"]["global_streaks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                3
+            );
+            assert_eq!(frozen["global_streak"]["global_streaks"][1], "freeze");
+            assert_eq!(
+                frozen["project_game_state"]["stage:p:s"]["streaks"][1],
+                "freeze"
+            );
+            assert_eq!(frozen["gamer"]["items"]["Предметы"]["Заморозка"], 0);
+            assert_eq!(frozen["gamer"]["coins"], 102.0);
+            drop(db);
+
+            set_clock("2026-09-26T11:00:00")?;
+            record(50)?;
+            assert!(record(50)?["progress"].is_null());
+            let (db, _) = open()?;
+            let restarted = crate::daily_goals::game_state(&db)?;
+            assert_eq!(
+                restarted["global_streak"]["global_streak_status"],
+                "Lose 3 Start"
+            );
+            assert_eq!(restarted["gamer"]["health"], 85.0);
+            assert_eq!(restarted["gamer"]["coins"], 122.0);
+            Ok(())
+        })();
+        if let Some(previous) = previous {
+            std::env::set_var("NFPROGRESS_DATA_DIR", previous);
+        } else {
+            std::env::remove_var("NFPROGRESS_DATA_DIR");
+        }
+        fs::remove_dir_all(root).unwrap();
+        result.unwrap();
+    }
+
+    #[test]
     fn linked_word_record_progress_survives_restart_and_repeat() {
         let _guard = DATA_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("worta-record-word-{}", std::process::id()));
@@ -3443,6 +3621,28 @@ fn record_sync_progress(
     created_at: &str,
     proposal: Option<&Value>,
 ) -> Result<(Value, Value), String> {
+    record_document_or_sync_progress(
+        connection,
+        project_id,
+        stage_id,
+        total,
+        source_hash,
+        created_at,
+        proposal,
+        None,
+    )
+}
+
+fn record_document_or_sync_progress(
+    connection: &mut rusqlite::Connection,
+    project_id: &str,
+    stage_id: Option<&str>,
+    total: f64,
+    source_hash: &str,
+    created_at: &str,
+    proposal: Option<&Value>,
+    document_revision: Option<i64>,
+) -> Result<(Value, Value), String> {
     let tx = connection
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
@@ -3450,6 +3650,20 @@ fn record_sync_progress(
         external_reattach::assert_progress_proposal(&tx, project_id, stage_id, proposal)?;
     }
     let document_id = document_id_for_scope(&tx, project_id, stage_id)?;
+    let local_document =
+        document_revision.is_some() && crate::daily_goals::local_project(&tx, project_id)?;
+    if let Some(revision) = document_revision {
+        let current: i64 = tx
+            .query_row(
+                "SELECT revision FROM documents WHERE id=?1",
+                [&document_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if revision != current {
+            return Err("Не удалось сохранить".to_string());
+        }
+    }
     let last: Option<String> = tx
         .query_row(
             "SELECT last_external_hash FROM document_bindings WHERE document_id=?",
@@ -3492,7 +3706,13 @@ fn record_sync_progress(
     } else {
         delta / goal_symbols * 100.0
     };
-    let entry = serde_json::json!({"id":entry_id,"new_total":total,"new_total_symbols":total*factor,"added":total-previous,"added_symbols":delta,"added_progress":added_progress,"created_at":created_at});
+    let mut entry = serde_json::json!({"id":entry_id,"new_total":total,"new_total_symbols":total*factor,"added":total-previous,"added_symbols":delta,"added_progress":added_progress,"created_at":created_at});
+    let day = local_document
+        .then(|| crate::streaks::logical_writing_day_at(&tx, created_at))
+        .transpose()?;
+    if let Some(day) = &day {
+        entry["writing_day"] = serde_json::json!(day);
+    }
     let mut next = payload.clone();
     let mut entries = next
         .get("progress_entries")
@@ -3502,6 +3722,18 @@ fn record_sync_progress(
     entries.push(entry.clone());
     next["progress_entries"] = Value::Array(entries);
     next["total"] = total.into();
+    if local_document {
+        next["progress"] = serde_json::json!(if goal > 0.0 {
+            total / goal * 100.0
+        } else {
+            0.0
+        });
+        next["remaining"] = if goal > 0.0 {
+            serde_json::json!((goal - total).max(0.0))
+        } else {
+            Value::Null
+        };
+    }
     next["updated_at"] = created_at.into();
 
     let table = if stage_id.is_some() {
@@ -3540,6 +3772,16 @@ fn record_sync_progress(
         if stage_id.is_some() {
             crate::refresh_project_totals_in_transaction(&tx, project_id)?
         }
+    }
+    if let Some(day) = day.filter(|_| !handled) {
+        crate::daily_goals::record_from_storage(
+            &tx,
+            project_id,
+            stage_id,
+            &day,
+            created_at,
+            delta > 0.0,
+        )?;
     }
     tx.execute("INSERT OR IGNORE INTO domain_events(event_id,event_type,project_id,stage_id,progress_id,delta_symbols,context_json,created_at) VALUES(?,'ProgressAdded',?,?,?,?,?,?)",params![format!("sync-progress:{document_id}:{source_hash}"),project_id,stage_id,entry_id,delta,serde_json::json!({"source":"trusted_document_sync","version":1,"key":format!("document:{}:{}",project_id,stage_id.unwrap_or("project"))}).to_string(),created_at]).map_err(|e|e.to_string())?;
     if proposal.is_none() {

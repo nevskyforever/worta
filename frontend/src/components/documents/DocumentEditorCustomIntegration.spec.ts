@@ -68,13 +68,13 @@ type CustomEditorExpose = {
   setContent: (content: TiptapDocument, emitUpdate?: boolean) => void
 }
 
-function mountEditor(project = projectFixture(), document = documentFixture) {
+function mountEditor(project = projectFixture(), document = documentFixture, stageId?: string) {
   vi.mocked(projectsApi.get).mockResolvedValue(project)
   vi.mocked(documentsApi.get).mockResolvedValue(document)
   vi.mocked(documentsApi.save).mockResolvedValue(document)
   vi.mocked(documentsApi.writeDocxContent).mockResolvedValue(document)
   return mount(DocumentEditorView, {
-    props: { scope: { projectId: 'project-id' }, title: 'Текст' },
+    props: { scope: { projectId: 'project-id', ...(stageId ? { stageId } : {}) }, title: 'Текст' },
     global: { plugins: [createPinia()] },
   })
 }
@@ -343,18 +343,81 @@ describe('DocumentEditorView custom editor integration', () => {
     wrapper.unmount()
   })
 
-  it('keeps document and daily-goal progress in the shared status bar', async () => {
-    const wrapper = mountEditor(projectFixture({
-      total: 0,
+  it('shows the stage plan and updates its progress across editing, recording and reopening', async () => {
+    const stage = projectFixture({
+      id: 'stage-id',
+      parent_project_id: 'project-id',
+      total: 14,
       goal: 100,
-      today_goal: 100,
-      plan_daily_goal: 100,
-      added_today: 40,
-    }))
+      today_goal: 18,
+      plan_daily_goal: 6,
+      added_today: 2,
+    })
+    const project = projectFixture({ today_goal: null, stages: [stage] })
+    const document = { ...documentFixture, stage_id: stage.id }
+    const wrapper = mountEditor(project, document, stage.id)
     await flushPromises()
 
+    const progress = () => wrapper.get('[role="progressbar"]').attributes('aria-valuenow')
     expect(wrapper.get('.document-editor-view__unit-count').text()).toContain('14 / 100')
-    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('54')
+    expect(progress()).toBe('33')
+    const api = wrapper.getComponent(NFDocumentEditor).vm as unknown as CustomEditorExpose
+    const draft = (text: string): TiptapDocument => ({
+      type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+    })
+
+    api.setContent(draft('коротко'), true)
+    await wrapper.vm.$nextTick()
+    expect(progress()).toBe('0')
+
+    const content = draft('Новый текст этапа!')
+    const savedDocument = { ...document, content, symbols: 18 }
+    const recordedProject = {
+      ...project,
+      stages: [{ ...stage, total: 18, added_today: 6, streak_status: 'Start' }],
+    }
+    vi.mocked(documentsApi.save).mockResolvedValue(savedDocument)
+    vi.mocked(documentsApi.recordProgress).mockResolvedValue({
+      changed: true,
+      symbols: 18,
+      document: savedDocument,
+      progress: {
+        project: recordedProject,
+        entry: { id: 'entry', added: 4, added_symbols: 4, added_progress: 4, new_total: 18, new_total_symbols: 18, created_at: '2026-11-12T09:00:00Z' },
+        added_symbols: 4,
+        game: null,
+        warning: null,
+      },
+    })
+    api.setContent(content, true)
+    await vi.advanceTimersByTimeAsync(700)
+    expect(progress()).toBe('100')
+    expect(vi.mocked(documentsApi.save).mock.lastCall?.[0]).toEqual({ projectId: 'project-id', stageId: stage.id })
+    expect(vi.mocked(documentsApi.save).mock.lastCall?.[1]).toMatchObject(content)
+    expect(documentsApi.recordProgress).not.toHaveBeenCalled()
+
+    vi.mocked(projectsApi.get).mockResolvedValue(recordedProject)
+    const record = wrapper.findAll('button').find((button) => button.text().includes('Добавить запись'))!
+    await record.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(documentsApi.recordProgress).mock.lastCall?.[0]).toEqual({ projectId: 'project-id', stageId: stage.id })
+    expect(vi.mocked(documentsApi.recordProgress).mock.lastCall?.[1]).toMatchObject(content)
+    expect(wrapper.get('.document-editor-view__today-goal').text()).toContain('Цель на день выполнена!')
+    expect(progress()).toBe('100')
+    expect(record.attributes('disabled')).toBeDefined()
+
+    wrapper.unmount()
+    const reopened = mountEditor(recordedProject, savedDocument, stage.id)
+    await flushPromises()
+    expect(reopened.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('100')
+    reopened.unmount()
+  })
+
+  it('uses the cumulative target when previous writing fell short', async () => {
+    const wrapper = mountEditor(projectFixture({ total: 14, added_today: 10, today_goal: 24, plan_daily_goal: 10 }))
+    await flushPromises()
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('50')
+    expect(wrapper.get('.document-editor-view__today-goal').text()).not.toContain('Цель на день выполнена!')
     wrapper.unmount()
   })
 

@@ -31,7 +31,7 @@ pub(crate) fn date_days(value: &str) -> Option<i64> {
 /// Python's game-state serializer stores `date` and `datetime` values as
 /// tagged objects. Plain ISO dates remain supported for older data and test
 /// fixtures.
-fn streak_date_days(value: &Value) -> Option<i64> {
+pub(crate) fn streak_date_days(value: &Value) -> Option<i64> {
     match value {
         Value::String(value) => date_days(value),
         Value::Object(value)
@@ -109,18 +109,24 @@ fn configured_now(connection: &Connection) -> Option<String> {
 }
 
 pub(crate) fn logical_writing_day(connection: &Connection) -> Result<String, String> {
+    logical_writing_day_at(connection, "now")
+}
+
+pub(crate) fn logical_writing_day_at(
+    connection: &Connection,
+    timestamp: &str,
+) -> Result<String, String> {
     let now = if let Some(now) = configured_now(connection) {
         now
     } else {
-        connection
-            .query_row(
-                "SELECT strftime('%Y-%m-%dT%H:%M:%S','now','localtime')",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|error| error.to_string())?
+        local_wall_time(connection, timestamp)?
     };
-    let start_day_time = connection
+    logical_writing_day_from(&now, &start_day_time(connection))
+        .ok_or_else(|| "Не удалось определить текущий писательский день.".to_string())
+}
+
+pub(crate) fn start_day_time(connection: &Connection) -> String {
+    connection
         .query_row(
             "SELECT value_json FROM settings WHERE key='start_day_time'",
             [],
@@ -128,9 +134,18 @@ pub(crate) fn logical_writing_day(connection: &Connection) -> Result<String, Str
         )
         .ok()
         .and_then(|value| serde_json::from_str::<String>(&value).ok())
-        .unwrap_or_else(|| "00:00:00".to_string());
-    logical_writing_day_from(&now, &start_day_time)
-        .ok_or_else(|| "Не удалось определить текущий писательский день.".to_string())
+        .and_then(|value| normalized_time(&value).map(str::to_owned))
+        .unwrap_or_else(|| "00:00:00".to_string())
+}
+
+fn local_wall_time(connection: &Connection, timestamp: &str) -> Result<String, String> {
+    connection
+        .query_row(
+            "SELECT strftime('%Y-%m-%dT%H:%M:%S',?1,'localtime')",
+            [timestamp],
+            |row| row.get(0),
+        )
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn streak_summary(streaks: Option<&Value>) -> (Option<i64>, usize, bool) {

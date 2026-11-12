@@ -258,9 +258,14 @@ pub(crate) fn append_loss_notifications(
     let length = after["global_streak"]["last_global_streak_lose_len"]
         .as_u64()
         .ok_or("invalid_game_payload")?;
-    let old = before["gamer"]["health"]
-        .as_f64()
-        .ok_or("invalid_game_payload")?;
+    // Fresh Desktop profiles may have earned a streak with Game disabled.
+    // Their initial health is implicit until the first Game mutation.
+    let old = before["gamer"]["health"].as_f64().unwrap_or_else(|| {
+        before["gamer"]["max_health"]
+            .as_f64()
+            .unwrap_or(100.0)
+            .max(0.0)
+    });
     let new = after["gamer"]["health"]
         .as_f64()
         .ok_or("invalid_game_payload")?;
@@ -327,7 +332,15 @@ pub(crate) fn refresh_global_loss(
     let Some(raw) = raw else {
         return Ok(false);
     };
-    let before: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let mut before: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    if crate::daily_goals::refresh_freezes(connection, &mut before, day)? {
+        connection
+            .execute(
+                "UPDATE game_state SET payload_json=?1,updated_at=?2 WHERE id=1",
+                params![before.to_string(), now],
+            )
+            .map_err(|e| e.to_string())?;
+    }
     let streak = crate::game_projection::streak_base(&before["global_streak"], true)?;
     if streak["enabled"] != true || streak["history"].as_array().is_none_or(|h| h.is_empty()) {
         return Ok(false);
@@ -342,61 +355,14 @@ pub(crate) fn refresh_global_loss(
         return Ok(false);
     }
     let lost = crate::game_codec::loss_after(&streak, day)?;
-    let mut after = if let Some(after) =
-        crate::game_writer::capture_loss(connection, &before, day, now)?
-    {
-        after
-    } else {
-        let mut after = before.clone();
-        let g = after["gamer"]
-            .as_object_mut()
-            .ok_or("invalid_game_payload")?;
-        let mut inventory = Vec::new();
-        if let Some(categories) = g.get("items").and_then(Value::as_object) {
-            for (category, items) in categories {
-                if let Some(items) = items.as_object() {
-                    for (key, count) in items {
-                        if count.as_u64().is_some_and(|n| n > 0) {
-                            inventory
-                                .push(json!({"category":category,"item_id":key,"count":count}));
-                        }
-                    }
-                }
-            }
-        }
-        let max = number_field(g, "max_health", 100.0).max(0.0);
-        let mut base = json!({"health":format!("{:.6}",number_field(g,"health",max).clamp(0.0,max)),"max_health":format!("{max:.6}"),"inventory":inventory});
-        crate::game_sync::loss_health(
-            &mut base,
-            lost["lost_length"].as_u64().ok_or("invalid_game_payload")?,
-        )?;
-        g.insert(
-            "health".into(),
-            json!(base["health"]
-                .as_str()
-                .ok_or("invalid_game_payload")?
-                .parse::<f64>()
-                .map_err(|_| "invalid_game_payload")?),
-        );
-        let potion = base["inventory"]
-            .as_array()
-            .and_then(|v| {
-                v.iter()
-                    .find(|v| v["category"] == "Зелья" && v["item_id"] == "Зелье воскрешения")
-            })
-            .map(|v| v["count"].clone())
-            .unwrap_or(json!(0));
-        // Preserve every unrelated legacy inventory entry and extension.
-        if g.get("items")
-            .and_then(|v| v.get("Зелья"))
-            .and_then(Value::as_object)
-            .is_some_and(|v| v.contains_key("Зелье воскрешения"))
-        {
-            g["items"]["Зелья"]["Зелье воскрешения"] = potion;
-        }
-        after["global_streak"] = crate::game_projection::streak_fields(&lost, true)?;
-        after
-    };
+    let mut after =
+        if let Some(after) = crate::game_writer::capture_loss(connection, &before, day, now)? {
+            after
+        } else {
+            let mut after = before.clone();
+            apply_local_global_loss(&mut after, &lost)?;
+            after
+        };
     // capture_loss already froze its exact payload; timestamp is local-only and
     // maintained by the common materializer below, before an intent is retained.
     after["gamer"]["last_health_recovery_at"] = json!({"__type__":"datetime","value":now});
@@ -425,6 +391,74 @@ pub(crate) fn refresh_global_loss(
         )
         .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+fn apply_local_global_loss(after: &mut Value, lost: &Value) -> Result<(), String> {
+    let g = after["gamer"]
+        .as_object_mut()
+        .ok_or("invalid_game_payload")?;
+    let mut inventory = Vec::new();
+    if let Some(categories) = g.get("items").and_then(Value::as_object) {
+        for (category, items) in categories {
+            if let Some(items) = items.as_object() {
+                for (key, count) in items {
+                    if count.as_u64().is_some_and(|n| n > 0) {
+                        inventory.push(json!({"category":category,"item_id":key,"count":count}));
+                    }
+                }
+            }
+        }
+    }
+    let max = number_field(g, "max_health", 100.0).max(0.0);
+    let mut base = json!({"health":format!("{:.6}",number_field(g,"health",max).clamp(0.0,max)),"max_health":format!("{max:.6}"),"inventory":inventory});
+    crate::game_sync::loss_health(
+        &mut base,
+        lost["lost_length"].as_u64().ok_or("invalid_game_payload")?,
+    )?;
+    g.insert(
+        "health".into(),
+        json!(base["health"]
+            .as_str()
+            .ok_or("invalid_game_payload")?
+            .parse::<f64>()
+            .map_err(|_| "invalid_game_payload")?),
+    );
+    let potion = base["inventory"]
+        .as_array()
+        .and_then(|v| {
+            v.iter()
+                .find(|v| v["category"] == "Зелья" && v["item_id"] == "Зелье воскрешения")
+        })
+        .map(|v| v["count"].clone())
+        .unwrap_or(json!(0));
+    // Preserve every unrelated legacy inventory entry and extension.
+    if g.get("items")
+        .and_then(|v| v.get("Зелья"))
+        .and_then(Value::as_object)
+        .is_some_and(|v| v.contains_key("Зелье воскрешения"))
+    {
+        g["items"]["Зелья"]["Зелье воскрешения"] = potion;
+    }
+    after["global_streak"] = crate::game_projection::streak_fields(lost, true)?;
+    Ok(())
+}
+
+pub(crate) fn apply_desktop_global_loss(
+    state: &mut Value,
+    day: &str,
+    now: &str,
+) -> Result<(), String> {
+    let streak = crate::game_projection::streak_base(&state["global_streak"], true)?;
+    let lost = crate::game_codec::loss_after(&streak, day)?;
+    let id = format!(
+        "{}:{}",
+        lost["lost_day"].as_str().unwrap_or(day),
+        lost["lost_length"].as_u64().unwrap_or(0)
+    );
+    let before = state.clone();
+    apply_local_global_loss(state, &lost)?;
+    state["gamer"]["last_health_recovery_at"] = json!({"__type__":"datetime","value":now});
+    append_loss_notifications(&before, state, &id, now)
 }
 
 pub fn process_pending_events(
@@ -2637,9 +2671,15 @@ fn project_state(
         "inspiration": {"abilities": [{"key":"creative_surge","name":"Творческий импульс","description":"+25% к следующей записи.","cost":30,"bonus":0.25,"active":number_field(gamer,"writing_reward_bonus",0.0)>0.0},{"key":"session_spark","name":"Искра сессии","description":"+25% к следующей сессии.","cost":25,"bonus":0.25,"active":number_field(gamer,"session_reward_bonus",0.0)>0.0},{"key":"challenge_focus","name":"Фокус испытания","description":"+25% к следующему испытанию.","cost":40,"bonus":0.25,"active":number_field(gamer,"challenge_reward_bonus",0.0)>0.0}], "creative_event": gamer.get("pending_creative_event").cloned().unwrap_or(Value::Null), "creative_event_history": gamer.get("creative_event_history").cloned().unwrap_or(json!([]))},
         "specializations": specializations_projection(gamer, now), "manuscripts": manuscripts_projection(gamer), "bank":bank_projection(gamer, level), "custom_awards":custom_awards_projection(gamer), "shop": catalog_state(gamer, true)
     });
+    let current_length = if global_status.starts_with("Lose ") && !global_status.ends_with(" Start")
+    {
+        0
+    } else {
+        global_length
+    };
     state["global_streak"] = json!({
         "status": global_status,
-        "length": global_length,
+        "length": current_length,
         "max_length": global_max,
     });
     if let Some(items) = gamer.get("items").and_then(Value::as_object) {
@@ -3378,6 +3418,57 @@ fn add_experience(gamer: &mut Map<String, Value>, amount: f64) {
         let max_health = 100 + ((level / 5) * 10);
         gamer.insert("max_health".into(), json!(max_health));
         gamer.insert("health".into(), json!(max_health));
+    }
+}
+
+pub(crate) fn award_desktop_streak(
+    gamer: &mut Value,
+    fields: &mut Value,
+    marker: &str,
+    day: &str,
+    length: usize,
+    lost: usize,
+) {
+    let Some(gamer) = gamer.as_object_mut() else {
+        return;
+    };
+    let global = marker == "global";
+    let key = if global {
+        "last_global_streak_bonus"
+    } else {
+        "last_streak_bonus"
+    };
+    let today = crate::streaks::date_days(day);
+    let due =
+        |date: &Value| crate::streaks::streak_date_days(date).is_none_or(|date| Some(date) < today);
+    let already_rewarded = !due(&fields[key])
+        || gamer
+            .get("api_streak_reward_days")
+            .and_then(|days| days.get(marker))
+            .is_some_and(|day| !due(day));
+    if already_rewarded {
+        return;
+    }
+    let level = integer_field(gamer, "level", 1).max(1) as f64;
+    let inflation = 1.0 + (level - 1.0) * 0.15;
+    let base = if length == 1 && lost == 0 {
+        50.0
+    } else {
+        10.0 * length as f64 * inflation
+    };
+    let coins = rounded_increment(base * gamer_cf(gamer, "coins"));
+    add_number(gamer, "coins", coins);
+    if length > 1 {
+        let base = if global { 1000.0 } else { 100.0 };
+        add_experience(gamer, base * length as f64 * gamer_cf(gamer, "exp"));
+    }
+    let date = json!({"__type__":"date","value":day});
+    fields[key] = date.clone();
+    let days = gamer
+        .entry("api_streak_reward_days")
+        .or_insert_with(|| json!({}));
+    if let Some(days) = days.as_object_mut() {
+        days.insert(marker.into(), date);
     }
 }
 
