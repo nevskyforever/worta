@@ -12,6 +12,7 @@ const props = defineProps<{
   translate?: (source: string) => string
   zoom?: number
   typewriterMode?: boolean
+  readOnly?: boolean
 }>()
 const emit = defineEmits<{
   update: [content: TiptapDocument]
@@ -50,16 +51,18 @@ const contentLayerStyle = computed(() => ({
 
 const editor = useEditor({
   content: props.initialContent,
-  extensions: createDocumentEditorExtensions(),
+  editable: !props.readOnly,
+  extensions: createDocumentEditorExtensions(props.readOnly),
   editorProps: {
     attributes: {
       class: 'nf-editor-content',
-      'aria-label': 'Текст документа',
+      'aria-label': props.translate?.('Текст документа') ?? 'Текст документа',
+      ...(props.readOnly ? { role: 'document', tabindex: '0' } : {}),
     },
   },
   onCreate: ({ editor }) => emit('ready', editor),
   onUpdate: ({ editor }) => {
-    emit('update', editor.getJSON() as TiptapDocument)
+    if (!props.readOnly) emit('update', editor.getJSON() as TiptapDocument)
     void nextTick(() => {
       updateLayoutMetrics()
       trackTypewriterCaret(false)
@@ -179,7 +182,7 @@ defineExpose({ focus, getEditor, getJSON, getScrollContainer, getSelection, setC
 
 <template>
   <section class="nf-document-editor">
-    <NFEditorToolbar v-if="editor" :editor="editor" :translate="translate" />
+    <NFEditorToolbar v-if="editor && !readOnly" :editor="editor" :translate="translate" />
     <div ref="viewport" class="nf-document-editor__viewport">
       <div class="nf-document-editor__page" :style="pageStyle">
         <div ref="contentLayer" class="nf-document-editor__content-layer" :style="contentLayerStyle">

@@ -37,6 +37,8 @@ import {
 import type { GlobalStreakSummary, SupportedLanguage } from '@/types/api'
 import type { GameState } from '@/types/game'
 
+const props = defineProps<{ cloudWorkspace?: boolean; locked?: boolean }>()
+const emit = defineEmits<{ projects: [] }>()
 const { online } = useNetworkStatus()
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +46,7 @@ const theme = useThemeStore()
 const locale = useLocaleStore()
 const t = locale.translate
 const appIcon = '/icons/icon-192.webp'
-const startupError = window.__NFPROGRESS_RUNTIME__?.startupError ?? ''
+const startupError = props.cloudWorkspace ? '' : window.__NFPROGRESS_RUNTIME__?.startupError ?? ''
 const savingPreference = ref(false)
 const preferenceError = ref<string | null>(null)
 const developerAvailable = ref(false)
@@ -68,7 +70,7 @@ const lastProjectPath = ref('/projects')
 const lastMapsPath = ref('/maps')
 const lastNotesPath = ref('/notes')
 const SIDEBAR_COLLAPSED_STORAGE_KEY = 'nfprogress.sidebar-collapsed'
-const sidebarCollapsed = ref(true)
+const sidebarCollapsed = ref(!props.cloudWorkspace)
 const appShell = ref<HTMLElement | null>(null)
 let sidebarAnimationFrame: number | undefined
 let sidebarAnimationToken = 0
@@ -86,7 +88,9 @@ try {
 } catch {
   // Session persistence is optional in restricted embedded webviews.
 }
-const navigationItems = computed(() => [
+const navigationItems = computed(() => props.cloudWorkspace ? [
+  { to: '/cloud', home: '/cloud', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
+] : [
   { to: lastProjectPath.value, home: '/projects', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
   { to: lastMapsPath.value, home: '/maps', label: 'Карты', mobileLabel: 'Карты', icon: gitBranchOutline },
   { to: lastNotesPath.value, home: '/notes', label: 'Заметки', mobileLabel: 'Заметки', icon: documentTextOutline },
@@ -155,6 +159,7 @@ async function toggleSidebar(): Promise<void> {
 }
 
 watch(() => route.fullPath, (path) => {
+  if (props.cloudWorkspace) return
   try {
     if (path.startsWith('/projects')) {
       lastProjectPath.value = path
@@ -170,6 +175,11 @@ watch(() => route.fullPath, (path) => {
 }, { immediate: true })
 
 function returnToSectionHome(event: MouseEvent, home: string): void {
+  if (props.cloudWorkspace) {
+    event.preventDefault()
+    emit('projects')
+    return
+  }
   const currentPath = route.fullPath.split(/[?#]/, 1)[0] ?? ''
   if (currentPath !== home && !currentPath.startsWith(`${home}/`)) return
 
@@ -262,6 +272,7 @@ async function refreshWritingDay(): Promise<void> {
 }
 
 onMounted(() => {
+  if (props.cloudWorkspace) return
   window.addEventListener('keydown', handleShortcut)
   void settingsApi.get().then((settings) => {
     developerAvailable.value = settings.capabilities.developer_mode_available === true
@@ -339,21 +350,22 @@ async function selectLanguage(event: Event): Promise<void> {
 }
 
 watchEffect(() => {
+  if (props.cloudWorkspace) return
   const sourceTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
   document.title = sourceTitle ? `${t(sourceTitle)} · nfprogress` : 'nfprogress'
 })
 </script>
 
 <template>
-  <a class="skip-link" href="#main-content">{{ t('Перейти к содержимому') }}</a>
+  <a v-if="!locked" class="skip-link" href="#main-content">{{ t('Перейти к содержимому') }}</a>
 
-  <div ref="appShell" class="app-shell" :class="{ 'app-shell--sidebar-collapsed': sidebarCollapsed }">
-    <aside class="sidebar" :aria-label="t('Основная навигация')">
+  <div ref="appShell" class="app-shell" :class="{ 'app-shell--sidebar-collapsed': sidebarCollapsed, 'app-shell--cloud': cloudWorkspace, 'app-shell--locked': locked }">
+    <aside v-if="!locked" class="sidebar" :aria-label="t('Основная навигация')">
       <div class="sidebar-header">
-        <RouterLink class="brand" to="/projects" aria-label="nfprogress — проекты">
+        <RouterLink class="brand" :to="cloudWorkspace ? '/cloud' : '/projects'" :aria-label="`worta · ${t('Проекты')}`" @click="cloudWorkspace && returnToSectionHome($event, '/cloud')">
           <img class="brand-mark" :src="appIcon" alt="" />
           <span>
-            <strong>nfprogress</strong>
+            <strong>worta</strong>
             <small>{{ t('Пространство писателя') }}</small>
           </span>
         </RouterLink>
@@ -399,7 +411,7 @@ watchEffect(() => {
         </RouterLink>
       </nav>
 
-      <div class="sidebar-controls">
+      <div v-if="!cloudWorkspace" class="sidebar-controls">
         <button
           v-if="developerAvailable"
           class="nf-button nf-button--quiet"
@@ -460,7 +472,7 @@ watchEffect(() => {
       {{ t('Не удалось запустить приложение. Попробуйте повторить запуск.') }}
     </div>
     <div
-      v-else-if="!online"
+      v-else-if="!online && !locked"
       class="network-banner"
       role="status"
       aria-live="polite"
@@ -475,22 +487,24 @@ watchEffect(() => {
       :class="{ 'app-main--with-banner': hasBanner }"
       tabindex="-1"
     >
-      <IonRouterOutlet :key="routerOutletKey" />
+      <slot><IonRouterOutlet :key="routerOutletKey" /></slot>
     </main>
 
-    <nav class="mobile-navigation" :aria-label="t('Основная навигация')">
+    <nav v-if="!locked" class="mobile-navigation" :aria-label="t('Основная навигация')">
       <RouterLink
         v-for="item in navigationItems"
         :key="item.to"
         class="mobile-navigation-link"
         :to="item.to"
         :aria-label="t(item.label)"
+        @click="cloudWorkspace && returnToSectionHome($event, item.home)"
       >
         <IonIcon :icon="item.icon" aria-hidden="true" />
         <span>{{ t(item.mobileLabel) }}</span>
       </RouterLink>
     </nav>
     <DeveloperModeDialog
+      v-if="!cloudWorkspace"
       :open="developerDialogOpen"
       @close="developerDialogOpen = false"
       @updated="publishDeveloperState"
@@ -499,6 +513,10 @@ watchEffect(() => {
 </template>
 
 <style scoped>
+.app-shell--cloud .app-main { overflow: auto; }
+.app-shell--locked { display: block; }
+.app-shell--locked .app-main { height: 100dvh; }
+.app-shell--cloud .mobile-navigation { grid-template-columns: minmax(0, 1fr); }
 .preference-error {
   margin: var(--nf-space-1) var(--nf-space-2) 0;
   color: var(--nf-color-danger);

@@ -11,8 +11,8 @@ try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } })
   await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
-  const launch = async (profilePath) => {
-    context = await chromium.launchPersistentContext(profilePath, { headless: true })
+  const launch = async (profilePath, viewport = { width: 1280, height: 900 }) => {
+    context = await chromium.launchPersistentContext(profilePath, { headless: true, viewport })
     await context.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
       return route.continue({ url: backend + url.pathname + url.search })
@@ -61,10 +61,11 @@ try {
   }
 
   const open = async (card, projectId) => {
-    await card.locator(`[data-cloud-project-id="${projectId}"]`).click()
+    await card.locator(`[data-cloud-project-id="${projectId}"]`).press('Enter')
     const panel = card.locator('[data-testid="cloud-project-read"]')
     await panel.waitFor()
     assert.equal(await card.locator('[data-testid="server-cloud-project-catalog"]').count(), 0)
+    assert.equal(await card.getByTestId('cloud-project-back').evaluate(button => button === document.activeElement), true)
     return panel
   }
 
@@ -88,6 +89,19 @@ try {
       const text = await notes.innerText()
       assert.ok(text.includes(fixture.expectedContent), `note content missing: ${text}`)
     }
+    if (fixture.manuscript) {
+      await panel.locator('[data-document-id]').press('Enter')
+      const editor = panel.locator('.tiptap[contenteditable="false"]')
+      await editor.locator('strong').getByText(fixture.manuscript, { exact: true }).waitFor()
+      assert.equal(await editor.locator('a, img, iframe').count(), 0)
+      await editor.press('Tab')
+      assert.equal(await editor.evaluate(element => element === document.activeElement), false)
+    }
+    assert.equal(await pageToUse.locator('#main-content').evaluate(main => main.scrollWidth <= main.clientWidth), true)
+    if (process.env.WORTA_WORKSPACE_SCREENSHOTS) {
+      const width = pageToUse.viewportSize().width
+      await pageToUse.screenshot({ path: `${process.env.WORTA_WORKSPACE_SCREENSHOTS}/workspace-${width}.png` })
+    }
   }
 
   if (fixture.webCreate) {
@@ -96,28 +110,37 @@ try {
     const form = card.getByTestId('cloud-project-create')
     await form.locator('input').fill(fixture.expectedProjectName)
     await form.locator('button').click()
-    const tile = card.locator('[data-cloud-project-id]')
-    await tile.getByText(fixture.expectedProjectName, { exact: true }).waitFor()
+    const tile = card.locator('[data-cloud-project-id]').getByText(fixture.expectedProjectName, { exact: true })
+    await tile.waitFor()
     const id = await tile.getAttribute('data-cloud-project-id')
+    const secondName = 'Второй облачный черновик'
+    await form.locator('input').fill(secondName)
+    await form.locator('button').click()
+    const secondTile = card.locator('[data-cloud-project-id]').getByText(secondName, { exact: true })
+    await secondTile.waitFor()
+    const secondId = await secondTile.getAttribute('data-cloud-project-id')
     const verifyEmpty = async () => {
       const panel = await open(card, id)
       const metadata = panel.getByTestId('cloud-project-metadata')
       await metadata.getByRole('heading', { name: fixture.expectedProjectName }).waitFor()
       await metadata.getByTestId('cloud-project-empty').waitFor()
       assert.equal(await panel.getByRole('alert').count(), 0)
+      await card.getByTestId('cloud-project-switch').selectOption(secondId)
+      await card.getByTestId('cloud-project-metadata').getByRole('heading', { name: secondName }).waitFor()
       await card.getByTestId('cloud-project-back').click()
+      assert.equal(await card.locator(`[data-cloud-project-id="${secondId}"]`).evaluate(button => button === document.activeElement), true)
       assert.ok(!(await card.getByTestId('server-cloud-project-catalog').innerText()).includes(id))
     }
     await verifyEmpty()
     await context.close()
-    page = await launch(`${profile}-fresh`)
+    page = await launch(`${profile}-fresh`, { width: 390, height: 844 })
     card = await unlock(page)
     await verifyEmpty()
   } else {
     await verify(page)
     // Read the same server history without the first browser's IndexedDB or device identity.
     await context.close()
-    page = await launch(`${profile}-fresh`)
+    page = await launch(`${profile}-fresh`, { width: 390, height: 844 })
     await verify(page)
   }
 

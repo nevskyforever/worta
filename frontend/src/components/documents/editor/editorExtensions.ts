@@ -17,7 +17,7 @@ const InsertTab = Extension.create({
   },
 })
 
-export function createDocumentEditorExtensions() {
+export function createDocumentEditorExtensions(readOnly = false) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
@@ -31,6 +31,6 @@ export function createDocumentEditorExtensions() {
     Subscript,
     Superscript,
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
-    InsertTab,
+    ...(readOnly ? [] : [InsertTab]),
   ]
 }

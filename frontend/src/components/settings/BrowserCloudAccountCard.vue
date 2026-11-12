@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
 import type { CloudProjectsResponse } from '@/api/cloudProjects'
 import { confirmationFor } from '@/api/legalDocuments'
@@ -12,10 +12,10 @@ import { BrowserCloudReadError, type BrowserCloudProjectRead as CloudProjectMeta
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
-import BrowserEncryptedWorkspace from './BrowserEncryptedWorkspace.vue'
-import BrowserCloudProjectRead from './BrowserCloudProjectRead.vue'
 import StatePanel from '@/components/ui/StatePanel.vue'
 
+const BrowserEncryptedWorkspace = defineAsyncComponent(() => import('./BrowserEncryptedWorkspace.vue'))
+const BrowserCloudProjectRead = defineAsyncComponent(() => import('./BrowserCloudProjectRead.vue'))
 type Copy = { unlocked: string; badPassword: string; writerBusy: string; storageUnavailable: string; legalRequired: string; acceptRevision: string; acceptCurrent: string; stale: string; onlineOnly: string; cloudProjects: string; refreshProjects: string; projectCount: string; noCloudProjects: string; projectIdsOnly: string; localWorkspace: string; connectionFailed: string; openCloudProject: string }
 const copy: Record<SupportedLanguage, Copy> = {
   ru: { unlocked: 'Ключ шифрования разблокирован.', badPassword: 'Не удалось разблокировать ключ. Проверьте пароль шифрования.', writerBusy: 'Другая вкладка использует защищённое хранилище. Закройте её и повторите попытку.', storageUnavailable: 'Защищённое хранилище браузера недоступно.', legalRequired: 'Требуется принять действующие условия', acceptRevision: 'Я ознакомился(-ась) и принимаю эту редакцию', acceptCurrent: 'Принять действующие условия', stale: 'Редакция условий изменилась. Ознакомьтесь с новым текстом и подтвердите его заново.', onlineOnly: 'Web-версия требует подключения к серверу. Сервер хранит постоянные пользовательские данные; E2EE выполняется в браузере.', cloudProjects: 'Облачные проекты worta', refreshProjects: 'Обновить список', projectCount: 'Проектов на сервере: {count} из {limit}', noCloudProjects: 'На сервере пока нет облачных проектов.', projectIdsOnly: 'Сервер вернул только идентификаторы. После разблокировки можно открыть поддерживаемые заметки для чтения.', localWorkspace: 'Открыть локальные тестовые проекты (не синхронизированы)', connectionFailed: 'Не удалось получить список с сервера. Проверьте подключение и повторите попытку.', openCloudProject: 'Открыть облачный проект' },
@@ -73,6 +73,28 @@ const cloudProjectMetadata = ref<Record<string, CloudProjectMetadata | null>>({}
 const cloudProjectMetadataLoading = ref<Record<string, boolean>>({})
 const cloudProjectMetadataError = ref<Record<string, string>>({})
 const selectedCloudProject = ref<string | null>(null)
+const projectBack = ref<HTMLButtonElement | null>(null)
+const projectTiles = new Map<string, HTMLButtonElement>()
+
+function registerProjectTile(id: string, element: unknown): void {
+  if (element instanceof HTMLButtonElement) projectTiles.set(id, element)
+  else projectTiles.delete(id)
+}
+
+async function openProject(id: string): Promise<void> {
+  selectedCloudProject.value = id
+  await nextTick()
+  projectBack.value?.focus()
+}
+
+async function showProjects(): Promise<void> {
+  const id = selectedCloudProject.value
+  if (!id) return
+  selectedCloudProject.value = null
+  await nextTick()
+  projectTiles.get(id)?.focus()
+}
+defineExpose({ showProjects })
 const cloudCatalogOpen = ref(false)
 const cloudCatalogBusy = ref(false)
 const cloudCatalogError = ref<string | null>(null)
@@ -388,9 +410,13 @@ watch(status, next => {
 
 <template>
   <section :class="workspacePage ? 'web-projects' : 'settings-card'" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
-    <div class="settings-card__heading">
+    <div :class="workspacePage ? 'page-header web-projects__header' : 'settings-card__heading'">
       <h2 id="browser-cloud-account-title">{{ t(workspacePage ? 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
       <p v-if="!props.session">{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
+      <div v-if="workspacePage" class="web-projects__actions">
+        <button class="nf-button nf-button--quiet" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
+        <button class="nf-button nf-button--quiet" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
+      </div>
     </div>
     <p :data-status="status" :hidden="workspacePage && status === 'unlocked'" aria-live="polite">
       <template v-if="status === 'logged_out'">{{ t('Войдите в аккаунт') }}</template>
@@ -442,7 +468,15 @@ watch(status, next => {
         <p v-if="cloudCreateError" role="alert">{{ cloudCreateError }}</p>
       </form>
       <section v-if="workspacePage && selectedCloudProject" class="web-projects__detail">
-        <button type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="selectedCloudProject = null">{{ t('Назад') }}</button>
+        <div class="web-projects__actions">
+          <button ref="projectBack" type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="showProjects">{{ t('Назад') }}</button>
+          <select v-if="cloudProjects && cloudProjects.cloud_project_ids.length > 1" data-testid="cloud-project-switch" :value="selectedCloudProject" :aria-label="t('Выберите проект')"
+            @change="selectedCloudProject = ($event.target as HTMLSelectElement).value">
+            <option v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id" :value="id">
+              {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
+            </option>
+          </select>
+        </div>
         <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace @invalidated="refresh(); clearCloudCatalog()" />
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
@@ -452,7 +486,8 @@ watch(status, next => {
         <StatePanel v-else-if="cloudProjects?.cloud_project_count === 0" :title="words.noCloudProjects" />
         <ul v-else-if="cloudProjects" class="web-projects__grid">
           <li v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id">
-            <button type="button" class="web-projects__tile" :data-cloud-project-id="id" @click="selectedCloudProject = id">
+            <button :ref="element => registerProjectTile(id, element)"
+              type="button" class="web-projects__tile" :data-cloud-project-id="id" @click="openProject(id)">
               {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
             </button>
           </li>
@@ -501,11 +536,11 @@ watch(status, next => {
         <textarea readonly style="width:100%" :value="recoveryKey"></textarea>
         <button class="nf-button" type="button" @click="recoveryKey = null">{{ t('Закрыть') }}</button>
       </section>
-      <button v-if="status === 'unlocked'" class="nf-button nf-button--secondary" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
+      <button v-if="status === 'unlocked' && !workspacePage" class="nf-button nf-button--secondary" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
       <button v-if="status === 'unlocked' && !props.session" class="nf-button" type="button" :disabled="busy" @click="toggleWorkspace">
         {{ workspaceOpen ? t('Закрыть рабочее пространство') : words.localWorkspace }}
       </button>
-      <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
+      <button v-if="!workspacePage" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
     </div>
     <BrowserEncryptedWorkspace v-if="status === 'unlocked' && workspaceOpen" ref="workspace" :session="session" @close="workspaceOpen = false" />
   </section>
@@ -523,6 +558,9 @@ watch(status, next => {
 .browser-cloud-account__catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .browser-cloud-account__catalog h3, .browser-cloud-account__catalog p { margin: 0; }
 .web-projects { display: grid; gap: var(--nf-space-4); }
+.web-projects__header h2 { margin: 0; font: clamp(1.8rem, 5vw, 3rem) var(--nf-font-serif); }
+.web-projects__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--nf-space-2); min-width: 0; }
+.web-projects__actions select { max-width: 100%; }
 .web-projects__catalog, .web-projects__detail { flex-basis: 100%; display: grid; justify-items: start; gap: var(--nf-space-4); }
 .web-projects__detail :deep([data-testid="cloud-project-read"]) { width: 100%; }
 .web-projects__grid { width: 100%; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--nf-space-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); }

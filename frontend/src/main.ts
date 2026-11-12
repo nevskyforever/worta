@@ -3,7 +3,6 @@ import { safeError } from './diagnostics/events'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { IonicVue } from '@ionic/vue'
-import Antd from 'ant-design-vue'
 
 import '@ionic/vue/css/core.css'
 import '@ionic/vue/css/normalize.css'
@@ -33,9 +32,6 @@ async function bootstrap(): Promise<void> {
   app.config.errorHandler = error => { diagnostics.record('application', 'runtime_start', 'failed', undefined, safeError(error), 'error') }
   window.addEventListener('unhandledrejection', event => { diagnostics.record('application', 'load', 'failed', undefined, safeError(event.reason), 'error') })
   app.use(IonicVue)
-  // Tiptap UI Kit renders its compact selects and popovers through Ant Design.
-  // Registering it prevents Vue from treating <a-select> as an unknown element.
-  app.use(Antd)
   app.use(router)
 
   const theme = useThemeStore(pinia)

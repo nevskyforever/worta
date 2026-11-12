@@ -17,6 +17,7 @@ from test_cloud_c18_structural_cross_runtime import structural, event, structura
 from test_cloud_c18_structural_integration import publish_pending, pull_structure
 from test_cloud_c18_content_note_acceptance import content, note, emit, receive
 from test_cloud_c18_content_note_gate import capabilities
+from test_cloud_c18_document_acceptance import document, emit as emit_documents, support as support_documents
 from nfprogress.core.sqlite.connection import register_remote_apply_authorization_guard
 
 
@@ -26,6 +27,7 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
     token = login(client).json()["access_token"]
     headers = _headers(token)
     db, identity = provision(tmp_path, "catalog-recovery", user, True)
+    document(tmp_path, db, identity, user, 'init')
     with sqlite3.connect(db) as connection:
         register_remote_apply_authorization_guard(connection)
         connection.execute("UPDATE projects SET status='активен' WHERE id=?", (PROJECT_ID,))
@@ -49,7 +51,7 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
 
     stage = json.loads((ROOT / "frontend/src/cloud/__fixtures__/stageCodecV1.json").read_text())["event"]["stage"]
     with sqlite3.connect(db) as connection:
-        details = dict(stage, name="Stage S1")
+        details = dict(stage, name="Stage S1", work_method="app")
         connection.execute("INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)",
             ("S1", PROJECT_ID, details["name"], details["goal"], int(details["infinite"]), details["unit"], details["status"], details["created_at"], json.dumps(details)))
         connection.execute("INSERT INTO stage_order VALUES(?,?,?)", ("S1", PROJECT_ID, 0))
@@ -90,6 +92,18 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
     with sqlite3.connect(db) as connection:
         expected_content = json.loads(connection.execute("SELECT payload_json FROM notes WHERE id='native-note'").fetchone()[0])["content"]
 
+    support_documents(client, headers, identity['device_id'])
+    manuscript = 'Formatted manuscript from Desktop'
+    saved = document(tmp_path, db, identity, user, 'save', stage_id='S1', content={
+        'type': 'doc', 'content': [{'type': 'paragraph', 'content': [
+            {'type': 'text', 'text': manuscript, 'marks': [{'type': 'bold'},
+                {'type': 'link', 'attrs': {'href': 'https://example.invalid/private'}}]},
+        ]}],
+    })
+    assert 'error' not in saved, saved
+    document(tmp_path, db, identity, user, 'begin')
+    assert len(emit_documents(client, tmp_path, token, db, identity, user, amk)) == 1
+
     run_browser(client, tmp_path, {
         "amk": amk,
         "projectId": PROJECT_ID,
@@ -99,6 +113,7 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
         "stageId": "S1",
         "stages": ["S1"],
         "expectedProjectName": "Cross-runtime project",
+        "manuscript": manuscript,
     })
 
 

@@ -3,10 +3,12 @@ import BrowserAccountGameRead from './BrowserAccountGameRead.vue'
 import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
+import NoteCard from '@/components/notes/NoteCard.vue'
 import StatePanel from '@/components/ui/StatePanel.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
-import { onBeforeUnmount, onMounted, ref, computed, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
+import { cloudDocumentForReading, cloudNoteCard, readCloudWorkspaceProject } from '@/platform/web/cloudWorkspaceReader'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
@@ -15,6 +17,7 @@ import type { SupportedLanguage } from '@/types/api'
 const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean }>()
 const emit = defineEmits<{ invalidated: [] }>()
 const locale = useLocaleStore(), t = locale.translate
+const NFDocumentEditor = defineAsyncComponent(() => import('@/components/documents/editor/NFDocumentEditor.vue'))
 const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: string; network: string; register: string }> = {
   ru: { open: 'Открыть облачный проект', partial: 'Проверенные настройки проекта с сервера. Тексты, этапы, заметки и другие данные ещё не открыты.', blocked: 'Чтение заблокировано', network: 'Не удалось подключиться к серверу. Повторите попытку.', register: 'Зарегистрировать браузер для доступа к облаку' },
   en: { open: 'Open cloud project', partial: 'Verified project settings from the server. Texts, stages, Notes and other data have not been opened yet.', blocked: 'Reading is blocked', network: 'Could not connect to the server. Try again.', register: 'Register this browser for cloud access' },
@@ -73,6 +76,14 @@ const documentUnavailable: Record<SupportedLanguage, string> = {
 const documentLabels: Record<SupportedLanguage, string> = {
   ru: 'Документы', en: 'Documents', es: 'Documentos', de: 'Dokumente', fr: 'Documents', pt_BR: 'Documentos',
 }
+const readOnlyLabels: Record<SupportedLanguage, string> = {
+  ru: 'Проект доступен для чтения. Редактирование в Web пока недоступно.',
+  en: 'You can read this project. Editing in Web is not yet available.',
+  es: 'Puedes leer este proyecto. La edición en la Web aún no está disponible.',
+  de: 'Du kannst dieses Projekt lesen. Die Bearbeitung im Web ist noch nicht verfügbar.',
+  fr: 'Vous pouvez consulter ce projet. La modification sur le Web est encore indisponible.',
+  pt_BR: 'Você pode ler este projeto. A edição na Web ainda não está disponível.',
+}
 // Only authenticated Tiptap text is presented. No source HTML, URLs or mark
 // attributes enter the DOM; Vue escapes even literal markup inside text nodes.
 function documentText(node: Record<string, unknown>): string {
@@ -92,6 +103,8 @@ const projectMap = computed<MindMapResponse | null>(() => {
 })
 const refuseMapWrite = async (): Promise<never> => { throw new Error('read_only') }
 const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value))
+const documentForReading = computed(() => activeDocument.value && cloudDocumentForReading(activeDocument.value))
+const stageNotes = computed(() => recovery.value?.notes.filter(note => note.stage_id === selectedStage.value) ?? [])
 const selectedStage = ref<string | null>(null)
 // UI preference only: opaque account/project/Stage IDs, never text or keys.
 function selectionKey(): string | null {
@@ -142,15 +155,14 @@ async function openRecovery(): Promise<void> {
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
   try {
-    if (props.workspace) {
-      const preview = await props.session.readCloudProject(props.projectId, active.signal, 'recovery').catch(() => null)
-      if (active.signal.aborted) return
-      if (preview?.empty && props.session.status === 'unlocked') {
-        result.value = preview
-        return
-      }
+    const opened = props.workspace
+      ? await readCloudWorkspaceProject(props.session, props.projectId, active.signal)
+      : { kind: 'project' as const, project: await props.session.readRecoveryProject(props.projectId, active.signal) }
+    if (opened.kind === 'empty') {
+      if (!active.signal.aborted && props.session.status === 'unlocked') result.value = opened.metadata
+      return
     }
-    const value = await props.session.readRecoveryProject(props.projectId, active.signal)
+    const value = opened.project
     if (!active.signal.aborted && props.session.status === 'unlocked') {
       recovery.value = value
       const remembered = hadRecovery ? priorSelection : rememberedStage()
@@ -189,22 +201,26 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         <dt>{{ t('Дедлайн') }}</dt><dd>{{ result.metadata.deadline ?? '—' }}</dd>
       </dl>
     </article>
-    <article v-if="recovery" data-testid="cloud-project-notes">
+    <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
-      <nav v-if="recovery.stages.length" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
-        <button type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
-        <button v-for="stage in recovery.stages" :key="stage.id" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
+      <p v-if="workspace" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
+      <nav v-if="recovery.stages.length" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
+        <button class="nf-button nf-button--secondary" type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
+        <button v-for="stage in recovery.stages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
       <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
       <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
       <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
-      <section v-if="stageDocuments.length" data-testid="cloud-document-list">
+      <section v-if="stageDocuments.length" class="cloud-reader__panel" data-testid="cloud-document-list">
         <h4>{{ documentLabels[locale.language] }}</h4>
-        <button v-for="document in stageDocuments" :key="document.id" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+        <div class="cloud-reader__stages">
+          <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+        </div>
       </section>
-      <section v-if="activeDocument" data-testid="cloud-document-read">
+      <section v-if="activeDocument" class="cloud-reader__panel" data-testid="cloud-document-read">
         <h5>{{ activeDocument.title }}</h5>
-        <p data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
+        <NFDocumentEditor v-if="workspace && documentForReading" :key="activeDocument.id" :initial-content="documentForReading" :translate="t" read-only />
+        <p v-else data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
       </section>
       <section v-if="projectMap" data-testid="cloud-map-read">
         <h4>{{ t('Карта') }}</h4>
@@ -214,12 +230,36 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
           <ul><li v-for="item in annotation.checklist" :key="item.id">{{ item.checked ? '☑' : '☐' }} {{ item.text }}</li></ul>
         </li></ul>
       </section>
-      <h4>{{ recoveryLabels[locale.language].heading }}</h4>
-      <section v-for="note in recovery.notes.filter(note => note.stage_id === selectedStage)" :key="note.id">
-        <h5>{{ note.title }}</h5>
-        <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" style="width: 100%; min-height: 12rem; border: 0" />
-        <p v-else style="white-space: pre-wrap">{{ note.content }}</p>
+      <section v-if="workspace && stageNotes.length" class="cloud-reader__panel">
+        <h4>{{ recoveryLabels[locale.language].heading }}</h4>
+        <div class="cloud-reader__notes">
+          <NoteCard v-for="note in stageNotes" :key="note.id" :note="cloudNoteCard(note)" reading>
+            <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" />
+            <p v-else class="cloud-reader__note-text">{{ note.content }}</p>
+          </NoteCard>
+        </div>
       </section>
+      <template v-if="!workspace">
+        <h4>{{ recoveryLabels[locale.language].heading }}</h4>
+        <section v-for="note in stageNotes" :key="note.id">
+          <h5>{{ note.title }}</h5>
+          <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" style="width: 100%; min-height: 12rem; border: 0" />
+          <p v-else style="white-space: pre-wrap">{{ note.content }}</p>
+        </section>
+      </template>
     </article>
   </section>
 </template>
+
+<style scoped>
+.cloud-reader { display: grid; gap: var(--nf-space-4); min-width: 0; overflow-wrap: anywhere; }
+.cloud-reader h3, .cloud-reader h4, .cloud-reader h5, .cloud-reader p { margin: 0; }
+.cloud-reader h3 { font: clamp(1.5rem, 4vw, 2.4rem) var(--nf-font-serif); }
+.cloud-reader__notice { color: var(--nf-color-text-muted); }
+.cloud-reader__stages { display: flex; flex-wrap: wrap; gap: var(--nf-space-2); }
+.cloud-reader__stages [aria-pressed='true'] { border-color: var(--nf-color-primary); color: var(--nf-color-primary); }
+.cloud-reader__panel { display: grid; gap: var(--nf-space-3); min-width: 0; }
+.cloud-reader__notes { display: grid; gap: var(--nf-space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); }
+.cloud-reader__notes iframe { width: 100%; min-height: 12rem; border: 0; }
+.cloud-reader__note-text { white-space: pre-wrap; }
+</style>

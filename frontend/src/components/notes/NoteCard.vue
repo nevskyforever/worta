@@ -22,6 +22,7 @@ const props = withDefaults(
     disabled?: boolean
     canMoveUp?: boolean
     canMoveDown?: boolean
+    reading?: boolean
   }>(),
   {
     disabled: false,
@@ -81,6 +82,7 @@ function selectColor(color: NoteColor): void {
       </div>
 
       <button
+        v-if="!reading"
         class="icon-button"
         type="button"
         :aria-label="t('Редактировать заметку')"
@@ -91,11 +93,13 @@ function selectColor(color: NoteColor): void {
       </button>
     </header>
 
-    <p v-if="preview" class="note-card__preview">{{ preview }}</p>
-    <p v-else class="note-card__empty">{{ t('В заметке пока нет текста.') }}</p>
+    <slot>
+      <p v-if="preview" class="note-card__preview">{{ preview }}</p>
+      <p v-else class="note-card__empty">{{ t('В заметке пока нет текста.') }}</p>
+    </slot>
 
     <ul v-if="note.checklist.length" class="note-card__checklist" :aria-label="t('Чек-лист')">
-      <li v-for="item in note.checklist.slice(0, 4)" :key="item.id">
+      <li v-for="item in reading ? note.checklist : note.checklist.slice(0, 4)" :key="item.id">
         <span aria-hidden="true">{{ item.checked ? '✓' : '○' }}</span>
         <span :class="{ 'is-checked': item.checked }">{{ item.text }}</span>
       </li>
@@ -111,7 +115,7 @@ function selectColor(color: NoteColor): void {
         {{ t('Изменено') }} {{ locale.formatDate(note.updated_at) }}
       </time>
 
-      <div class="note-card__actions">
+      <div v-if="!reading" class="note-card__actions">
         <div class="note-card__color-control">
           <button
             class="icon-button note-card__color-toggle"
