@@ -91,6 +91,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.name === 'admin-login' && adminSession.active()) return { name: 'admin' }
   if (to.meta.requiresAdmin && !adminSession.active()) return { name: 'admin-login' }
   if (currentPlatform() === 'web' && !to.meta.admin && !to.meta.standalone) return { name: 'web-login' }
   if (to.name === 'web-password-reset' && currentPlatform() !== 'web') return { name: 'projects' }

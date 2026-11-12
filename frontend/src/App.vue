@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from 'vue'
 import { IonApp, IonRouterOutlet } from '@ionic/vue'
+import { RouterView } from 'vue-router'
 
 import { apiErrorMessage } from '@/api/client'
 import { settingsApi } from '@/api/settings'
@@ -110,6 +111,7 @@ onBeforeUnmount(() => {
 <template>
   <IonApp>
     <WebAccountPage v-if="router.currentRoute.value.meta.webAccount" />
+    <RouterView v-else-if="router.currentRoute.value.meta.admin" />
     <IonRouterOutlet v-else-if="isStandaloneRoute" />
     <div
       v-else-if="bootstrapState === 'loading'"
