@@ -90,8 +90,7 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
     with sqlite3.connect(db) as connection:
         expected_content = json.loads(connection.execute("SELECT payload_json FROM notes WHERE id='native-note'").fetchone()[0])["content"]
 
-    fixture_path = tmp_path / "catalog-recovery-browser.json"
-    fixture_path.write_text(json.dumps({
+    run_browser(client, tmp_path, {
         "amk": amk,
         "projectId": PROJECT_ID,
         "sequence": sequence,
@@ -100,7 +99,18 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
         "stageId": "S1",
         "stages": ["S1"],
         "expectedProjectName": "Cross-runtime project",
-    }), encoding="utf-8")
+    })
+
+
+def test_web_created_empty_project_reopens_in_fresh_browser(cloud_client, tmp_path):
+    client, engine = cloud_client
+    create_user(engine)
+    run_browser(client, tmp_path, {"webCreate": True, "expectedProjectName": "Облачный черновик"})
+
+
+def run_browser(client, tmp_path, fixture):
+    fixture_path = tmp_path / "catalog-recovery-browser.json"
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
     fixture_path.chmod(0o600)
 
     api_socket = socket.socket()

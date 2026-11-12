@@ -3,6 +3,7 @@ import BrowserAccountGameRead from './BrowserAccountGameRead.vue'
 import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
+import StatePanel from '@/components/ui/StatePanel.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
@@ -11,7 +12,7 @@ import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
-const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean }>()
+const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean }>()
 const emit = defineEmits<{ invalidated: [] }>()
 const locale = useLocaleStore(), t = locale.translate
 const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: string; network: string; register: string }> = {
@@ -23,6 +24,11 @@ const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: 
   pt_BR: { open: 'Abrir projeto na nuvem', partial: 'Configurações verificadas do servidor. Textos, etapas, notas e outros dados ainda não foram abertos.', blocked: 'Leitura bloqueada', network: 'Não foi possível conectar ao servidor. Tente novamente.', register: 'Registrar este navegador para acessar a nuvem' },
 }
 const words = computed(() => copy[locale.language])
+const emptyProject: Record<SupportedLanguage, string> = {
+  ru: 'В проекте пока нет содержимого', en: 'This project has no content yet',
+  es: 'El proyecto aún no tiene contenido', de: 'Dieses Projekt hat noch keine Inhalte',
+  fr: 'Ce projet ne contient encore aucun contenu', pt_BR: 'Este projeto ainda não tem conteúdo',
+}
 // Keep only text and basic formatting; the opaque-origin sandbox is a second barrier
 // against scripts, network access and access to the authenticated parent page.
 function noteHtmlDocument(content: string): string {
@@ -136,6 +142,14 @@ async function openRecovery(): Promise<void> {
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
   try {
+    if (props.workspace) {
+      const preview = await props.session.readCloudProject(props.projectId, active.signal, 'recovery').catch(() => null)
+      if (active.signal.aborted) return
+      if (preview?.empty && props.session.status === 'unlocked') {
+        result.value = preview
+        return
+      }
+    }
     const value = await props.session.readRecoveryProject(props.projectId, active.signal)
     if (!active.signal.aborted && props.session.status === 'unlocked') {
       recovery.value = value
@@ -158,13 +172,18 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
 
 <template>
   <section data-testid="cloud-project-read" :data-project-id="projectId">
-    <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="open">{{ busy ? t('Загружаем с сервера…') : words.open }}</button>
-    <button data-testid="cloud-notes-open" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="openRecovery">{{ recoveryLabels[locale.language].open }}</button>
+    <template v-if="!workspace">
+      <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="open">{{ busy ? t('Загружаем с сервера…') : words.open }}</button>
+      <button data-testid="cloud-notes-open" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="openRecovery">{{ recoveryLabels[locale.language].open }}</button>
+    </template>
+    <StatePanel v-if="workspace && busy" :title="t('Загружаем с сервера…')" loading />
     <p v-if="error" role="alert" :data-read-code="error">{{ error === 'connection_failed' ? words.network : error === 'document_recovery_unavailable' ? documentUnavailable[locale.language] : recoveryError ? recoveryLabels[locale.language].unavailable : `${words.blocked}: ${error}` }}</p>
+    <button v-if="workspace && error" class="nf-button nf-button--secondary" type="button" @click="openRecovery">{{ t('Повторить загрузку') }}</button>
     <article v-if="result" data-testid="cloud-project-metadata">
       <h3>{{ result.metadata.name }}</h3>
-      <p>{{ words.partial }}</p>
-      <dl>
+      <StatePanel v-if="result.empty" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
+      <p v-else>{{ words.partial }}</p>
+      <dl v-if="!result.empty">
         <dt>{{ t('Цель') }}</dt><dd>{{ result.metadata.goal ?? t('Без лимита') }}</dd>
         <dt>{{ t('Статус') }}</dt><dd>{{ result.metadata.status }}</dd>
         <dt>{{ t('Дедлайн') }}</dt><dd>{{ result.metadata.deadline ?? '—' }}</dd>

@@ -1,6 +1,6 @@
 import { cloudProjectsApi } from '@/api/cloudProjects'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
-import { encryptedSyncV3Api, isAccountItem } from '@/api/encryptedSyncV3'
+import { encryptedSyncV3Api, isAccountItem, parseV3Pull } from '@/api/encryptedSyncV3'
 import { CryptoError } from '@/crypto'
 import { ApiError, ApiResponseTooLargeError } from '@/api/client'
 import type { NormalUserAuthRuntime } from '@/auth/userAuth'
@@ -19,6 +19,7 @@ export interface BrowserCloudProjectRead {
   readonly projectId: string
   readonly metadata: ProjectMetadata
   readonly cursor: number
+  readonly empty?: true
   readonly ready: false
   readonly declarationAllowed: false
   readonly writerAuthorized: false
@@ -31,6 +32,7 @@ function fail(code: string): never { throw new BrowserCloudReadError(code) }
 export async function readBrowserCloudProject(input: {
   auth: NormalUserAuthRuntime; lease: AuthoritativeKeyContextLease; deviceId: string
   projectId: string; signal: AbortSignal; current: () => boolean
+  delivery?: 'recovery'
 }): Promise<BrowserCloudProjectRead> {
   const { auth, lease, deviceId, projectId, signal, current } = input
   const context = auth.requireContext()
@@ -68,11 +70,14 @@ export async function readBrowserCloudProject(input: {
     if (registry.current_cursor > 200) fail('history_limit')
     const histories = new Map<string, ProjectMetadataEvent[]>()
     const ids = new Set<string>()
-    let cursor = 0, bytes = 0
+    let cursor = 0, bytes = 0, selectedSequence = 0
     await lease.use(async amk => {
       let more = true
       while (more) {
-        const page = await request(token => encryptedSyncV3Api.pull(token, deviceId, cursor, 100, signal))
+        const page = input.delivery === 'recovery'
+          ? parseV3Pull(JSON.parse(await request(token => encryptedSyncV3Api.recoveryRaw(token, cursor, 100,
+            registry.current_cursor, mode.cutover_epoch, signal))), cursor, 100)
+          : await request(token => encryptedSyncV3Api.pull(token, deviceId, cursor, 100, signal))
         try {
           for (const item of page.items) {
             if (item.event.server_sequence !== cursor + 1 || ids.has(item.event.event_id)) fail('history_gap_or_duplicate')
@@ -97,6 +102,7 @@ export async function readBrowserCloudProject(input: {
             // Encrypted cover blob material/authentication remains a separate concern.
             const history = histories.get(e.project_id) ?? []
             history.push(event); histories.set(e.project_id, history)
+            if (e.project_id === projectId) selectedSequence = e.server_sequence
             ids.add(e.event_id); cursor = e.server_sequence
           }
           if (page.next_cursor !== cursor || page.has_more && cursor >= registry.current_cursor) fail('server_changed')
@@ -122,7 +128,16 @@ export async function readBrowserCloudProject(input: {
     if (JSON.stringify(after) !== JSON.stringify(registry) || afterMode.writer_transport_version !== mode.writer_transport_version
       || afterMode.cutover_epoch !== mode.cutover_epoch) fail('server_changed')
     check()
+    // Only the complete, stable account feed can prove that this bootstrap
+    // consists of a single Metadata Create and contains no project content.
+    const history = histories.get(projectId)!
+    const header = history[0]?.header
+    const empty = input.delivery === 'recovery' && history.length === 1 && header?.operation === 'create'
+      && header.device_id === selected.origin_device_id && header.revision === 1 && header.generation === 1
+      && header.parent_event_ids.length === 0 && selected.initial_event_count === 1
+      && selected.initial_max_server_sequence === selectedSequence
     return { kind: 'metadata_only', projectId, metadata: structuredClone(snapshot.metadata), cursor,
+      ...(empty ? { empty: true as const } : {}),
       ready: false, declarationAllowed: false, writerAuthorized: false }
   } catch (error) {
     check()

@@ -14,13 +14,16 @@ function syncRoute(status: typeof session.status): void {
 </script>
 
 <template>
-  <main class="web-account">
-    <h1>worta</h1>
+  <main class="web-account" :class="{ 'web-account--workspace': route.name === 'web-workspace' }">
+    <header><h1>worta</h1></header>
     <BrowserCloudAccountCard :session="session" :workspace-page="route.name === 'web-workspace'" @status-change="syncRoute" />
   </main>
 </template>
 
 <style scoped>
 .web-account { max-width: 58rem; width: 100%; height: 100%; overflow: auto; margin: 0 auto; padding: clamp(1rem, 4vw, 3rem); }
-.web-account > h1 { font-family: var(--nf-font-serif); font-size: clamp(2rem, 6vw, 3.5rem); }
+.web-account h1 { font-family: var(--nf-font-serif); font-size: clamp(2rem, 6vw, 3.5rem); }
+.web-account--workspace { max-width: 76rem; }
+.web-account--workspace header { border-bottom: 1px solid var(--nf-color-border); margin-bottom: var(--nf-space-5); }
+.web-account--workspace h1 { font-size: 2rem; margin: 0 0 var(--nf-space-3); }
 </style>

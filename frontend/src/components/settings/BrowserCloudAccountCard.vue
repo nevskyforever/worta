@@ -14,6 +14,7 @@ import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
 import BrowserEncryptedWorkspace from './BrowserEncryptedWorkspace.vue'
 import BrowserCloudProjectRead from './BrowserCloudProjectRead.vue'
+import StatePanel from '@/components/ui/StatePanel.vue'
 
 type Copy = { unlocked: string; badPassword: string; writerBusy: string; storageUnavailable: string; legalRequired: string; acceptRevision: string; acceptCurrent: string; stale: string; onlineOnly: string; cloudProjects: string; refreshProjects: string; projectCount: string; noCloudProjects: string; projectIdsOnly: string; localWorkspace: string; connectionFailed: string; openCloudProject: string }
 const copy: Record<SupportedLanguage, Copy> = {
@@ -113,7 +114,7 @@ async function loadCloudProjectMetadata(ids: string[], controller: AbortControll
   cloudProjectMetadataLoading.value = loading
   await Promise.all(ids.map(async id => {
     try {
-      const value = await session.readCloudProject(id, controller.signal)
+      const value = await session.readCloudProject(id, controller.signal, props.workspacePage ? 'recovery' : undefined)
       if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
       cloudProjectMetadata.value = { ...cloudProjectMetadata.value, [id]: value }
       const nextError = { ...cloudProjectMetadataError.value }
@@ -142,7 +143,6 @@ async function loadCloudCatalog(): Promise<void> {
     const result = await session.listCloudProjects(controller.signal)
     if (generation !== cloudCatalogGeneration || !['authenticated', 'unlocked'].includes(session.status)) return
     cloudProjects.value = result
-    if (session.status === 'unlocked') void loadCloudProjectMetadata(result.cloud_project_ids, controller, generation)
   } catch (cause) {
     if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
     if (cause instanceof StaleAuthContextError) {
@@ -382,24 +382,24 @@ watch(status, next => {
   emit('statusChange', next)
   if (next === 'unlocked') void checkSyncMode()
   else { resetSyncSetup(); resetCloudCreate() }
-  if (next === 'logged_out' || next === 'legal_required') clearCloudCatalog()
+  if (next === 'logged_out' || next === 'legal_required' || (props.session && next !== 'unlocked')) clearCloudCatalog()
 }, { immediate: true })
 </script>
 
 <template>
-  <section class="settings-card" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
+  <section :class="workspacePage ? 'web-projects' : 'settings-card'" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
     <div class="settings-card__heading">
-      <h2 id="browser-cloud-account-title">{{ t('Зашифрованное рабочее пространство') }}</h2>
-      <p>{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
+      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
+      <p v-if="!props.session">{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
     </div>
-    <p :data-status="status" aria-live="polite">
+    <p :data-status="status" :hidden="workspacePage && status === 'unlocked'" aria-live="polite">
       <template v-if="status === 'logged_out'">{{ t('Войдите в аккаунт') }}</template>
       <template v-else-if="status === 'legal_required'">{{ words.legalRequired }}</template>
       <template v-else-if="status === 'authenticated'">{{ t('Подключён аккаунт') }}</template>
       <template v-else-if="status === 'locked'">{{ t('Ключ шифрования заблокирован. Введите пароль шифрования.') }}</template>
       <template v-else>{{ words.unlocked }}</template>
     </p>
-    <p v-if="connectedUsername">{{ t('Подключён аккаунт') }}: <strong>{{ connectedUsername }}</strong></p>
+    <p v-if="connectedUsername && !workspacePage">{{ t('Подключён аккаунт') }}: <strong>{{ connectedUsername }}</strong></p>
     <p v-if="error" role="alert">{{ error }}</p>
     <form v-if="status === 'logged_out'" class="browser-cloud-account__inputs" @submit.prevent="signIn">
       <label>{{ t('Имя пользователя или e-mail') }} <input v-model="username" autocomplete="username" /></label>
@@ -422,18 +422,18 @@ watch(status, next => {
       <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
     </div>
     <div v-else class="browser-cloud-account__inputs">
-      <p class="browser-cloud-account__online-policy">{{ words.onlineOnly }}</p>
-      <button class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
+      <p v-if="!props.session" class="browser-cloud-account__online-policy">{{ words.onlineOnly }}</p>
+      <button v-if="!props.session" class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
       </button>
-      <div v-if="props.session && status === 'unlocked' && syncMode !== 3" class="browser-cloud-account__create">
+      <div v-if="props.session && status === 'unlocked' && syncMode !== 3 && !selectedCloudProject" class="browser-cloud-account__create">
         <p v-if="syncBusy" role="status">{{ setupWords.busy }}</p>
         <p v-else-if="syncError" role="alert">{{ syncError }}</p>
         <p v-else-if="syncMode !== null">{{ setupWords.hint }}</p>
         <button v-if="!syncBusy" class="nf-button" type="button" :disabled="busy" data-testid="cloud-sync-setup"
           @click="checkSyncMode(syncMode !== null)">{{ syncMode === null ? t('Повторить') : setupWords.action }}</button>
       </div>
-      <form v-if="status === 'unlocked' && (!props.session || syncMode === 3)" class="browser-cloud-account__inputs browser-cloud-account__create"
+      <form v-if="status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
         data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
         <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
         <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || !cloudProjectName.trim()">{{ createWords.title }}</button>
@@ -441,7 +441,24 @@ watch(status, next => {
         <p v-else-if="cloudCreateSaved" role="status">{{ createWords.saved }}</p>
         <p v-if="cloudCreateError" role="alert">{{ cloudCreateError }}</p>
       </form>
-      <section v-if="cloudCatalogOpen" class="browser-cloud-account__catalog" :aria-label="words.cloudProjects" data-testid="server-cloud-project-catalog">
+      <section v-if="workspacePage && selectedCloudProject" class="web-projects__detail">
+        <button type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="selectedCloudProject = null">{{ t('Назад') }}</button>
+        <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace @invalidated="refresh(); clearCloudCatalog()" />
+      </section>
+      <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
+        <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
+        <StatePanel v-if="cloudCatalogBusy" :title="t('Загружаем с сервера…')" loading />
+        <p v-else-if="cloudCatalogError" role="alert">{{ cloudCatalogError }}</p>
+        <StatePanel v-else-if="cloudProjects?.cloud_project_count === 0" :title="words.noCloudProjects" />
+        <ul v-else-if="cloudProjects" class="web-projects__grid">
+          <li v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id">
+            <button type="button" class="web-projects__tile" :data-cloud-project-id="id" @click="selectedCloudProject = id">
+              {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
+            </button>
+          </li>
+        </ul>
+      </section>
+      <section v-else-if="!props.session && cloudCatalogOpen" class="browser-cloud-account__catalog" :aria-label="words.cloudProjects" data-testid="server-cloud-project-catalog">
         <div class="browser-cloud-account__catalog-heading">
           <h3>{{ words.cloudProjects }}</h3>
           <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
@@ -505,5 +522,11 @@ watch(status, next => {
 .browser-cloud-account__catalog { flex-basis: 100%; display: grid; gap: .5rem; padding: 1rem; border: 1px solid var(--nf-color-border); border-radius: .5rem; }
 .browser-cloud-account__catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .browser-cloud-account__catalog h3, .browser-cloud-account__catalog p { margin: 0; }
+.web-projects { display: grid; gap: var(--nf-space-4); }
+.web-projects__catalog, .web-projects__detail { flex-basis: 100%; display: grid; justify-items: start; gap: var(--nf-space-4); }
+.web-projects__detail :deep([data-testid="cloud-project-read"]) { width: 100%; }
+.web-projects__grid { width: 100%; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--nf-space-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); }
+.web-projects__tile { width: 100%; min-height: 7rem; padding: var(--nf-space-4); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-lg); background: var(--nf-color-surface); color: var(--nf-color-text); font: 1.3rem var(--nf-font-serif); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.web-projects__tile:hover, .web-projects__tile:focus-visible { border-color: var(--nf-color-primary); }
 [role="alert"] { color: var(--ion-color-danger); }
 </style>

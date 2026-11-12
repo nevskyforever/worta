@@ -122,12 +122,12 @@ export class BrowserCloudAccountSession {
   }
 
   /** Server read only. The result belongs to this active key/auth session. */
-  async readCloudProject(projectId: string, signal: AbortSignal): Promise<BrowserCloudProjectRead> {
+  async readCloudProject(projectId: string, signal: AbortSignal, delivery?: 'recovery'): Promise<BrowserCloudProjectRead> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !this.controller) throw new BrowserCloudReadError('key_locked')
-    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId,
+    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId, delivery,
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) })
   }
