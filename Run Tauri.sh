@@ -26,19 +26,19 @@ case "$MODE" in
   "") ;;
   --data-dir)
     if [ "$#" -ne 2 ] || [ -z "${2:-}" ]; then
-      echo "Использование: $0 [--fresh|--legacy|--clean|--data-dir PATH|--check]"
+      echo "Использование: $0 [--fresh|--staging|--legacy|--clean|--data-dir PATH|--check]"
       exit 2
     fi
     DATA_ROOT="$2"
     ;;
-  --fresh|--legacy|--clean|--check)
+  --fresh|--staging|--legacy|--clean|--check)
     if [ "$#" -ne 1 ]; then
-      echo "Использование: $0 [--fresh|--legacy|--clean|--data-dir PATH|--check]"
+      echo "Использование: $0 [--fresh|--staging|--legacy|--clean|--data-dir PATH|--check]"
       exit 2
     fi
     ;;
   *)
-    echo "Использование: $0 [--fresh|--legacy|--clean|--data-dir PATH|--check]"
+    echo "Использование: $0 [--fresh|--staging|--legacy|--clean|--data-dir PATH|--check]"
     exit 2
     ;;
 esac
@@ -158,7 +158,7 @@ fi
 
 if [ -z "$DATA_ROOT" ]; then
   case "$MODE" in
-    --fresh)
+    --fresh|--staging)
       DATA_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/nfprogress-tauri-dev.XXXXXX")"
       ;;
     --legacy)
@@ -179,10 +179,23 @@ fi
 echo "Tauri dev data root: $DATA_ROOT"
 echo "Запускается Tauri dev. Это не production-сборка; при первом запуске Cargo может собрать debug-код."
 cd "$FRONTEND_DIR"
+TAURI_OVERRIDE=()
+if [ "$MODE" = "--staging" ]; then
+  export WORTA_DESKTOP_STAGING=1
+  export VITE_API_BASE_URL=''
+  TAURI_OVERRIDE=(--config "$(node -e '
+    const { app } = require(process.argv[1]);
+    console.log(JSON.stringify({
+      identifier: "app.nfprogress.tracker.staging",
+      build: { beforeDevCommand: "npm run dev -- --strictPort" },
+      app: { windows: app.windows.map(window => ({ ...window, incognito: true })) },
+    }));
+  ' "$TAURI_CONFIG")")
+fi
 # Для обычной разработки incremental-артефакты и debug-символы не нужны:
 # они со временем раздувают target на несколько гигабайт.
 CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" \
 CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}" \
 CARGO_TARGET_DIR="$TAURI_TARGET_DIR" \
 NFPROGRESS_BUILD_PROFILE=test NFPROGRESS_DATA_DIR="$DATA_ROOT" \
-  exec npm run tauri:dev -- --config "$TAURI_CONFIG"
+  exec npm run tauri:dev -- --config "$TAURI_CONFIG" ${TAURI_OVERRIDE[@]+"${TAURI_OVERRIDE[@]}"}

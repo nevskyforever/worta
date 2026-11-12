@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
-import type { Plugin } from 'vite'
+import type { Plugin, ServerOptions } from 'vite'
 import { defineConfig } from 'vitest/config'
 import { enableE2eLegalGateSkip } from './scripts/e2eLegalGate.ts'
 
@@ -32,6 +32,10 @@ function syncMindMapAssets(): Plugin {
   }
 }
 
+const stagingProxy: ServerOptions['proxy'] = {
+  '^/api/v[123]/': { target: 'https://test.worta.ru', changeOrigin: true },
+}
+
 export default defineConfig(({ command, mode }) => ({
   define: {
     __WORTA_E2E_SKIP_LEGAL_GATE__: JSON.stringify(enableE2eLegalGateSkip(command, mode, process.env)),
@@ -45,7 +49,7 @@ export default defineConfig(({ command, mode }) => ({
   server: {
     host: '127.0.0.1',
     port: 5173,
-    proxy: {
+    proxy: process.env.WORTA_DESKTOP_STAGING === '1' ? stagingProxy : {
       '/api': 'http://127.0.0.1:8000',
       '/health': 'http://127.0.0.1:8000',
     },

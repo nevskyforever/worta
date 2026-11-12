@@ -108,7 +108,7 @@ describe('SettingsPage', () => {
     expect(wrapper.find('#settings-motion').exists()).toBe(true)
     expect(wrapper.find('[data-testid="browser-cloud-account"]').exists()).toBe(true)
     const cloudAccount = wrapper.get('[data-testid="browser-cloud-account"]')
-    expect(cloudAccount.text()).toContain('Облачные проекты WORTA')
+    expect(cloudAccount.text()).toContain('Облачные проекты worta')
     expect(cloudAccount.get('[data-status="logged_out"]').text()).toContain('Войдите в аккаунт')
     expect(cloudAccount.find('input[autocomplete="username"]').exists()).toBe(true)
     expect(cloudAccount.find('input[autocomplete="current-password"]').exists()).toBe(true)
