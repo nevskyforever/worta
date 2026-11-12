@@ -76,12 +76,12 @@ def test_smtp_modes_config_redaction_and_trusted_links(monkeypatch, caplog, clou
     for security, factory in [('implicit_tls', 'SMTP_SSL'), ('starttls', 'SMTP')]:
         config = RuntimeConfig(public_web_url='https://trusted.example.test', smtp_host='smtp.example.test',
             smtp_port=465, smtp_username='mailer', smtp_password='smtp-secret',
-            smtp_from_email='no-reply@example.test', smtp_from_name='NFProgress', smtp_security=security)
+            smtp_from_email='no-reply@example.test', smtp_security=security)
         client = Mock(); client.__enter__ = Mock(return_value=client); client.__exit__ = Mock(return_value=False)
         mocked = Mock(return_value=client); monkeypatch.setattr(f'backend.app.cloud.email.smtplib.{factory}', mocked)
         SmtpEmailSender(config).send(OutgoingEmail('to@example.test', 'Subject', 'Body'))
         assert mocked.call_args.kwargs['timeout'] == 10
-        assert client.send_message.call_args.args[0]['From'] == 'NFProgress <no-reply@example.test>'
+        assert client.send_message.call_args.args[0]['From'] == 'worta <no-reply@example.test>'
         if security == 'starttls': client.starttls.assert_called_once()
     assert 'smtp-secret' not in repr(config)
     with pytest.raises(ValueError): RuntimeConfig(smtp_host='smtp.example.test')

@@ -59,8 +59,8 @@ def create_invitation(payload: AdminInvitationCreateRequest,
         raise HTTPException(error.status_code, detail={'code': error.code}) from None
     link = f"{base.rstrip('/')}/invite#token={quote(raw, safe='')}"
     try:
-        sender.send(OutgoingEmail(payload.email, 'Приглашение в WORTA',
-            f'Администратор пригласил вас в закрытое тестирование WORTA.\n'
+        sender.send(OutgoingEmail(payload.email, 'Приглашение в worta',
+            f'Администратор пригласил вас в закрытое тестирование worta.\n'
             f'Создайте свой пароль по ссылке: {link}\n'
             'Ссылка действует 72 часа и используется один раз.'))
     except EmailDeliveryError:

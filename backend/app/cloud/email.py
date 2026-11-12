@@ -42,7 +42,7 @@ class SmtpEmailSender:
         self._username = config.smtp_username
         self._password = config.smtp_password
         self._from_email = config.smtp_from_email
-        self._from_name = config.smtp_from_name or config.smtp_from_email
+        self._from_name = config.smtp_from_name or 'worta'
         self._security = config.smtp_security
 
     def send(self, message: OutgoingEmail) -> None:

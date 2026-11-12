@@ -67,7 +67,10 @@ def test_private_invitation_authorization_creation_acceptance_and_replay(cloud_c
     assert issued.status_code == 201, issued.json()
     assert issued.json()['status'] == 'pending'
     assert 'token' not in issued.text and 'password' not in issued.text
-    assert client.app.state.email_sender.messages[-1].recipient == payload['email']
+    message = client.app.state.email_sender.messages[-1]
+    assert message.recipient == payload['email']
+    assert message.subject == 'Приглашение в worta'
+    assert 'закрытое тестирование worta.' in message.body
     token = _issued_token(client)
     invalid_token = token[:-1] + ('A' if token[-1] != 'A' else 'B')
     assert client.post('/api/v1/auth/invitations/documents', json={
@@ -169,7 +172,7 @@ def test_failed_invitation_delivery_revokes_token_and_allows_retry(cloud_client,
     retry = client.post('/api/v1/admin/invitations', headers=headers, json=payload)
     assert retry.status_code == 201 and retry.json()['status'] == 'pending'
     assert client.app.state.email_sender.messages[-1].body.startswith(
-        'Администратор пригласил вас в закрытое тестирование WORTA.')
+        'Администратор пригласил вас в закрытое тестирование worta.')
     assert 'https://app.example.test/invite#token=iv1.' in client.app.state.email_sender.messages[-1].body
 
 
