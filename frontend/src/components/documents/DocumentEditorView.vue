@@ -99,7 +99,10 @@ let positionSaveTimer: number | undefined
 let positionRestoreTimer: number | undefined
 let hasRestoredEditorPosition = false
 const linked = computed(() => Boolean(documentState.value?.docx_path))
-const showWordBindingPanel = computed(() => canLinkWord && (!linked.value || documentState.value?.sync_state !== 'synced'))
+const showWordBindingPanel = computed(() => canLinkWord && linked.value && [
+  'conflict', 'external_changed', 'word_changed', 'missing_external',
+  'external_proposal', 'external_import_pending', 'external_write_pending',
+].includes(documentState.value?.sync_state ?? ''))
 const textSymbols = computed(() => countTextSymbols(editorContent.value))
 const textUnits = computed(() => {
   const entity = projectEntity.value
@@ -414,10 +417,10 @@ async function decideLocalFile(choice: 'compare' | 'cloud' | 'import' | 'unlink'
 }
 async function linkWord() {
   try {
-    const path = await pickDesktopWordFile('Связать с файлом Word', 'Word')
+    const path = await pickDesktopWordFile(t('Связать с файлом Word'), 'Word')
     if (!path) return
     await link(path)
-    status.value = t('Файл Word связан')
+    status.value = t(status.value)
   } catch (error) {
     status.value = t(error instanceof Error ? error.message : 'Произошла непредвиденная ошибка.')
   }
@@ -498,6 +501,13 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
         <button class="nf-button" type="button" :disabled="processing || !canRecordText" @click="onRecordClick">
           {{ processing ? t('Сохраняем…') : t('Добавить запись') }}
         </button>
+        <button
+          v-if="canLinkWord && !showWordBindingPanel"
+          class="nf-button nf-button--secondary"
+          type="button"
+          :aria-label="t('Связать с файлом Word')"
+          @click="linkWord"
+        >{{ t(linked ? 'Файл Word связан' : 'Связать с файлом Word') }}</button>
         <button class="nf-button nf-button--secondary" type="button" title="Импортировать документ Word" aria-label="Импортировать документ Word" @click="importWord">Импорт DOCX</button>
         <button class="nf-button nf-button--secondary" type="button" title="Экспортировать документ Word" aria-label="Экспортировать документ Word" @click="exportWord">Экспорт DOCX</button>
 

@@ -1,10 +1,19 @@
+import { invoke } from '@tauri-apps/api/core'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { currentPlatform } from '@/platform/runtime'
 import { integrationsApi } from './integrations'
 import { settingsApi } from './settings'
 
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }))
+vi.mock('@/platform/runtime', async (importOriginal) => {
+  const runtime = await importOriginal<typeof import('@/platform/runtime')>()
+  return { ...runtime, currentPlatform: vi.fn(runtime.currentPlatform) }
+})
+
 afterEach(() => {
   vi.unstubAllGlobals()
+  vi.mocked(currentPlatform).mockReset()
 })
 
 function jsonResponse(payload: unknown): Response {
@@ -116,5 +125,30 @@ describe('settings and document integration API clients', () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/projects/project%2Fone/sync/all')
     expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/projects/project%2Fone/sync/run-all')
     expect((fetchMock.mock.calls[1]?.[1] as RequestInit).method).toBe('POST')
+  })
+})
+
+it('passes Scrivener inspection and source settings as native commands', async () => {
+  vi.mocked(currentPlatform).mockReturnValue('tauri')
+  const path = '/tmp/Book.scriv'
+  const items = [{ id: 'draft', title: 'Draft', children: [{ id: 'chapter', title: 'Chapter', children: [] }] }]
+  vi.mocked(invoke).mockResolvedValueOnce(items).mockResolvedValue({})
+
+  expect(await integrationsApi.inspectScrivener(path)).toEqual(items)
+  expect(invoke).toHaveBeenLastCalledWith('inspect_scrivener', { command: { path } })
+
+  await integrationsApi.getSync('book', 'stage')
+  expect(invoke).toHaveBeenLastCalledWith('get_document_sync', {
+    command: { projectId: 'book', stageId: 'stage' },
+  })
+
+  await integrationsApi.configureSync('book', { type: 'scrivener', path, stage_id: 'stage', item_id: 'chapter' })
+  expect(invoke).toHaveBeenLastCalledWith('configure_document_sync', {
+    command: { projectId: 'book', stageId: 'stage', type: 'scrivener', path, itemId: 'chapter' },
+  })
+
+  await integrationsApi.removeSync('book', 'stage')
+  expect(invoke).toHaveBeenLastCalledWith('remove_document_sync', {
+    command: { projectId: 'book', stageId: 'stage' },
   })
 })

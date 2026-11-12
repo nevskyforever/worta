@@ -655,6 +655,7 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
         &now(),
         None,
         Some(revision),
+        None,
     )?;
     Ok(serde_json::json!({
         "changed": !entry.is_null(),
@@ -1316,40 +1317,65 @@ fn validate_sync_scope(
     Ok((id, payload))
 }
 
+type SyncBinding = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+fn binding_with_legacy_id(
+    connection: &rusqlite::Connection,
+    project_id: &str,
+    stage_id: Option<&str>,
+) -> Result<Option<(SyncBinding, Option<String>)>, String> {
+    let read = |row: &rusqlite::Row<'_>| -> rusqlite::Result<SyncBinding> {
+        Ok((
+            row.get(0)?,
+            row.get(1)?,
+            row.get(2)?,
+            row.get(3)?,
+            row.get(4)?,
+        ))
+    };
+    if external_reattach::connected(connection, project_id)? {
+        return connection.query_row(
+            "SELECT binding_type,external_path,source_id,content_hash,last_synced_at FROM project_bindings WHERE id=?1",
+            [external_reattach::project_binding_id(project_id, stage_id)],
+            read,
+        ).optional().map(|binding| binding.map(|binding| (binding, None))).map_err(|e| e.to_string());
+    }
+    let document_id = document_id_for_scope(connection, project_id, stage_id)?;
+    let document = connection.query_row(
+        "SELECT binding_type,external_path,source_id,last_external_hash,last_synced_at FROM document_bindings WHERE document_id=?1",
+        [document_id],
+        read,
+    ).optional().map_err(|e| e.to_string())?;
+    if let Some(binding) = document {
+        return Ok(Some((binding, None)));
+    }
+    // Migrated desktop profiles store progress sources independently of text
+    // documents. Keep those sources usable without requiring reattachment.
+    connection
+        .query_row(
+            "SELECT binding_type,external_path,source_id,content_hash,last_synced_at,id
+         FROM project_bindings WHERE project_id=?1 AND stage_id IS ?2
+         AND id NOT LIKE 'external-progress:%' AND external_path IS NOT NULL
+         AND binding_type IN ('word','scrivener') ORDER BY id LIMIT 1",
+            params![project_id, stage_id],
+            |row| Ok((read(row)?, Some(row.get(5)?))),
+        )
+        .optional()
+        .map_err(|e| e.to_string())
+}
+
 fn binding_for_scope(
     connection: &rusqlite::Connection,
     project_id: &str,
     stage_id: Option<&str>,
-) -> Result<
-    Option<(
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    )>,
-    String,
-> {
-    let document_id = document_id_for_scope(connection, project_id, stage_id)?;
-    if external_reattach::connected(connection, project_id)? {
-        return connection.query_row("SELECT binding_type,external_path,source_id,content_hash,last_synced_at FROM project_bindings WHERE id=?1",[external_reattach::project_binding_id(project_id,stage_id)],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(|e|e.to_string());
-    }
-    connection
-        .query_row(
-            "SELECT binding_type,external_path,source_id,last_external_hash,last_synced_at FROM document_bindings WHERE document_id=?1",
-            [document_id.as_str()],
-            |row| {
-                Ok((
-                    row.get(0)?,
-                    row.get(1)?,
-                    row.get(2)?,
-                    row.get(3)?,
-                    row.get(4)?,
-                ))
-            },
-        )
-        .optional()
-        .map_err(|error| error.to_string())
+) -> Result<Option<SyncBinding>, String> {
+    Ok(binding_with_legacy_id(connection, project_id, stage_id)?.map(|(binding, _)| binding))
 }
 
 fn sync_summary(
@@ -1462,6 +1488,7 @@ pub fn configure_sync(command: SyncConfigureCommand) -> Result<SyncSummary, Stri
         params![payload.to_string(), timestamp, entity_id],
     )
     .map_err(|error| error.to_string())?;
+    remove_legacy_sync_binding(&tx, &command.project_id, command.stage_id.as_deref())?;
     tx.commit().map_err(|error| error.to_string())?;
     sync_summary(
         &connection,
@@ -1548,17 +1575,31 @@ pub fn remove_sync(command: SyncScopeCommand) -> Result<SyncSummary, String> {
         &command.project_id,
         command.stage_id.as_deref(),
     )?;
-    connection
-        .execute(
-            "DELETE FROM document_bindings WHERE document_id=?",
-            [document_id.as_str()],
-        )
-        .map_err(|error| error.to_string())?;
+    let tx = connection.transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM document_bindings WHERE document_id=?",
+        [document_id],
+    )
+    .map_err(|e| e.to_string())?;
+    remove_legacy_sync_binding(&tx, &command.project_id, command.stage_id.as_deref())?;
+    tx.commit().map_err(|e| e.to_string())?;
     sync_summary(
         &connection,
         &command.project_id,
         command.stage_id.as_deref(),
     )
+}
+
+fn remove_legacy_sync_binding(
+    db: &rusqlite::Connection,
+    project_id: &str,
+    stage_id: Option<&str>,
+) -> Result<(), String> {
+    db.execute(
+        "DELETE FROM project_bindings WHERE project_id=?1 AND stage_id IS ?2 AND id NOT LIKE 'external-progress:%' AND binding_type IN ('word','scrivener')",
+        params![project_id, stage_id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 fn sync_source(
@@ -1601,7 +1642,7 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
         &command.project_id,
         command.stage_id.as_deref(),
     )?;
-    let binding = binding_for_scope(
+    let (binding, legacy_id) = binding_with_legacy_id(
         &connection,
         &command.project_id,
         command.stage_id.as_deref(),
@@ -1614,6 +1655,9 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
             command.stage_id.as_deref(),
             false,
         );
+    }
+    if let Some(id) = legacy_id {
+        return run_legacy_sync(&mut connection, command, &payload, binding, &id);
     }
     let (symbols, hash) = match sync_source(&binding.0, Path::new(&binding.1), binding.2.as_deref())
     {
@@ -1717,6 +1761,48 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
     })
 }
 
+fn run_legacy_sync(
+    db: &mut rusqlite::Connection,
+    scope: SyncScopeCommand,
+    entity: &Value,
+    binding: SyncBinding,
+    id: &str,
+) -> Result<SyncRunResult, String> {
+    let (kind, path, source_id, _, _) = binding;
+    let (symbols, hash) = sync_source(&kind, Path::new(&path), source_id.as_deref())?;
+    let total = normalize_total(symbols as f64, entity["unit"].as_str().unwrap_or("symbols"))?;
+    let (project, entry, _) = record_document_or_sync_progress(
+        db,
+        &scope.project_id,
+        scope.stage_id.as_deref(),
+        total,
+        &hash,
+        &now(),
+        None,
+        None,
+        Some(id),
+    )?;
+    Ok(SyncRunResult {
+        changed: !entry.is_null(),
+        symbols,
+        sync: sync_summary(db, &scope.project_id, scope.stage_id.as_deref())?,
+        progress: (!entry.is_null()).then(|| progress_result(project, entry)),
+    })
+}
+
+fn update_legacy_sync_hash(db: &rusqlite::Connection, id: &str, hash: &str) -> Result<(), String> {
+    let updated = db
+        .execute(
+            "UPDATE project_bindings SET content_hash=?1,last_synced_at=?2 WHERE id=?3",
+            params![hash, now(), id],
+        )
+        .map_err(|e| e.to_string())?;
+    if updated != 1 {
+        return Err("sync_source_stale".into());
+    }
+    Ok(())
+}
+
 fn progress_result(project: Value, entry: Value) -> Value {
     serde_json::json!({
         "project": project,
@@ -1730,7 +1816,7 @@ fn progress_result(project: Value, entry: Value) -> Value {
 fn run_all_sync_filtered(project_filter: Option<&str>) -> Result<SyncBatchResult, String> {
     let connection = open()?.0;
     let mut targets = Vec::new();
-    let mut statement = connection.prepare("SELECT d.project_id,d.stage_id FROM documents d JOIN document_bindings b ON b.document_id=d.id JOIN projects p ON p.id=d.project_id LEFT JOIN stages s ON s.id=d.stage_id WHERE NOT EXISTS(SELECT 1 FROM cloud_sync_project_bindings cb WHERE cb.project_id=d.project_id) AND (?1 IS NULL OR d.project_id=?1) AND ((d.stage_id IS NULL AND json_extract(p.payload_json,'$.status')='активен' AND json_extract(p.payload_json,'$.work_method')='sync') OR (d.stage_id IS NOT NULL AND json_extract(s.payload_json,'$.status')='активен' AND json_extract(s.payload_json,'$.work_method')='sync')) UNION SELECT b.project_id,b.stage_id FROM project_bindings b JOIN projects p ON p.id=b.project_id LEFT JOIN stages s ON s.id=b.stage_id WHERE b.id LIKE 'external-progress:%' AND (?1 IS NULL OR b.project_id=?1) AND ((b.stage_id IS NULL AND json_extract(p.payload_json,'$.status')='активен' AND json_extract(p.payload_json,'$.work_method')='sync') OR (b.stage_id IS NOT NULL AND json_extract(s.payload_json,'$.status')='активен' AND json_extract(s.payload_json,'$.work_method')='sync')) ORDER BY 1,2").map_err(|error| error.to_string())?;
+    let mut statement = connection.prepare("SELECT d.project_id,d.stage_id FROM documents d JOIN document_bindings b ON b.document_id=d.id JOIN projects p ON p.id=d.project_id LEFT JOIN stages s ON s.id=d.stage_id WHERE NOT EXISTS(SELECT 1 FROM cloud_sync_project_bindings cb WHERE cb.project_id=d.project_id) AND (?1 IS NULL OR d.project_id=?1) AND ((d.stage_id IS NULL AND json_extract(p.payload_json,'$.status')='активен' AND json_extract(p.payload_json,'$.work_method')='sync') OR (d.stage_id IS NOT NULL AND json_extract(s.payload_json,'$.status')='активен' AND json_extract(s.payload_json,'$.work_method')='sync')) UNION SELECT b.project_id,b.stage_id FROM project_bindings b JOIN projects p ON p.id=b.project_id LEFT JOIN stages s ON s.id=b.stage_id WHERE (b.id LIKE 'external-progress:%' OR (b.binding_type IN ('word','scrivener') AND b.external_path IS NOT NULL AND NOT EXISTS(SELECT 1 FROM cloud_sync_project_bindings cb WHERE cb.project_id=b.project_id))) AND (?1 IS NULL OR b.project_id=?1) AND ((b.stage_id IS NULL AND json_extract(p.payload_json,'$.status')='активен' AND json_extract(p.payload_json,'$.work_method')='sync') OR (b.stage_id IS NOT NULL AND json_extract(s.payload_json,'$.status')='активен' AND json_extract(s.payload_json,'$.work_method')='sync')) ORDER BY 1,2").map_err(|error| error.to_string())?;
     let rows = statement
         .query_map([project_filter], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -3185,6 +3271,70 @@ mod tests {
     }
 
     #[test]
+    fn migrated_scrivener_binding_opens_its_tree_and_synchronizes_once() {
+        let _guard = DATA_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root =
+            std::env::temp_dir().join(format!("worta-scrivener-legacy-{}", std::process::id()));
+        let previous = std::env::var_os("NFPROGRESS_DATA_DIR");
+        fs::create_dir(&root).unwrap();
+        std::env::set_var("NFPROGRESS_DATA_DIR", &root);
+        let result = (|| -> Result<(), String> {
+            let source = root.join("Book.scriv");
+            let item = source.join("Files/Data/CHAPTER");
+            fs::create_dir_all(&item).map_err(|e| e.to_string())?;
+            fs::write(source.join("Book.scrivx"),
+                r#"<ScrivenerProject><Binder><BinderItem UUID="DRAFT"><Title>Draft</Title><Children><BinderItem UUID="CHAPTER"><Title>Chapter</Title></BinderItem></Children></BinderItem></Binder></ScrivenerProject>"#
+            ).map_err(|e| e.to_string())?;
+            fs::write(item.join("content.rtf"), br"{\rtf1 Hello world}")
+                .map_err(|e| e.to_string())?;
+            let path = source.to_string_lossy().into_owned();
+            let tree = inspect_scrivener(ScrivenerInspectCommand { path: path.clone() })?;
+            assert_eq!(tree[0].children[0].id, "CHAPTER");
+            assert_eq!(tree[0].children[0].title, "Chapter");
+
+            let (db, _) = open()?;
+            crate::initialize_fresh_desktop_database(&db, &root)?;
+            let project = serde_json::json!({"id":"book","name":"Book","status":"активен","unit":"symbols","goal":100,"total":0,"work_method":"sync"});
+            db.execute("INSERT INTO projects(id,name,goal,infinite,unit,status,payload_json) VALUES('book','Book',100,0,'symbols','активен',?1)", [project.to_string()]).map_err(|e| e.to_string())?;
+            db.execute("INSERT INTO project_order VALUES('book',0)", [])
+                .map_err(|e| e.to_string())?;
+            db.execute("INSERT INTO project_bindings(id,project_id,binding_type,external_path,source_id,payload_json) VALUES('legacy','book','scrivener',?1,'CHAPTER','{}')", [&path]).map_err(|e| e.to_string())?;
+            drop(db);
+
+            let scope = || SyncScopeCommand {
+                project_id: "book".into(),
+                stage_id: None,
+            };
+            let summary = get_sync(scope())?;
+            assert!(summary.configured);
+            assert_eq!(summary.item_id.as_deref(), Some("CHAPTER"));
+
+            let batch = run_project_syncs("book".into())?;
+            assert_eq!((batch.checked, batch.changed, batch.failed), (1, 1, 0));
+            assert_eq!(batch.items[0].symbols, Some(11));
+            let repeat = run_sync(scope())?;
+            assert!(!repeat.changed);
+            assert!(repeat.sync.last_synced_at.is_some());
+            assert!(!remove_sync(scope())?.configured);
+            let (db, _) = open()?;
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM progress_entries", [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1
+            );
+            Ok(())
+        })();
+        if let Some(previous) = previous {
+            std::env::set_var("NFPROGRESS_DATA_DIR", previous);
+        } else {
+            std::env::remove_var("NFPROGRESS_DATA_DIR");
+        }
+        fs::remove_dir_all(root).unwrap();
+        result.unwrap();
+    }
+
+    #[test]
     fn linked_word_record_progress_survives_restart_and_repeat() {
         let _guard = DATA_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let root = std::env::temp_dir().join(format!("worta-record-word-{}", std::process::id()));
@@ -3657,6 +3807,7 @@ fn record_sync_progress(
         created_at,
         proposal,
         None,
+        None,
     )
     .map(|(project, entry, _)| (project, entry))
 }
@@ -3670,6 +3821,7 @@ fn record_document_or_sync_progress(
     created_at: &str,
     proposal: Option<&Value>,
     document_revision: Option<i64>,
+    legacy_binding_id: Option<&str>,
 ) -> Result<
     (
         Value,
@@ -3699,15 +3851,22 @@ fn record_document_or_sync_progress(
             return Err("Не удалось сохранить".to_string());
         }
     }
-    let last: Option<String> = tx
-        .query_row(
+    let last: Option<String> = if let Some(id) = legacy_binding_id {
+        tx.query_row(
+            "SELECT content_hash FROM project_bindings WHERE id=?1 AND project_id=?2 AND stage_id IS ?3",
+            params![id, project_id, stage_id],
+            |row| row.get(0),
+        ).map_err(|_| "sync_source_stale")?
+    } else {
+        tx.query_row(
             "SELECT last_external_hash FROM document_bindings WHERE document_id=?",
             [document_id.as_str()],
             |row| row.get(0),
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .flatten();
+        .flatten()
+    };
     if proposal.is_none() && last.as_deref() == Some(source_hash) {
         tx.commit().map_err(|e| e.to_string())?;
         return Ok((
@@ -3731,7 +3890,9 @@ fn record_document_or_sync_progress(
     };
     let delta = (total - previous) * factor;
     if delta.abs() < 0.009 {
-        if proposal.is_none() {
+        if let Some(id) = legacy_binding_id {
+            update_legacy_sync_hash(&tx, id, source_hash)?;
+        } else if proposal.is_none() {
             tx.execute("UPDATE document_bindings SET last_external_hash=?,last_synced_at=?,sync_state='synced' WHERE document_id=?",params![source_hash,now(),document_id]).map_err(|e|e.to_string())?;
         }
         tx.commit().map_err(|e| e.to_string())?;
@@ -3836,7 +3997,9 @@ fn record_document_or_sync_progress(
     } else {
         Ok(None)
     };
-    if proposal.is_none() {
+    if let Some(id) = legacy_binding_id {
+        update_legacy_sync_hash(&tx, id, source_hash)?;
+    } else if proposal.is_none() {
         tx.execute("UPDATE document_bindings SET last_external_hash=?,last_synced_at=?,last_synced_revision=(SELECT revision FROM documents WHERE id=?),sync_state='synced',expected_external_hash=? WHERE document_id=?",params![source_hash,now(),document_id,source_hash,document_id]).map_err(|e|e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;

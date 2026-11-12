@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { documentsApi } from '@/api/documents'
 import { projectsApi } from '@/api/projects'
+import { pickDesktopWordFile } from '@/platform/files'
 import { useNotificationsStore } from '@/stores/notifications'
 import { projectFixture } from '@/test/fixtures'
 import { gameStateFixture } from '@/test/gameFixtures'
@@ -19,6 +20,7 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@/api/projects', () => ({ projectsApi: { get: vi.fn() } }))
+vi.mock('@/platform/files', () => ({ pickDesktopWordFile: vi.fn(), pickDesktopWordSavePath: vi.fn() }))
 vi.mock('@/platform/runtime', () => ({
   currentPlatform: vi.fn(() => 'tauri'),
   isDeveloperModeAvailable: vi.fn(() => false),
@@ -110,6 +112,23 @@ describe('DocumentEditorView custom editor integration', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('offers Word linking in the header and shows the panel only when the file needs attention', async () => {
+    const wrapper = mountEditor()
+    await flushPromises()
+    expect(wrapper.find('.local-word-binding').exists()).toBe(false)
+
+    const path = '/tmp/draft.docx'
+    vi.mocked(pickDesktopWordFile).mockResolvedValueOnce(path)
+    vi.mocked(documentsApi.link).mockResolvedValueOnce({
+      ...documentFixture, docx_path: path, sync_state: 'external_proposal',
+    })
+    await wrapper.get('button[aria-label="Связать с файлом Word"]').trigger('click')
+    await flushPromises()
+    expect(documentsApi.link).toHaveBeenCalledWith({ projectId: 'project-id' }, path)
+    expect(wrapper.get('.local-word-binding').text()).toContain('Word отличается от WORTA')
+    wrapper.unmount()
   })
 
   it('loads the document and autosaves emitted JSON through useDocumentSync', async () => {
