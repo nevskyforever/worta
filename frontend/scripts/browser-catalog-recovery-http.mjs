@@ -11,19 +11,19 @@ try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } })
   await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
-  const launch = async (profilePath = profile) => {
+  const launch = async (profilePath) => {
     context = await chromium.launchPersistentContext(profilePath, { headless: true })
     await context.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
       return route.continue({ url: backend + url.pathname + url.search })
     })
     const page = await context.newPage()
-    await page.goto(origin + '/scripts/browser-cloud-account-harness.html')
-    await page.waitForFunction(() => !!window.harness)
+    await page.goto(origin)
+    await page.waitForURL('**/login')
     return page
   }
 
-  let page = await launch()
+  let page = await launch(profile)
   await page.evaluate(async raw => {
     const crypto = await import('/src/crypto/index.ts')
     const { encodeBase64Url } = await import('/src/api/base64url.ts')
@@ -41,7 +41,6 @@ try {
   }, fixture.amk)
 
   const loginAndOpen = async (pageToUse) => {
-    await pageToUse.evaluate(() => harness.mountAccountCard())
     const card = pageToUse.locator('[data-testid="browser-cloud-account"]')
     await card.locator('input[autocomplete="username"]').fill('Arthur')
     await card.locator('input[autocomplete="current-password"]').fill('correct horse battery staple')
@@ -49,8 +48,8 @@ try {
     await card.locator('[data-status="authenticated"]').waitFor()
     await card.locator('input[autocomplete="off"]').fill('test-encryption-password')
     await card.locator('form button[type="submit"]').click()
+    await pageToUse.waitForURL('**/cloud')
     await card.locator('[data-status="unlocked"]').waitFor()
-    await card.locator('[data-testid="cloud-catalog-toggle"]').click()
     await card.locator('[data-testid="server-cloud-project-catalog"]').waitFor()
     await card.locator(`[data-cloud-project-id="${fixture.projectId}"]`).waitFor()
     await card.locator(`[data-cloud-project-id="${fixture.projectId}"]`).click()
@@ -63,9 +62,7 @@ try {
   const verify = async (pageToUse) => {
     const { panel } = await loginAndOpen(pageToUse)
     const notes = pageToUse.locator('[data-testid="cloud-project-notes"]')
-    const text = await notes.innerText()
-    assert.ok(text.includes(fixture.expectedContent), `note content missing: ${text}`)
-    assert.ok(text.includes(fixture.expectedProjectName ?? 'PRIVATE'), `project heading missing: ${text}`)
+    assert.equal(await notes.locator('h3').first().innerText(), fixture.expectedProjectName)
     const stages = panel.locator('[data-stage-id]')
     assert.equal(await stages.count(), fixture.stages?.length ?? 1)
     if (fixture.stages?.length) {
@@ -77,13 +74,16 @@ try {
     if (fixture.contentFormat === 'html') {
       const rendered = await pageToUse.frameLocator('[data-testid="cloud-note-html"]').locator('body').innerText()
       assert.ok(rendered.includes(String(fixture.expectedContent).replace(/<[^>]*>/g, '')))
+    } else {
+      const text = await notes.innerText()
+      assert.ok(text.includes(fixture.expectedContent), `note content missing: ${text}`)
     }
   }
 
   await verify(page)
-  // Fresh browser restart, same server/account data.
+  // Read the same server history without the first browser's IndexedDB or device identity.
   await context.close()
-  page = await launch()
+  page = await launch(`${profile}-fresh`)
   await verify(page)
 
   console.log(JSON.stringify({ pass: true, catalogOpen: true, autoOpenRecovery: true, stage: true, note: true, reopen: true }))
