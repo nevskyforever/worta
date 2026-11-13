@@ -738,7 +738,7 @@ onBeforeUnmount(() => {
             >
               <IonSpinner v-if="syncLoading || syncRunning" name="crescent" aria-hidden="true" />
               <IonIcon v-else :icon="refreshOutline" aria-hidden="true" />
-              {{ selectedSyncConfigured ? t('Синхронизировать сейчас') : t('Подключить источник') }}
+              {{ isStageDetail && !isSharedProject ? t('Синхронизировать') : selectedSyncConfigured ? t('Синхронизировать сейчас') : t('Подключить источник') }}
             </button>
             <button
               v-if="isSharedProject && !isStageDetail && project.status !== 'завершен'"
