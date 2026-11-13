@@ -65,6 +65,12 @@ class BuildCacheTests(unittest.TestCase):
             run('clean', '--days', '1', '--apply')
             self.assertFalse(target.exists())
             self.assertTrue(other.exists())
+            env['NFPROGRESS_TAURI_TARGET_MAX_MB'] = '1'
+            run('run', '--target', 'probe', '--', sys.executable, '-c',
+                'import os; from pathlib import Path; '
+                '(Path(os.environ["CARGO_TARGET_DIR"])/"large.o").write_bytes(bytes(2**21))',
+                cwd=other)
+            self.assertFalse(target.exists())
 
 
 if __name__ == '__main__':

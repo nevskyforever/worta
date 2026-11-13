@@ -17,11 +17,21 @@ import sys
 
 
 def root():
+    if os.environ.get('WORTA_BUILD_CACHE_DIR'):
+        path = Path(os.environ['WORTA_BUILD_CACHE_DIR']).expanduser()
+        if not path.is_absolute() or path.resolve() != path:
+            raise ValueError('WORTA_BUILD_CACHE_DIR must be an absolute path without symlinks')
+        return path
     return Path.home() / 'Library/Caches/worta/build' if os.uname().sysname == 'Darwin' else Path.home() / '.cache/worta/build'
 
 
 def usage(path):
     return int(subprocess.check_output(['du', '-sk', str(path)], text=True).split()[0]) * 1024 if path.exists() else 0
+
+
+def contains_protected_files(path):
+    return any(any(path.rglob(pattern)) for pattern in
+               ('*.app', '*.dmg', '*.zip', '*.db', '*.sqlite*', '*.bak', '.git'))
 
 
 def target_path(base, target):
@@ -56,6 +66,9 @@ def main():
     if base.is_symlink() or base.resolve() != base:
         raise ValueError('Cache root must be a literal path')
     if args.action == 'run':
+        max_mb = int(os.environ.get('NFPROGRESS_TAURI_TARGET_MAX_MB', '2048'))
+        if max_mb <= 0:
+            parser.error('NFPROGRESS_TAURI_TARGET_MAX_MB must be a positive integer')
         target_path(base, args.target)
         workspace = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
         key = args.target + '-' + os.environ.get('NFPROGRESS_BUILD_PROFILE', 'development') + '-' + hashlib.sha256(str(Path(workspace).resolve()).encode()).hexdigest()[:16]
@@ -74,17 +87,27 @@ def main():
             marker = target / '.worta-cache'
             if marker.is_symlink():
                 raise ValueError('Symlinked cache marker refused')
+            if not marker.is_file() and any(target.iterdir()):
+                raise ValueError('Refusing unmanaged Cargo target')
+            if marker.is_file() and usage(target) >= max_mb * 1024 * 1024 and not contains_protected_files(target):
+                shutil.rmtree(target)
+                target.mkdir()
             marker.touch()
             env = dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_INCREMENTAL='0', WORTA_MANAGED_CACHE='1')
             try:
                 return subprocess.call(command, env=env)
             finally:
-                marker.touch()
+                if usage(target) >= max_mb * 1024 * 1024 and not contains_protected_files(target):
+                    print(f'Removing oversized Cargo cache: {target}', file=sys.stderr)
+                    shutil.rmtree(target)
+                elif target.is_dir():
+                    marker.touch()
     print('Managed Cargo targets:', base)
     registry = Path(os.environ.get('CARGO_HOME', str(Path.home()/'.cargo'))) / 'registry'
     print('Cargo registry:', registry, 'bytes:', usage(registry))
     npm = subprocess.check_output(['npm', 'config', 'get', 'cache'], text=True).strip()
     print('npm cache:', npm, 'bytes:', usage(Path(npm)))
+    print('Shared macOS npm install:', base / 'tauri-npm', 'bytes:', usage(base / 'tauri-npm'))
     # Existing release targets are intentionally isolated and report-only here.
     from clean_generated import GENERATED, repository_root
     repository = repository_root()
@@ -100,7 +123,7 @@ def main():
         try:
             with locked(base, path.name):
                 age = (time.time() - (path / '.worta-cache').stat().st_mtime) / 86400
-                protected = any(any(path.rglob(pattern)) for pattern in ('*.app', '*.dmg', '*.zip', '*.db', '*.sqlite*', '*.bak', '.git'))
+                protected = contains_protected_files(path)
                 stale = age >= max(1, args.days) and not protected
                 print('CLEANABLE' if stale else 'KEEP', path, 'bytes:', usage(path), 'age days:', round(age, 1))
                 if args.action == 'clean' and args.apply and stale:

@@ -20,8 +20,9 @@ Cargo registry uses CARGO_HOME (normally ~/.cargo); npm uses its configured cach
 node_modules remain independent, without shared links.
 
 `python3 scripts/maintenance/build_cache.py clean --days 30` previews stale
-managed targets. Add `--apply` to delete the listed inactive targets. The last-use
-marker is refreshed before and after each command. Targets containing app bundles,
+managed targets. Add `--apply` to delete the listed inactive targets. The runner
+also purges oversized targets before and after a command (2 GiB by default,
+configurable with `NFPROGRESS_TAURI_TARGET_MAX_MB`). Targets containing app bundles,
 DMG or ZIP installers are retained. Direct Cargo invocations must not write into
 managed targets: use the runner so cleanup and builds share the same lock.
 
@@ -31,13 +32,22 @@ failed qualification or packaging. `NFPROGRESS_TAURI_KEEP_BUNDLE=1` preserves on
 the bundle at its original path: it is moved aside during `cargo clean` and then
 restored without copying the target. It no longer retains all intermediates.
 Only explicit `NFPROGRESS_TAURI_KEEP_BUILD_CACHE=1` retains the entire target for
-diagnostics. Cargo incremental output is disabled for qualification as well as
-packaging. A per-architecture workspace lock refuses competing invocations.
+diagnostics after a successful build within the configured size limit. Cargo
+incremental output is disabled. Qualification omits Rust debug symbols and
+cleans the dev profile before packaging. A per-architecture workspace lock
+refuses competing invocations.
 
-The fixed ARM/Intel workspaces and their node_modules are reused, rather than
-created per invocation; an unchanged package lock does not rerun npm ci. Their
-separate node_modules are necessary for independent parallel frontend builds and
-are never linked together. The registry and npm download caches stay shared.
+ARM and Intel share one npm installation in `tauri-npm/install` under the
+cache root. It is rebuilt under a lock when package manifests or the host
+Node/npm version change. Each build gets a private copy using APFS copy-on-write
+when supported and a normal copy otherwise. The npm download cache and Cargo
+registry are already shared. Local development keeps its own `frontend/node_modules`.
+
+On success, failure, or a handled interrupt, the build removes its private
+dependency copy, frontend output and temporary directory, including test
+databases. Set `WORTA_BUILD_CACHE_DIR` to an absolute path to place the shared
+cache on a different volume. Release compilation stays in the worktree, so
+use a worktree on that volume too if the system disk is short of space.
 
 The existing `clean_generated.py` audits worktree-local legacy outputs. Review
 its exact targets before applying: retained bundles or dependencies may still be

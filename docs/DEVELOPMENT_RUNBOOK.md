@@ -308,11 +308,9 @@ Initial release macOS — только Apple Silicon: `Release Tauri ARM.sh` я�
 ARM. Intel остаётся доступен явно через `Release Tauri All.sh intel` или
 `NFPROGRESS_TAURI_INCLUDE_INTEL=1` для отложенной квалификации.
 Для каждой архитектуры создаётся отдельный игнорируемый frontend-workspace в
-`.tauri-build-workspaces/`: в нём свои `node_modules`, Vite-вывод и Tauri target.
-Обычные `Build Tauri` test-сборки удаляют workspace Cargo target после упаковки;
-release qualification сохраняет его явно для проверки `.app`. Переменную
-`NFPROGRESS_TAURI_KEEP_BUILD_CACHE=1` задавайте только если этот кэш нужно
-оставить.
+`.tauri-build-workspaces/`. Обе сборки переиспользуют одну установку npm и после
+завершения удаляют свои копии зависимостей и промежуточные файлы. Расположение
+кэша и правила хранения описаны в [Local build caches](build-cache.md).
 
 Перед сборкой нормализованная версия из `engine.py` синхронизируется с
 `tauri.conf.json`, `Cargo.toml` и `Cargo.lock` внутри соответствующего

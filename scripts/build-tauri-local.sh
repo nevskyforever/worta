@@ -140,8 +140,15 @@ prepare_frontend_workspace() {
 # Install cleanup before any work: failed checks/builds must not retain targets.
 # KEEP_BUNDLE retains only the qualified bundle, not gigabytes of intermediates.
 STAGING_DIR=""
+BUILD_TEMP=""
 BUILD_LOCK="$WORKSPACE_DIR/.build.lock"
 mkdir -p "$WORKSPACE_DIR"
+if [ "$(cd "$WORKSPACE_DIR" && pwd -P)" != "$WORKSPACE_DIR" ] \
+  || [ -L "$FRONTEND_DIR" ] || [ -L "$FRONTEND_DIR/src-tauri" ] \
+  || [ -L "$WORKSPACE_TARGET_DIR" ]; then
+  echo "Refusing aliased build workspace: $WORKSPACE_DIR" >&2
+  exit 1
+fi
 if ! mkdir "$BUILD_LOCK"; then
   echo "Build workspace is already locked: $BUILD_LOCK" >&2
   exit 1
@@ -150,10 +157,17 @@ printf '%s\n' "$$" > "$BUILD_LOCK/pid"
 cleanup_build() {
   local status=$? saved_bundle="" bundle_path="$WORKSPACE_TARGET_DIR/$TARGET/release/bundle"
   trap - EXIT
+  trap '' HUP INT TERM
   if [ -n "$STAGING_DIR" ] && [ -d "$STAGING_DIR" ]; then
     rm -rf -- "$STAGING_DIR"
   fi
-  if [ "${NFPROGRESS_TAURI_KEEP_BUILD_CACHE:-0}" != "1" ] && [ -d "$WORKSPACE_TARGET_DIR" ]; then
+  if [ -n "$BUILD_TEMP" ]; then
+    rm -rf -- "$BUILD_TEMP" || status=1
+  fi
+  rm -rf -- "$FRONTEND_DIR/node_modules" "$FRONTEND_DIR/dist" || status=1
+  if [ -d "$WORKSPACE_TARGET_DIR" ] && { [ "$status" -ne 0 ] \
+    || [ "${NFPROGRESS_TAURI_KEEP_BUILD_CACHE:-0}" != "1" ] \
+    || [ "$(du -sk "$WORKSPACE_TARGET_DIR" | awk '{print $1}')" -ge "$TAURI_TARGET_LIMIT_KB" ]; }; then
     if [ -L "$WORKSPACE_TARGET_DIR" ] || [ "$(cd "$WORKSPACE_TARGET_DIR" && pwd -P)" != "$WORKSPACE_TARGET_DIR" ]; then
       echo "Refusing cleanup of aliased Cargo target: $WORKSPACE_TARGET_DIR" >&2
       exit 1
@@ -174,6 +188,11 @@ cleanup_build() {
   exit "$status"
 }
 trap cleanup_build EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+BUILD_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/worta-build-$ARCH.XXXXXX")"
+export TMPDIR="$BUILD_TEMP"
 # Bound output growth even when qualification compiles tests before release.
 export CARGO_INCREMENTAL=0
 
@@ -190,13 +209,7 @@ if [ -d "$WORKSPACE_TARGET_DIR" ]; then
   fi
 fi
 
-NODE_MODULES_LOCK="$FRONTEND_DIR/node_modules/.package-lock.json"
-if [ ! -f "$NODE_MODULES_LOCK" ] \
-  || [ "$FRONTEND_DIR/package.json" -nt "$NODE_MODULES_LOCK" ] \
-  || [ "$FRONTEND_DIR/package-lock.json" -nt "$NODE_MODULES_LOCK" ]; then
-  echo "Устанавливаются или обновляются frontend-зависимости..."
-  (cd "$FRONTEND_DIR" && npm ci)
-fi
+python3 "$ROOT_DIR/scripts/maintenance/tauri_npm_cache.py" "$FRONTEND_DIR"
 
 node "$ROOT_DIR/scripts/sync-tauri-versions.mjs" --frontend-dir "$FRONTEND_DIR"
 node "$ROOT_DIR/scripts/apply-tauri-build-profile.mjs" \
@@ -213,6 +226,8 @@ fi
 
 if [ "${NFPROGRESS_TAURI_RUN_RUST_CHECKS:-0}" = "1" ]; then
   echo "Запускаются Rust fmt/check/tests для release qualification..."
+  export CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR"
+  export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
   cargo fmt --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" --check
   cargo check \
     --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" \
@@ -220,6 +235,7 @@ if [ "${NFPROGRESS_TAURI_RUN_RUST_CHECKS:-0}" = "1" ]; then
   cargo test \
     --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" \
     --target "$TARGET"
+  cargo clean --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" --profile dev
 fi
 
 mkdir -p "$BUILD_DIR"
