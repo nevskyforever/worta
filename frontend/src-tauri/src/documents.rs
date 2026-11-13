@@ -1673,6 +1673,15 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
         }
         Err(error) => return Err(error),
     };
+    if binding.0 == "scrivener" {
+        // Scrivener provides a read-only text count, independent of the revision
+        // of any draft previously stored in the editor.
+        let total = normalize_total(
+            symbols as f64,
+            payload["unit"].as_str().unwrap_or("symbols"),
+        )?;
+        return record_source_total(&mut connection, command, symbols, total, &hash, None);
+    }
     let previous_hash: Option<String> = connection
         .query_row(
             "SELECT last_external_hash FROM document_bindings WHERE document_id=?",
@@ -1771,16 +1780,27 @@ fn run_legacy_sync(
     let (kind, path, source_id, _, _) = binding;
     let (symbols, hash) = sync_source(&kind, Path::new(&path), source_id.as_deref())?;
     let total = normalize_total(symbols as f64, entity["unit"].as_str().unwrap_or("symbols"))?;
+    record_source_total(db, scope, symbols, total, &hash, Some(id))
+}
+
+fn record_source_total(
+    db: &mut rusqlite::Connection,
+    scope: SyncScopeCommand,
+    symbols: usize,
+    total: f64,
+    hash: &str,
+    legacy_id: Option<&str>,
+) -> Result<SyncRunResult, String> {
     let (project, entry, _) = record_document_or_sync_progress(
         db,
         &scope.project_id,
         scope.stage_id.as_deref(),
         total,
-        &hash,
+        hash,
         &now(),
         None,
         None,
-        Some(id),
+        legacy_id,
     )?;
     Ok(SyncRunResult {
         changed: !entry.is_null(),
@@ -2762,42 +2782,148 @@ fn read_scrivener_item(root: &Path, item_id: &str) -> Result<Vec<u8>, String> {
 }
 
 fn count_rtf_symbols(bytes: &[u8]) -> usize {
-    let text = String::from_utf8_lossy(bytes);
-    let mut count = 0usize;
-    let mut chars = text.chars().peekable();
-    while let Some(character) = chars.next() {
-        match character {
-            '{' | '}' | '\\' => {
-                if character == '\\' {
-                    if let Some(next) = chars.peek().copied() {
-                        if next == '\\' || next == '{' || next == '}' {
-                            count += 1;
-                            chars.next();
-                        } else if next == '\'' {
-                            chars.next();
-                            chars.next();
-                        } else {
-                            while chars
-                                .peek()
-                                .is_some_and(|value| value.is_ascii_alphabetic())
-                            {
-                                chars.next();
+    #[derive(Clone, Copy)]
+    struct Group {
+        destination: bool,
+        hidden_text: bool,
+        fallback_width: usize,
+    }
+
+    let mut group = Group {
+        destination: false,
+        hidden_text: false,
+        fallback_width: 1,
+    };
+    let mut groups = Vec::new();
+    let mut index = 0;
+    let mut count = 0;
+    let mut fallback = 0;
+    let mut high_surrogate = false;
+
+    while let Some(&byte) = bytes.get(index) {
+        index += 1;
+        let mut unicode = None;
+        match byte {
+            b'{' => {
+                groups.push(group);
+                fallback = 0;
+                continue;
+            }
+            b'}' => {
+                if let Some(parent) = groups.pop() {
+                    group = parent;
+                }
+                fallback = 0;
+                continue;
+            }
+            b'\r' | b'\n' => continue,
+            b'\\' => {
+                let Some(&control) = bytes.get(index) else {
+                    break;
+                };
+                index += 1;
+                match control {
+                    b'*' => {
+                        group.destination = true;
+                        continue;
+                    }
+                    b'\'' => {
+                        let Some(hex) = bytes.get(index..index + 2) else {
+                            break;
+                        };
+                        if !hex.iter().all(u8::is_ascii_hexdigit) {
+                            continue;
+                        }
+                        index += 2;
+                    }
+                    b'\\' | b'{' | b'}' | b'~' | b'_' | b'-' => {}
+                    c if c.is_ascii_alphabetic() => {
+                        let start = index - 1;
+                        while bytes.get(index).is_some_and(u8::is_ascii_alphabetic) {
+                            index += 1;
+                        }
+                        let word = &bytes[start..index];
+                        let start = index;
+                        if bytes.get(index) == Some(&b'-') {
+                            index += 1;
+                        }
+                        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                            index += 1;
+                        }
+                        let number = std::str::from_utf8(&bytes[start..index])
+                            .ok()
+                            .and_then(|value| value.parse::<i32>().ok());
+                        if bytes.get(index) == Some(&b' ') {
+                            index += 1;
+                        }
+                        match word {
+                            b"fonttbl" | b"colortbl" | b"stylesheet" | b"info" | b"pict"
+                            | b"object" | b"fldinst" | b"header" | b"headerl" | b"headerr"
+                            | b"headerf" | b"footer" | b"footerl" | b"footerr" | b"footerf"
+                            | b"listtable" | b"listoverridetable" | b"generator" | b"pntext"
+                            | b"listtext" | b"themedata" | b"datastore" | b"filetbl" => {
+                                group.destination = true;
+                                continue;
                             }
-                            if chars.peek().is_some_and(|value| *value == '-') {
-                                chars.next();
+                            b"uc" => {
+                                group.fallback_width = number.unwrap_or(1).max(0) as usize;
+                                continue;
                             }
-                            while chars.peek().is_some_and(|value| value.is_ascii_digit()) {
-                                chars.next();
+                            b"bin" => {
+                                index = index.saturating_add(number.unwrap_or(0).max(0) as usize);
+                                continue;
                             }
-                            if chars.peek().is_some_and(|value| *value == ' ') {
-                                chars.next();
+                            b"v" => {
+                                group.hidden_text = number != Some(0);
+                                continue;
                             }
+                            b"u" => {
+                                let Some(number) = number else { continue };
+                                unicode = Some(number as u16);
+                            }
+                            b"par" | b"line" | b"tab" | b"cell" | b"row" | b"emdash"
+                            | b"endash" | b"bullet" | b"lquote" | b"rquote" | b"ldblquote"
+                            | b"rdblquote" | b"enspace" | b"emspace" | b"qmspace" => {}
+                            _ => continue,
                         }
                     }
+                    _ => continue,
                 }
             }
-            '\n' | '\r' => {}
-            _ => count += 1,
+            // Scrivener can also write literal UTF-8. Count its continuation
+            // bytes as part of the same character, while accepting ANSI bytes.
+            0xc2..=0xf4 => {
+                let width = if byte < 0xe0 {
+                    2
+                } else if byte < 0xf0 {
+                    3
+                } else {
+                    4
+                };
+                let start = index - 1;
+                if bytes
+                    .get(start..start + width)
+                    .is_some_and(|value| std::str::from_utf8(value).is_ok())
+                {
+                    index = start + width;
+                }
+            }
+            _ => {}
+        }
+
+        if let Some(unit) = unicode {
+            fallback = group.fallback_width;
+            if !group.destination && !group.hidden_text {
+                if !high_surrogate || !(0xdc00..=0xdfff).contains(&unit) {
+                    count += 1;
+                }
+                high_surrogate = (0xd800..=0xdbff).contains(&unit);
+            }
+        } else if fallback > 0 {
+            fallback -= 1;
+        } else if !group.destination && !group.hidden_text {
+            count += 1;
+            high_surrogate = false;
         }
     }
     count
@@ -3315,6 +3441,17 @@ mod tests {
             let repeat = run_sync(scope())?;
             assert!(!repeat.changed);
             assert!(repeat.sync.last_synced_at.is_some());
+            let entry = batch.items[0].progress.as_ref().unwrap()["entry"]["id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let (mut db, _) = open()?;
+            crate::delete_progress_in_connection(&mut db, "book".into(), entry, None)?;
+            drop(db);
+            let restored = run_sync(scope())?;
+            assert!(restored.changed);
+            assert_eq!(restored.symbols, 11);
+            assert!(!run_sync(scope())?.changed);
             assert!(!remove_sync(scope())?.configured);
             let (db, _) = open()?;
             assert_eq!(
@@ -3716,6 +3853,12 @@ mod tests {
     #[test]
     fn rtf_counter_ignores_control_words() {
         assert_eq!(count_rtf_symbols(br"{\rtf1\ansi Hello \b world}"), 11);
+        assert_eq!(count_rtf_symbols(br"{\rtf1{\fonttbl{\f0 Arial;}}{\colortbl;\red255;} {\*\expandedcolortbl metadata}\uc1 \u1090?\u1077?\u1089?\u1090?}"), 5);
+        assert_eq!(
+            count_rtf_symbols(br"{\rtf1{\fonttbl{\f0 Arial;}}\uc1 \u1090?\u1077?\u1089?\u1090?}"),
+            4
+        );
+        assert_eq!(count_rtf_symbols(br"{\rtf1 \uc1 \u-10179?\u-8704?}"), 1);
     }
 
     #[test]
@@ -3851,23 +3994,30 @@ fn record_document_or_sync_progress(
             return Err("Не удалось сохранить".to_string());
         }
     }
-    let last: Option<String> = if let Some(id) = legacy_binding_id {
+    let (last, binding_type): (Option<String>, Option<String>) = if let Some(id) = legacy_binding_id
+    {
         tx.query_row(
-            "SELECT content_hash FROM project_bindings WHERE id=?1 AND project_id=?2 AND stage_id IS ?3",
+            "SELECT content_hash,binding_type FROM project_bindings WHERE id=?1 AND project_id=?2 AND stage_id IS ?3",
             params![id, project_id, stage_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         ).map_err(|_| "sync_source_stale")?
     } else {
         tx.query_row(
-            "SELECT last_external_hash FROM document_bindings WHERE document_id=?",
+            "SELECT last_external_hash,binding_type FROM document_bindings WHERE document_id=?",
             [document_id.as_str()],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .flatten()
+        .unwrap_or_default()
     };
-    if proposal.is_none() && last.as_deref() == Some(source_hash) {
+    // Compare a local Scrivener source with the recorded total. The same
+    // file can restore that total after the user deletes a progress entry.
+    let standalone_scrivener = proposal.is_none()
+        && document_revision.is_none()
+        && binding_type.as_deref() == Some("scrivener")
+        && crate::daily_goals::local_project(&tx, project_id)?;
+    if !standalone_scrivener && proposal.is_none() && last.as_deref() == Some(source_hash) {
         tx.commit().map_err(|e| e.to_string())?;
         return Ok((
             crate::project_payload(connection, project_id)?,
@@ -3926,7 +4076,7 @@ fn record_document_or_sync_progress(
     entries.push(entry.clone());
     next["progress_entries"] = Value::Array(entries);
     next["total"] = total.into();
-    if local_document {
+    if local_document || standalone_scrivener {
         next["progress"] = serde_json::json!(if goal > 0.0 {
             total / goal * 100.0
         } else {
