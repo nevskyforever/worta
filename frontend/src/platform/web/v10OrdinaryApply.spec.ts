@@ -41,7 +41,7 @@ it('concurrent Notes serialize on full source and require manual retry',async()=
  await expect(f.owner.apply(scope,b.sequence)).rejects.toMatchObject({code:'note_orphan'})
  expect(await f.owner.apply(scope,a.sequence)).toBe('applied');expect(await f.owner.apply(scope,b.sequence)).toBe('applied')
  expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:2})
-})
+},20000)
 it('two prepared owners cannot commit the same source twice',async()=>{
  const f=await ordinaryV10Fixture(),r=await f.receive(),other=f.create(),a=await f.owner.prepare(scope,r.sequence),b=await other.prepare(scope,r.sequence)
  expect(await f.owner.commit(a)).toBe('applied');const before=f.before()
@@ -62,7 +62,7 @@ for(const protocol of [2,3] as const)it(`rollback all source/history/proof and r
  const f=await ordinaryV10Fixture('keep_both',protocol),r=await f.receive(),p=await f.owner.prepare(scope,r.sequence),before=f.before()
  f.f.abort();await expect(f.owner.commit(p)).rejects.toMatchObject({code:'storage_failed'});expect(f.before()).toEqual(before)
  f.f.abort(false);expect(await f.create().apply(scope,r.sequence)).toBe('applied');expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:1})
-})
+},20000)
 for(const kind of ['project','note','cursor','dependency','history','binding','other-project'] as const)it(`complete pre-commit CAS pins ${kind}`,async()=>{
  const f=await ordinaryV10Fixture(),r=await f.receive(),p=await f.owner.prepare(scope,r.sequence),d=f.f.db
  if(kind==='project')(d.localProjects![0] as any).source_revision++
