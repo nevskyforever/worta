@@ -352,7 +352,7 @@ async function selectLanguage(event: Event): Promise<void> {
 watchEffect(() => {
   if (props.cloudWorkspace) return
   const sourceTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
-  document.title = sourceTitle ? `${t(sourceTitle)} · nfprogress` : 'nfprogress'
+  document.title = sourceTitle ? `${t(sourceTitle)} · worta` : 'worta'
 })
 </script>
 

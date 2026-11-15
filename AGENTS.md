@@ -4,13 +4,13 @@ The user-facing product name is always **worta**, lowercase in every language.
 Keep compatibility identifiers such as API paths, storage keys, and database
 names unchanged unless the task explicitly calls for a migration.
 
-This is a Python desktop application with a PySide6 GUI for writers to track their writing progress, with optional gamification features.
+This is a desktop application for writers to track their writing progress, with optional gamification features. Production Desktop uses Vue/TypeScript, Tauri/Rust, and SQLite.
 
 > **Current UI:** the user-facing interface is implemented in Vue (`frontend/`).
 > The PySide6 interface is legacy and is not used by the application. Do not add
 > or change PySide6 UI behavior unless the user explicitly requests legacy-interface work.
 
-The application is built with Nuitka for:
+Production Desktop targets:
 
 * Windows;
 * macOS Apple Silicon;
@@ -18,10 +18,68 @@ The application is built with Nuitka for:
 
 ## Release signing policy (owner-approved)
 
-* Until the owner explicitly changes this policy, worta Desktop releases are intentionally distributed **without platform code-signing certificates**: no Apple Developer ID signing/notarization for macOS and no Authenticode signing for Windows. This is expected and **is not, by itself, a release blocker or a reason to report PARTIAL/STOP**.
-* Do not wait for certificates, purchase signing services, add mandatory signing steps, or change the existing build, updater, and publication workflows solely to obtain platform signatures.
-* This exception applies **only to platform installer/app signing**. Keep the existing cryptographic signatures and integrity checks used by the updater, security gates, installer validation, backward compatibility, and data-migration acceptance requirements intact. Never bypass or disable those protections.
-* Still test that installers launch, data remains intact, and updates work where applicable. Report actual platform warnings or failures for unsigned apps accurately, without confusing missing certificates with a functional build failure.
+* Until the owner explicitly changes this policy, worta Desktop releases are intentionally distributed without Apple Developer ID signing/notarization or Microsoft Authenticode signing. This is expected and is not a release blocker.
+* Do not wait for certificates, purchase signing services, add mandatory signing steps, or change existing build, updater, and publication workflows solely to obtain platform signatures.
+* This exception applies only to platform installer/app signing. Preserve existing cryptographic updater signatures and integrity checks, installer validation, backward compatibility, and data-migration acceptance requirements. Never bypass or disable those protections.
+* Test that installers launch, data remains intact, and updates work where applicable. Report platform warnings for unsigned apps accurately.
+
+## Product name and release process
+
+* Owner decision (2026-11-02): `main` contains standalone stable Desktop;
+  `6.0` contains the separate cloud/Web development. C21/C22/C23/PF6.0
+  and the public-release block apply to cloud/Web 6.0, not standalone Desktop
+  releases from `main`. Desktop security, installer, update, data-preservation
+  and migration acceptance gates remain mandatory. Cloud 6.0 remains closed.
+
+* The official product name is `worta`, always lowercase in user-facing names,
+  window titles, installers, releases, and other product references.
+* Existing internal identifiers may be retained when changing them would break
+  compatibility with user data or updates.
+* Production Desktop is Python-free: Vue/TypeScript, Tauri/Rust, and SQLite.
+  Do not package or start a Python runtime, FastAPI sidecar, or Nuitka payload
+  in normal Desktop operation. Python may be used for the cloud server and
+  explicit migration or development tools outside the normal Desktop runtime.
+* For Desktop releases, run `Release Tauri All.sh` on the owner’s Mac to build
+  and test macOS Apple Silicon and Intel in parallel. Track both builds through
+  completion and resolve failures before continuing. This script publishes the
+  qualified macOS archives and updates the existing hosting manifests after both
+  builds pass; preserve all release and integrity gates.
+* Before dispatching the Windows workflow, verify both published macOS archives
+  with `scripts/verify-tauri-artifact.py` against their exact source commit.
+  Create the annotated `v<version>` Git tag on that commit, push that specific
+  tag, and verify the remote tag resolves to the same SHA. The workflow requires
+  this tag before it inspects hosted artifacts; publishing macOS alone does not
+  create it. Never move an existing release tag to repair a mismatch.
+* Keep the dispatch commit, version tag, and macOS artifact source SHA identical.
+  If source changes after macOS qualification, rebuild and qualify the macOS
+  artifacts from the new release commit before dispatching a new release run.
+  If a run failed only because its matching tag was absent, publish the verified
+  tag and rerun failed jobs of that original run instead of dispatching from a
+  newer commit. Do not rerun an already successful release.
+* After both macOS builds succeed, manually dispatch `.github/workflows/build.yml`
+  from `main` to build Windows x64 and publish the release. Keep the release tag,
+  source revision and macOS artifact provenance consistent.
+* Use the existing signing, update, and publication mechanisms. Do not create
+  new release mechanisms without separate approval.
+* Every Desktop release description, in-app update description, and Telegram
+  release post must use this exact structure:
+
+  ```text
+  Обновление [версия]
+
+  [понятное для простого пользователя описание изменений]
+  ```
+
+  Replace `[версия]` with the release version, omit the brackets, and write
+  the description in plain language. Normalize supplied text to this structure;
+  publication must reject a heading whose version differs from the release.
+* GitHub Releases remains the official release record and archive. Legacy
+  desktop builds keep using the existing `nfproject.ru/app` update manifest
+  and files. New WORTA builds use `worta.ru/app` for updater manifests and
+  payloads, and `worta.ru/releases.json` for the three download buttons. Keep
+  these generations separate while publishing compatible release files through
+  the existing `scripts/upload-release.sh`; the WORTA document root is
+  `/home/n/nevskyfore/worta/public_html` and its app directory is `app/`.
 
 ## General working rules
 
@@ -164,6 +222,23 @@ opened from the Help menu in `main_UI.py`.
 
 ## Building
 
+### Запуск тестовой Desktop-сборки
+
+* По просьбе пользователя каждый тестовый запуск создавай в новом уникальном
+  каталоге и на новой копии текущих пользовательских данных. Не запускай сборку
+  повторно на ранее использованном тестовом профиле.
+* Сначала копируй данные в новый профиль, затем направляй приложение только в
+  этот профиль через `NFPROGRESS_DATA_DIR`. Не изменяй и не удаляй исходные
+  пользовательские данные.
+* Для подключённых локальных документов Word и Scrivener также создавай копии
+  внутри тестового каталога и обновляй пути к ним только в копии базы данных.
+  Тестовое приложение не должно записывать в исходные документы.
+* Для пользовательской проверки запускай Desktop через `tauri dev` с отдельным
+  тестовым заголовком окна и свободным локальным портом. Предоставляй
+  пользователю launcher для этого профиля и сообщай путь к нему и к тестовым
+  данным. Если запускается следующий тест, подготовь для него новый каталог и
+  новую копию данных.
+
 * Reuse an existing worktree when practical. Remove task-created temporary clones
   and worktrees only after verifying they contain no user files or unique work.
 * After multi-GB Rust/Android validation, stop builds and run
@@ -185,6 +260,9 @@ opened from the Help menu in `main_UI.py`.
 
 ## Verifying changes
 
+* Do not perform GUI testing without the user's explicit authorization for the current task. This includes launching an application for visual or interactive testing, computer-use automation, and browser tests through Playwright or similar tools. Prior authorization for another task does not authorize a new task.
+* Without that authorization, use non-GUI checks and report any unverified visual or interactive behavior.
+
 After making changes:
 
 1. Check syntax of affected Python files.
@@ -202,11 +280,19 @@ port or prevents a clean test run. First verify the process command and project
 path; do not terminate an unrelated application or a production build.
 
 For changes to the Vue interface that affect user interaction, verify the flow
-in Chromium through Playwright when practical. Use `Run Web.sh` to start the
-local application. If Chromium is not installed for Playwright, ask the user
-for permission before running `npx playwright install chromium`.
+in Chromium through Playwright when practical and only when the user has explicitly
+authorized GUI testing for this task. Use `Run Web.sh` to start the local application.
+If Chromium is not installed, ask the user for permission before installing it.
 
 ## LOCAL-FIRST TESTING POLICY — MANDATORY FOR ALL FUTURE CODEX TASKS
+
+### Pre-release CI policy
+
+The pre-release test process is currently local-only. Do not trigger cloud,
+SQLite, frontend, or release qualification workflows automatically from pushes
+to `main`; keep those workflows available only through explicit manual dispatch
+after the relevant local checks pass. A normal commit/push to `main` must not
+start broad pre-release validation or publication.
 
 Use local verification as the primary development loop, then commit and push
 for independent GitHub Actions acceptance:
@@ -269,7 +355,8 @@ changes before commit and independent GitHub Actions acceptance.
 8. New Web user flows must use real server APIs and relevant backend tests.
    Keep credentials out of browser storage and expose no raw access token to UI.
 9. Do not change Desktop offline-first behavior. Public registration and release
-   remain blocked until all required gates and explicit approvals pass.
+   of cloud/Web 6.0 remain blocked until all required gates and explicit approvals
+   pass; the separate Desktop `main` release policy above applies to Desktop.
 
 Use `scripts/maintenance/local_acceptance.sh` for the maintained `quick`,
 `backend`, `frontend`, and `prepush` local acceptance modes.

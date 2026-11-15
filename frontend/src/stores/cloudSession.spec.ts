@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 vi.mock('@/platform/runtime', () => ({ currentPlatform: vi.fn(() => 'tauri') }))
+vi.mock('@/platform/desktopCloud', () => ({ desktopCloudEnabled: vi.fn(() => true) }))
 const bridge = vi.hoisted(() => ({ invoke: vi.fn(), listeners: new Set<(event: { payload: unknown }) => void>() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: bridge.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({

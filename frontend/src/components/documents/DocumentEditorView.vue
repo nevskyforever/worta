@@ -3,20 +3,22 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import type { Editor } from '@tiptap/core'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { pickDesktopWordFile, pickDesktopWordSavePath } from '@/platform/files'
-import { currentPlatform } from '@/platform/runtime'
+import { currentPlatform, isDeveloperModeAvailable } from '@/platform/runtime'
 import { useDocumentSync, type ConflictChoice } from '@/composables/useDocumentSync'
 import { exportDocx } from '@/services/documentDocx'
 import type { DocumentScope, TiptapDocument } from '@/types/documents'
 import { projectsApi } from '@/api/projects'
 import type { Project } from '@/types/api'
 import { convertProjectUnit } from '@/utils/projectPlanning'
+import { UNIT_FACTORS } from '@/core/projects/units'
 import { announceDataChange, onDataChange } from '@/services/dataChanges'
 import { progressChangeNotification } from '@/utils/progressNotifications'
-import { gameResponseMessages } from '@/utils/gameNotifications'
+import { progressGameMessages } from '@/utils/gameNotifications'
 import LocalWordBindingPanel from './LocalWordBindingPanel.vue'
 import DocumentConflictResolver from './DocumentConflictResolver.vue'
 import NFDocumentEditor from './editor/NFDocumentEditor.vue'
 import NFEditorStatusControls from './editor/NFEditorStatusControls.vue'
+import { useProjectsStore } from '@/stores/projects'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
 
@@ -25,6 +27,11 @@ const router = useRouter()
 const locale = useLocaleStore()
 const notifications = useNotificationsStore()
 const t = locale.translate
+const projectStore = useProjectsStore()
+const sharedSource = computed(() => {
+  const project = projectStore.currentProject?.id === props.scope.projectId ? projectStore.currentProject : projectStore.projects.find(item => item.id === props.scope.projectId)
+  return project?.name === 'Общий проект'
+})
 type DocumentEditorExpose = {
   getEditor: () => Editor | null
   getJSON: () => TiptapDocument
@@ -92,10 +99,19 @@ let positionSaveTimer: number | undefined
 let positionRestoreTimer: number | undefined
 let hasRestoredEditorPosition = false
 const linked = computed(() => Boolean(documentState.value?.docx_path))
+const showWordBindingPanel = computed(() => canLinkWord && linked.value && [
+  'conflict', 'external_changed', 'word_changed', 'missing_external',
+  'external_proposal', 'external_import_pending', 'external_write_pending',
+].includes(documentState.value?.sync_state ?? ''))
 const textSymbols = computed(() => countTextSymbols(editorContent.value))
-const textUnits = computed(() => projectEntity.value
-  ? convertProjectUnit(textSymbols.value, 'symbols', projectEntity.value.unit)
-  : null)
+const textUnits = computed(() => {
+  const entity = projectEntity.value
+  if (!entity) return null
+  // Desktop records fractional author sheets from the exact symbol count.
+  if (canLinkWord && entity.unit === 'author_list') return textSymbols.value / UNIT_FACTORS.author_list
+  return convertProjectUnit(textSymbols.value, 'symbols', entity.unit)
+})
+const hasRecordableDocument = computed(() => textSymbols.value > 0 || Boolean(canLinkWord && documentState.value?.exists))
 const entityFractionDigits = computed(() => projectEntity.value?.unit === 'symbols' ? 0 : 2)
 const entityProgressLabel = computed(() => {
   const entity = projectEntity.value
@@ -110,15 +126,27 @@ const entityProgressLabel = computed(() => {
 const todayGoalCurrentValue = computed(() => {
   const entity = projectEntity.value
   if (!entity) return 0
-  const unsavedChange = textSymbols.value > 0
+  const unsavedChange = hasRecordableDocument.value
     ? (textUnits.value ?? entity.total) - entity.total
     : 0
   return Math.max(0, entity.added_today + unsavedChange)
 })
-const todayGoalCompleted = computed(() => {
+const todayGoalRequired = computed(() => {
   const entity = projectEntity.value
-  if (!entity || entity.plan_daily_goal === null) return false
-  return todayGoalCurrentValue.value >= entity.plan_daily_goal
+  if (!entity) return null
+  if (!canLinkWord) return entity.plan_daily_goal
+  if (entity.today_goal === null) return null
+  return entity.today_goal - Math.max(0, entity.total - entity.added_today)
+})
+const todayGoalCompleted = computed(() => {
+  const target = todayGoalRequired.value
+  if (target === null) return false
+  if (canLinkWord) {
+    const entity = projectEntity.value
+    const projectedTotal = hasRecordableDocument.value ? textUnits.value : entity?.total
+    return projectedTotal != null && projectedTotal + 1e-9 >= (entity?.today_goal ?? Infinity)
+  }
+  return todayGoalCurrentValue.value >= target
 })
 const todayGoalLabel = computed(() => {
   const entity = projectEntity.value
@@ -126,13 +154,14 @@ const todayGoalLabel = computed(() => {
   return `${locale.formatNumber(entity.today_goal, entityFractionDigits.value)} ${locale.formatUnit(entity.unit, entity.today_goal)}`
 })
 const todayGoalProgressPercent = computed(() => {
-  const target = projectEntity.value?.plan_daily_goal
-  if (target === null || target === undefined || target <= 0) return 0
+  const target = todayGoalRequired.value
+  if (canLinkWord && todayGoalCompleted.value) return 100
+  if (target === null || target <= 0) return 0
   return Math.min(100, Math.max(0, (todayGoalCurrentValue.value / target) * 100))
 })
 const canRecordText = computed(() => Boolean(
   projectEntity.value
-  && textSymbols.value > 0
+  && hasRecordableDocument.value
   && textUnits.value !== null
   && Math.abs(textUnits.value - projectEntity.value.total) >= 0.009,
 ))
@@ -266,7 +295,7 @@ function chooseExternalVersion(): Promise<ConflictChoice> {
   return new Promise<ConflictChoice>((resolve) => { pendingConflictResolve.value = resolve })
 }
 async function recordTextProgress(force = false, snapshot = captureEditorContent()): Promise<boolean> {
-  if (recording.value || countTextSymbols(snapshot) <= 0 || (!force && !canRecordText.value)) return false
+  if (recording.value || !hasRecordableDocument.value || (!force && !canRecordText.value)) return false
   recording.value = true
   try {
     const result = await saveAndRecord(snapshot)
@@ -286,7 +315,7 @@ async function recordTextProgress(force = false, snapshot = captureEditorContent
     }
     if (progress.game) {
       notifications.setGameHistory(progress.game.state.notifications)
-      for (const message of gameResponseMessages(progress.game)) notifications.success(t(message))
+      for (const message of progressGameMessages(progress.game, t, locale.formatNumber)) notifications.success(message)
       announceDataChange('game')
     }
     if (progress.warning) notifications.warning(progress.warning)
@@ -388,10 +417,10 @@ async function decideLocalFile(choice: 'compare' | 'cloud' | 'import' | 'unlink'
 }
 async function linkWord() {
   try {
-    const path = await pickDesktopWordFile('Связать с файлом Word', 'Word')
+    const path = await pickDesktopWordFile(t('Связать с файлом Word'), 'Word')
     if (!path) return
     await link(path)
-    status.value = t('Файл Word связан')
+    status.value = t(status.value)
   } catch (error) {
     status.value = t(error instanceof Error ? error.message : 'Произошла непредвиденная ошибка.')
   }
@@ -464,7 +493,7 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
   <section class="document-editor-view">
     <header class="document-editor-view__header">
       <div class="document-editor-view__title">
-        <button class="document-editor-view__back" type="button" :title="scope.stageId ? t('Вернуться к источнику') : t('Вернуться к проекту')" :aria-label="scope.stageId ? t('Вернуться к источнику') : t('Вернуться к проекту')" @click="closeEditor">← {{ scope.stageId ? t('К источнику') : t('К проекту') }}</button>
+        <button class="document-editor-view__back" type="button" :title="scope.stageId ? t(sharedSource ? 'Вернуться к источнику' : 'Этап') : t('Вернуться к проекту')" :aria-label="scope.stageId ? t(sharedSource ? 'Вернуться к источнику' : 'Этап') : t('Вернуться к проекту')" @click="closeEditor">← {{ scope.stageId ? t(sharedSource ? 'К источнику' : 'Этап') : t('К проекту') }}</button>
         <div><p class="document-editor-view__eyebrow">Текст</p><h1>{{ title }}</h1></div>
       </div>
       <div class="document-editor-view__actions">
@@ -472,13 +501,20 @@ onBeforeRouteLeave(async () => { saveEditorPosition(); await flushAndRecord() })
         <button class="nf-button" type="button" :disabled="processing || !canRecordText" @click="onRecordClick">
           {{ processing ? t('Сохраняем…') : t('Добавить запись') }}
         </button>
+        <button
+          v-if="canLinkWord && !showWordBindingPanel"
+          class="nf-button nf-button--secondary"
+          type="button"
+          :aria-label="t('Связать с файлом Word')"
+          @click="linkWord"
+        >{{ t(linked ? 'Файл Word связан' : 'Связать с файлом Word') }}</button>
         <button class="nf-button nf-button--secondary" type="button" title="Импортировать документ Word" aria-label="Импортировать документ Word" @click="importWord">Импорт DOCX</button>
         <button class="nf-button nf-button--secondary" type="button" title="Экспортировать документ Word" aria-label="Экспортировать документ Word" @click="exportWord">Экспорт DOCX</button>
 
       </div>
 
     </header>
-    <LocalWordBindingPanel v-if="canLinkWord" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" @reattach="linkWord" @copy="exportWord" @decision="decideLocalFile" @cancel="status=''" />
+    <LocalWordBindingPanel v-if="showWordBindingPanel" :attached="linked" :state="documentState?.sync_state" :external-content="documentState?.external_content" :show-conflict-actions="isDeveloperModeAvailable()" @reattach="linkWord" @decision="decideLocalFile" @cancel="status=''" />
     <div class="document-editor-view__workspace">
       <div ref="editorShell" class="document-editor-view__editor-shell">
         <NFDocumentEditor

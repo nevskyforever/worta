@@ -12,7 +12,7 @@ const config = JSON.parse(await readFile(configPath, 'utf8'));
 if (profile === 'test') {
   config.identifier = 'app.nfprogress.tracker.test';
   for (const window of config.app?.windows ?? []) {
-    window.title = 'nfprogress Test';
+    window.title = `${config.productName} Test`;
   }
 } else if (profile !== 'production') {
   console.error(`Unsupported build profile: ${profile}`);

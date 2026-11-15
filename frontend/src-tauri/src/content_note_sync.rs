@@ -109,10 +109,22 @@ fn portable(n: &Value) -> Result<(), &'static str> {
 }
 pub(crate) fn decode(frame: &[u8]) -> Result<ContentNote, &'static str> {
     let normalized;
-    let frame = if frame.len()>=20 && frame[11]!=0 && [8].contains(&frame[9]) && [1].contains(&frame[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(frame,&[8],&[1],8388608-20).map_err(|e| e)?;
+    let frame = if frame.len() >= 20
+        && frame[11] != 0
+        && [8].contains(&frame[9])
+        && [1].contains(&frame[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            frame,
+            &[8],
+            &[1],
+            8388608 - 20,
+        )
+        .map_err(|e| e)?;
         normalized.as_slice()
-    } else {frame};
+    } else {
+        frame
+    };
 
     if frame.len() > 8388608 {
         return Err("content_note_resource_limit");
@@ -245,7 +257,9 @@ pub(crate) fn receipt(
             if own {
                 db.execute("INSERT OR IGNORE INTO cloud_sync_upload_receipts(account_id,event_id,device_id,server_sequence,duplicate,accepted_at) VALUES(?1,?2,?3,?4,0,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",params![c.account_id,c.event_id,c.pulling_device_id,c.server_sequence])?;
                 let proven:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_upload_receipts WHERE account_id=?1 AND event_id=?2 AND device_id=?3 AND server_sequence=?4)",params![c.account_id,c.event_id,c.pulling_device_id,c.server_sequence],|r|r.get(0))?;
-                if !proven{return Err(rusqlite::Error::InvalidQuery)}
+                if !proven {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
                 db.execute("UPDATE cloud_sync_outbox SET lifecycle='accepted' WHERE event_id=?1 AND account_id=?2 AND lifecycle='sealed'",params![c.event_id,c.account_id])?;
             }
         }

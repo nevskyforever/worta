@@ -51,6 +51,7 @@ const agreementDocument = computed(() => {
       h1 { font-size: 1.65rem !important; }
       h2 { margin-top: 1.6rem !important; font-size: 1.25rem !important; }
       p, li { white-space: normal !important; }
+      body * { color: inherit !important; }
     </style>
   `
   if (agreement.value.html.includes('</head>')) {
@@ -135,7 +136,7 @@ onBeforeUnmount(() => controller.abort())
   <main class="agreement-gate">
     <section v-if="declined" class="agreement-card agreement-card--declined" aria-labelledby="declined-title">
       <span class="agreement-brand" aria-hidden="true">nf</span>
-      <h1 id="declined-title">{{ t('Для работы с nfprogress необходимо принять пользовательское соглашение') }}</h1>
+      <h1 id="declined-title">{{ t('Для работы с nfprogress необходимо принять пользовательское соглашение').replace(/nfprogress/gi, 'worta') }}</h1>
       <p>{{ t('Без принятия соглашения функции приложения остаются недоступны.') }}</p>
       <button class="nf-button" type="button" @click="returnToAgreement">
         {{ t('Вернуться к соглашению') }}
@@ -145,7 +146,7 @@ onBeforeUnmount(() => controller.abort())
     <section v-else class="agreement-card" aria-labelledby="agreement-title">
       <header class="agreement-header">
         <div>
-          <p class="agreement-eyebrow">nfprogress</p>
+          <p class="agreement-eyebrow">worta</p>
           <h1 id="agreement-title">{{ t('Пользовательское соглашение') }}</h1>
           <p>{{ t('Ознакомьтесь с условиями перед началом работы.') }}</p>
         </div>

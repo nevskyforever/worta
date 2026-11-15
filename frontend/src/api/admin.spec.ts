@@ -1,10 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { adminApi, adminSession, onAdminSessionInvalidated } from './admin'
 
+function inMemoryStorageStub() {
+  return {
+    getItem: vi.fn(() => null),
+    setItem: vi.fn(),
+    removeItem: vi.fn(),
+    clear: vi.fn(),
+  }
+}
+
 describe('admin API memory session', () => {
-  beforeEach(() => { adminSession.clear(); vi.restoreAllMocks() })
+  beforeEach(() => { vi.unstubAllGlobals(); adminSession.clear(); vi.restoreAllMocks() })
 
   it('uses bearer authentication without browser token storage', async () => {
+    const localStorage = inMemoryStorageStub()
+    const sessionStorage = inMemoryStorageStub()
+    vi.stubGlobal('localStorage', localStorage)
+    vi.stubGlobal('sessionStorage', sessionStorage)
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
       access_token: 'access-one', refresh_token: 'refresh-one', access_expires_in: 60,
     }), { status: 200 })).mockResolvedValueOnce(new Response(JSON.stringify({
@@ -16,8 +29,10 @@ describe('admin API memory session', () => {
     expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ headers: expect.any(Headers) })
     expect((fetchMock.mock.calls[2]?.[1] as RequestInit).headers as Headers).toHaveProperty('get')
     expect(((fetchMock.mock.calls[2]?.[1] as RequestInit).headers as Headers).get('Authorization')).toBe('Bearer access-one')
-    expect(localStorage.getItem('access_token')).toBeNull()
-    expect(sessionStorage.getItem('refresh_token')).toBeNull()
+    expect(localStorage.getItem).not.toHaveBeenCalled()
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem).not.toHaveBeenCalled()
+    expect(sessionStorage.setItem).not.toHaveBeenCalled()
   })
 
   it('replaces both runtime tokens during refresh and clears on logout', async () => {

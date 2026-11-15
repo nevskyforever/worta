@@ -273,10 +273,22 @@ pub(crate) fn frame(e: &Event) -> Result<Vec<u8>, Error> {
 }
 pub(crate) fn unframe(bytes: &[u8]) -> Result<Event, Error> {
     let normalized;
-    let bytes = if bytes.len()>=20 && bytes[11]!=0 && [2,3].contains(&bytes[9]) && [1,2].contains(&bytes[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(bytes,&[2,3],&[1,2],1024*1024).map_err(Error::Compression)?;
+    let bytes = if bytes.len() >= 20
+        && bytes[11] != 0
+        && [2, 3].contains(&bytes[9])
+        && [1, 2].contains(&bytes[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            bytes,
+            &[2, 3],
+            &[1, 2],
+            1024 * 1024,
+        )
+        .map_err(Error::Compression)?;
         normalized.as_slice()
-    } else {bytes};
+    } else {
+        bytes
+    };
 
     if bytes.len() < 20
         || bytes.len() > 1024 * 1024 + 20
@@ -556,7 +568,8 @@ pub(crate) fn seal(
     if nonce.len() != 24 || ciphertext.len() < 16 || ciphertext.len() > 1024 * 1024 + 36 {
         return Err(Error::Invalid);
     }
-    let compression_view = crate::frame_compression::canonical_view(expected_frame).map_err(|_| Error::Invalid)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(expected_frame).map_err(|_| Error::Invalid)?;
     let expected_frame = compression_view.as_ref();
     let tx = db.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let bytes:Vec<u8>=tx.query_row("SELECT e.canonical_frame FROM cloud_sync_structural_events e JOIN cloud_sync_outbox o ON o.account_id=e.account_id AND o.event_id=e.event_id WHERE e.account_id=?1 AND e.event_id=?2 AND o.lifecycle IN ('unsealed','sealed','accepted')",params![a,event],|r|r.get(0))?;
@@ -640,12 +653,22 @@ fn reference_coverage(
     Ok(Some(covered.len() == refs.len()))
 }
 // Read-only C18 content consumer. Accepted Stage-order coverage is unchanged.
-pub(crate) fn content_reference_ready(db: &Connection, a: &str, p: &str, id: &str, refs: &[String]) -> Result<(), String> {
+pub(crate) fn content_reference_ready(
+    db: &Connection,
+    a: &str,
+    p: &str,
+    id: &str,
+    refs: &[String],
+) -> Result<(), String> {
     let current = tips(db, a, p, "stage", id).map_err(|_| "stage_dependency_missing")?;
-    if current.len() != 1 { return Err("stage_dependency_missing".into()); }
+    if current.len() != 1 {
+        return Err("stage_dependency_missing".into());
+    }
     let raw: Vec<u8> = db.query_row("SELECT canonical_frame FROM cloud_sync_structural_events WHERE account_id=?1 AND project_id=?2 AND entity_type='stage' AND entity_id=?3 AND event_id=?4", params![a,p,id,current[0]], |r|r.get(0)).map_err(|_| "stage_dependency_missing")?;
     let event = unframe(&raw).map_err(|_| "stage_dependency_missing")?;
-    if event.header.operation == "delete" { return Err("stage_tombstone_child_manifest_incomplete".into()); }
+    if event.header.operation == "delete" {
+        return Err("stage_tombstone_child_manifest_incomplete".into());
+    }
     // Consume the same authority facts for this Stage only. Do not materialize
     // every Stage/Stage-order branch just to verify one bounded Note dependency.
     let (local, _, unsupported) = snapshot(db, p, id).map_err(|_| "stage_dependency_missing")?;
@@ -653,8 +676,12 @@ pub(crate) fn content_reference_ready(db: &Connection, a: &str, p: &str, id: &st
     if !unsupported.is_empty() || projection.as_ref() != current.first() || event.stage != local {
         return Err("stage_dependency_missing".into());
     }
-    match reference_coverage(db, a, p, id, &current, refs).map_err(|_| "stage_dependency_missing")? {
-        Some(true) => Ok(()), None => Err("stage_dependency_proof_limit".into()), _ => Err("stage_dependency_missing".into())
+    match reference_coverage(db, a, p, id, &current, refs)
+        .map_err(|_| "stage_dependency_missing")?
+    {
+        Some(true) => Ok(()),
+        None => Err("stage_dependency_proof_limit".into()),
+        _ => Err("stage_dependency_missing".into()),
     }
 }
 // Remote decisions may reconcile authenticated history, but must not adopt an
@@ -807,7 +834,8 @@ pub(crate) fn apply(
     nonce: &[u8],
     ciphertext: &[u8],
 ) -> Result<&'static str, Error> {
-    let compression_view = crate::frame_compression::canonical_view(bytes).map_err(|_| Error::Invalid)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(bytes).map_err(|_| Error::Invalid)?;
     let bytes = compression_view.as_ref();
     let e = unframe(bytes)?;
     let h = &e.header;
@@ -1759,10 +1787,14 @@ pub(crate) fn reader_blocker(
     event: &str,
     reason: &str,
 ) -> Result<(), Error> {
-    if !crate::frame_compression::CODES.contains(&reason) && !matches!(
-        reason,
-        "invalid_stage_frame" | "structural_authentication_failed" | "structural_scope_mismatch"
-    ) {
+    if !crate::frame_compression::CODES.contains(&reason)
+        && !matches!(
+            reason,
+            "invalid_stage_frame"
+                | "structural_authentication_failed"
+                | "structural_scope_mismatch"
+        )
+    {
         return Err(Error::Invalid);
     }
     db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type IN ('stage','stage_order') AND state IN ('received','orphan')",params![reason,a,event])?;
@@ -2074,11 +2106,19 @@ mod tests {
         let mut db = sqlite::open_database(&path).unwrap();
         metadata_active(&mut db);
         assert_eq!(retry(&mut db, ACCOUNT, 8).unwrap(), vec!["applied"]);
-        let initial: String = db.query_row("SELECT payload_json FROM stages WHERE id='S1'", [], |r| r.get(0)).unwrap();
+        let initial: String = db
+            .query_row("SELECT payload_json FROM stages WHERE id='S1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         let initial: Value = serde_json::from_str(&initial).unwrap();
         assert_eq!(initial["total"], json!(0));
         assert_eq!(initial["progress_entries"], json!([]));
-        assert_eq!(crate::progress_sync::source(&db, "project", Some("S1")).unwrap()["chain"]["base_total"], json!("0.000000"));
+        assert_eq!(
+            crate::progress_sync::source(&db, "project", Some("S1")).unwrap()["chain"]
+                ["base_total"],
+            json!("0.000000")
+        );
         let mut s2 = event(102);
         s2.header.entity_id = "S2".into();
         let o = order(103, &[e.clone(), s2.clone()]);

@@ -183,19 +183,31 @@ pub fn capture(db: &mut Connection, scope: &metadata::MetadataScope, now: &str) 
     let failure = match raw.as_deref() {
         None => Some("game_legacy_extension_unsupported"),
         Some(raw) if raw.len() > game_sync::MAX_HISTORY_BYTES => Some("game_resource_limit"),
-        Some(raw) if serde_json::from_str::<Value>(raw).is_err() => Some("game_legacy_extension_unsupported"),
+        Some(raw) if serde_json::from_str::<Value>(raw).is_err() => {
+            Some("game_legacy_extension_unsupported")
+        }
         _ => None,
     };
     if let Some(code) = failure {
         // Keep the exact original source in game_state. A bounded reference is
         // sufficient recovery evidence when the source cannot fit a candidate.
         let id = metadata::new_event_id().map_err(|_| "game_storage_error")?;
-        tx.execute("INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,NULL,?4)",params![id,a,canonical(&json!({"retained_source":"game_state","reason":code})),now]).map_err(sql)?;
-        blocked(&tx,a,"account",&id,code)?;
+        tx.execute(
+            "INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,NULL,?4)",
+            params![
+                id,
+                a,
+                canonical(&json!({"retained_source":"game_state","reason":code})),
+                now
+            ],
+        )
+        .map_err(sql)?;
+        blocked(&tx, a, "account", &id, code)?;
         tx.commit().map_err(sql)?;
         return Ok(());
     }
-    let source: Value = serde_json::from_str(raw.as_deref().unwrap()).map_err(|_| "game_legacy_extension_unsupported")?;
+    let source: Value = serde_json::from_str(raw.as_deref().unwrap())
+        .map_err(|_| "game_legacy_extension_unsupported")?;
     let account_id = metadata::new_event_id().map_err(|_| "game_storage_error")?;
     let restricted: bool = tx
         .query_row(
@@ -213,26 +225,26 @@ pub fn capture(db: &mut Connection, scope: &metadata::MetadataScope, now: &str) 
     let mut candidates = Vec::new();
     let mut events = Vec::new();
     if !account_active {
-    tx.execute(
-        "INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,?4,?5)",
-        params![
-            account_id,
-            a,
-            canonical(&source),
-            base.as_ref().ok().map(canonical),
-            now
-        ],
-    )
-    .map_err(sql)?;
-    candidates.push((
-        "account".to_string(),
-        account_id.clone(),
-        base.as_ref().err().cloned(),
-    ));
-    if let Ok(base) = &base {
-        let parents = game_sync::tips(&tx, a, "account")?;
-        events.push(json!({"version":1,"header":header(&tx,scope,None,None,&account_id,&parents,"legacy-game-v1",now)?,"action":{"kind":if parents.is_empty(){"genesis"}else{"adopt_local"},"base":base}}));
-    }
+        tx.execute(
+            "INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,?4,?5)",
+            params![
+                account_id,
+                a,
+                canonical(&source),
+                base.as_ref().ok().map(canonical),
+                now
+            ],
+        )
+        .map_err(sql)?;
+        candidates.push((
+            "account".to_string(),
+            account_id.clone(),
+            base.as_ref().err().cloned(),
+        ));
+        if let Ok(base) = &base {
+            let parents = game_sync::tips(&tx, a, "account")?;
+            events.push(json!({"version":1,"header":header(&tx,scope,None,None,&account_id,&parents,"legacy-game-v1",now)?,"action":{"kind":if parents.is_empty(){"genesis"}else{"adopt_local"},"base":base}}));
+        }
     }
     let projects=rows(&tx,"SELECT project_id FROM cloud_sync_project_bindings WHERE account_id=?1 ORDER BY project_id",[a])?;
     for p in projects {
@@ -260,25 +272,43 @@ pub fn capture(db: &mut Connection, scope: &metadata::MetadataScope, now: &str) 
         }
         if candidates.len() + owners.len() > 4096 {
             if candidates.is_empty() {
-                tx.execute("INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,NULL,?4)",params![account_id,a,canonical(&source),now]).map_err(sql)?;
-                candidates.push(("account".into(),account_id.clone(),Some("game_resource_limit".into())));
-            } else { candidates[0].2 = Some("game_resource_limit".into()); }
+                tx.execute(
+                    "INSERT INTO cloud_game_candidates VALUES(?1,?2,'account',?3,NULL,?4)",
+                    params![account_id, a, canonical(&source), now],
+                )
+                .map_err(sql)?;
+                candidates.push((
+                    "account".into(),
+                    account_id.clone(),
+                    Some("game_resource_limit".into()),
+                ));
+            } else {
+                candidates[0].2 = Some("game_resource_limit".into());
+            }
             break;
         }
         for stage in owners {
             let key = canonical(&json!([p, stage]));
             let owner_active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM cloud_game_migrations WHERE account_id=?1 AND owner_key=?2 AND lifecycle='active')",params![a,key],|r|r.get(0)).map_err(sql)?;
-            if owner_active {continue;}
+            if owner_active {
+                continue;
+            }
             let legacy = stage
                 .as_ref()
                 .map(|s| format!("stage:{p}:{s}"))
                 .unwrap_or_else(|| format!("project:{p}"));
             let id = metadata::new_event_id().map_err(|_| "game_storage_error")?;
             let source_result = owner_source(&tx, &source, &p, stage.as_deref());
-            let owner_source = source_result.as_ref().cloned().unwrap_or_else(|_|json!({"retained_source":"game_state","project_id":p,"stage_id":stage}));
+            let owner_source = source_result.as_ref().cloned().unwrap_or_else(
+                |_| json!({"retained_source":"game_state","project_id":p,"stage_id":stage}),
+            );
             let result = (|| -> Result<Value> {
-                if let Err(code)=&source_result { return Err(code.clone()); }
-                if let Err(code)=&base { return Err(code.clone()); }
+                if let Err(code) = &source_result {
+                    return Err(code.clone());
+                }
+                if let Err(code) = &base {
+                    return Err(code.clone());
+                }
                 let base = game_projection::streak_base(&owner_source, false)?;
                 let parents = game_sync::tips(&tx, a, &key)?;
                 let h = header(
@@ -399,13 +429,30 @@ mod tests {
     }
     #[test]
     fn game_missing_source_retains_durable_migration_blocker() {
-        let (mut db,path,scope,_) = setup();
-        db.execute("DELETE FROM game_state",[]).unwrap();
-        capture(&mut db,&scope,NOW).unwrap();
-        assert_eq!(db.query_row("SELECT lifecycle FROM cloud_game_migrations",[],|r|r.get::<_,String>(0)).unwrap(),"blocked");
-        assert_eq!(db.query_row("SELECT code FROM cloud_game_blockers",[],|r|r.get::<_,String>(0)).unwrap(),"game_legacy_extension_unsupported");
-        assert_eq!(db.query_row("SELECT count(*) FROM cloud_game_events",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        drop(db);std::fs::remove_file(path).unwrap();
+        let (mut db, path, scope, _) = setup();
+        db.execute("DELETE FROM game_state", []).unwrap();
+        capture(&mut db, &scope, NOW).unwrap();
+        assert_eq!(
+            db.query_row("SELECT lifecycle FROM cloud_game_migrations", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "blocked"
+        );
+        assert_eq!(
+            db.query_row("SELECT code FROM cloud_game_blockers", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "game_legacy_extension_unsupported"
+        );
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM cloud_game_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn game_explicit_migration_retains_baseline_pays_nothing_and_resumes_same_frame() {

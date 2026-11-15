@@ -9,7 +9,7 @@ const TITLE_AREA = { x: 80, y: 805, width: PROGRESS_SHARE_IMAGE_SIZE - 160, heig
 const BRAND_CENTER_Y = PROGRESS_SHARE_IMAGE_SIZE - 54
 const BRAND_ICON_SIZE = 46
 const BRAND_SPACING = 14
-const BRAND_TEXT = 'nfprogress'
+const BRAND_TEXT = 'worta'
 const BRAND_ICON_URL = '/icons/icon-192.webp'
 
 const START_COLOR = [169, 169, 169] as const
@@ -624,7 +624,7 @@ function downloadImage(blob: Blob): void {
     : undefined
   const anchor = document.createElement('a')
   anchor.href = url
-  anchor.download = 'nfprogress-progress.png'
+  anchor.download = 'worta-progress.png'
   anchor.rel = 'noopener'
   anchor.style.display = 'none'
   document.body.append(anchor)

@@ -17,6 +17,17 @@ const ionicStubs = {
 describe('StageDialog', () => {
   afterEach(() => vi.useRealTimers())
 
+  it.each([
+    { sharedSource: false, heading: 'Добавить этап' },
+    { sharedSource: true, heading: 'Добавить источник' },
+  ])('names the creation dialog for sharedSource=$sharedSource', ({ sharedSource, heading }) => {
+    const wrapper = mount(StageDialog, {
+      props: { open: true, projectUnit: 'symbols', sharedSource },
+      global: { plugins: [createPinia()], stubs: ionicStubs },
+    })
+    expect(wrapper.get('h2').text()).toBe(heading)
+  })
+
   it('keeps deadline and daily goal calculations live for a stage', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-26T12:00:00'))
@@ -51,6 +62,29 @@ describe('StageDialog', () => {
     expect((wrapper.get('#stage-deadline').element as HTMLInputElement).value)
       .toBe('2026-08-31')
   })
+
+  it('recalculates from current progress when the stage deadline is today', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-19T12:00:00'))
+    const wrapper = mount(StageDialog, {
+      props: {
+        open: true,
+        projectUnit: 'symbols',
+        stage: projectFixture({
+          goal: 16_000, total: 14_464, personal_goal: 500,
+          plan_daily_goal: 500, today_goal: 16_000, deadline: '2026-09-19',
+          planning_date: '2026-09-19',
+        }),
+      },
+      global: { plugins: [createPinia()], stubs: ionicStubs },
+    })
+
+    await wrapper.get('#stage-personal-goal').setValue('250')
+
+    expect((wrapper.get('#stage-deadline').element as HTMLInputElement).value)
+      .toBe('2026-09-25')
+  })
+
   it('carries an edited current value without implicitly recalculating the plan', async () => {
     const wrapper = mount(StageDialog, {
       props: {

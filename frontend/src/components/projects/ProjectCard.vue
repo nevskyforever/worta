@@ -33,7 +33,7 @@ const presentation = useProjectPresentation(() => props.project)
 
 const stageCountLabel = computed(() => {
   const count = props.project.stages.length
-  return `${t('Источников')}: ${locale.formatNumber(count, 0)}`
+  return `${t(props.project.name === 'Общий проект' ? 'Источников' : 'Этапов')}: ${locale.formatNumber(count, 0)}`
 })
 
 const isOverdue = computed(() => {

@@ -9,6 +9,7 @@ import { useMotionStore } from '@/stores/motion'
 import { useNotificationsStore } from '@/stores/notifications'
 import { useThemeStore } from '@/stores/theme'
 import * as e2eLegalGate from '@/platform/e2eLegalGate'
+import * as runtime from '@/platform/runtime'
 import type { SettingsResponse } from '@/types/content'
 
 import App from './App.vue'
@@ -22,6 +23,7 @@ vi.mock('@/api/content', () => ({
 vi.mock('@/api/settings', () => ({
   settingsApi: {
     get: vi.fn(),
+    acceptUserAgreement: vi.fn(),
   },
 }))
 
@@ -120,6 +122,19 @@ describe('App bootstrap', () => {
     expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="agreement-gate"]').exists()).toBe(false)
     expect(settings.values.user_agreement).toBe(false)
+  })
+
+  it('opens a desktop test profile without recording agreement acceptance', async () => {
+    const settings = settingsResponse({ language: 'ru', user_agreement: false })
+    vi.mocked(settingsApi.get).mockResolvedValue(settings)
+    vi.spyOn(runtime, 'isDesktopTestProfile').mockReturnValue(true)
+    const { wrapper } = mountApp()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="app-shell"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="agreement-gate"]').exists()).toBe(false)
+    expect(settings.values.user_agreement).toBe(false)
+    expect(settingsApi.acceptUserAgreement).not.toHaveBeenCalled()
   })
 
   it('keeps the app blocked after a bootstrap error and retries safely', async () => {

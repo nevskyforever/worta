@@ -10,7 +10,7 @@ PROFILE_SCRIPT = ROOT / 'scripts' / 'apply-tauri-build-profile.mjs'
 def test_test_profile_overlay_is_distinct_and_production_overlay_is_unchanged(tmp_path):
     config_path = tmp_path / 'tauri.conf.json'
     original = {
-        'productName': 'nfprogress',
+        'productName': 'worta',
         'identifier': 'app.nfprogress.tracker',
         'app': {'windows': [{'title': 'nfprogress'}]},
     }
@@ -21,9 +21,9 @@ def test_test_profile_overlay_is_distinct_and_production_overlay_is_unchanged(tm
         check=True,
     )
     test_config = json.loads(config_path.read_text(encoding='utf-8'))
-    assert test_config['productName'] == 'nfprogress'
+    assert test_config['productName'] == 'worta'
     assert test_config['identifier'] == 'app.nfprogress.tracker.test'
-    assert test_config['app']['windows'][0]['title'] == 'nfprogress Test'
+    assert test_config['app']['windows'][0]['title'] == 'worta Test'
 
     config_path.write_text(json.dumps(original), encoding='utf-8')
     subprocess.run(

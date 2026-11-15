@@ -1,3 +1,6 @@
+import { createPinia } from 'pinia'
+import { useProjectsStore } from '@/stores/projects'
+import { projectFixture } from '@/test/fixtures'
 import { mount } from '@vue/test-utils'
 import { defineComponent, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,6 +24,7 @@ vi.mock('@/stores/locale', () => ({
 function mountPage() {
   return mount(DocumentPage, {
     global: {
+      plugins: [createPinia()],
       stubs: {
         IonContent: { template: '<div><slot /></div>' },
         IonPage: { template: '<div><slot /></div>' },
@@ -50,14 +54,17 @@ describe('DocumentPage route scope', () => {
     expect(editor.props('title')).toBe('Текст проекта')
   })
 
-  it('uses the path parameter for a stage document', () => {
+  it.each([['Роман', 'Текст этапа'], ['Общий проект', 'Текст источника']])('names a stage document in %s', async (name, title) => {
     route.name = 'stage-document'
     route.params = { projectId: 'project-id', stageId: 'stage-id' }
     route.query = { stageId: 'stale-stage' }
 
-    const editor = mountPage().getComponent({ name: 'DocumentEditor' })
+    const wrapper = mountPage()
+    useProjectsStore().currentProject = projectFixture({ id: 'project-id', name })
+    const editor = wrapper.getComponent({ name: 'DocumentEditor' })
 
     expect(editor.props('scope')).toEqual({ projectId: 'project-id', stageId: 'stage-id' })
-    expect(editor.props('title')).toBe('Текст источника')
+    await wrapper.vm.$nextTick()
+    expect(editor.props('title')).toBe(title)
   })
 })

@@ -94,6 +94,33 @@ prepare_frontend_workspace() {
     "$FRONTEND_SOURCE_DIR/" "$FRONTEND_DIR/"
   rsync --archive --delete \
     "$ROOT_DIR/mindmap_assets/" "$WORKSPACE_DIR/mindmap_assets/"
+  # Vitest's node-only release checks resolve shared compression fixtures and
+  # the local FastAPI app from the workspace root. Copy only their source
+  # trees; these are test inputs and are never included in the Tauri bundle.
+  if [ -d "$ROOT_DIR/scripts/compression" ]; then
+    mkdir -p "$WORKSPACE_DIR/scripts"
+    rsync --archive --delete \
+      "$ROOT_DIR/scripts/compression/" "$WORKSPACE_DIR/scripts/compression/"
+  fi
+  if [ -d "$ROOT_DIR/backend" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/backend/" "$WORKSPACE_DIR/backend/"
+  fi
+  # The backend smoke test imports the shared service package and legacy
+  # engine module from the repository root. They remain test-only sources and
+  # are not part of the production Desktop artifact.
+  if [ -d "$ROOT_DIR/nfprogress" ]; then
+    rsync --archive --delete \
+      "$ROOT_DIR/nfprogress/" "$WORKSPACE_DIR/nfprogress/"
+  fi
+  if [ -f "$ROOT_DIR/engine.py" ]; then
+    cp -p "$ROOT_DIR/engine.py" "$WORKSPACE_DIR/engine.py"
+  fi
+  # The compatibility layer imported by the backend smoke test also resolves
+  # legacy top-level Python modules (game, settings, and related schemas).
+  # Keep these test-only sources available without placing Python in the app.
+  rsync --archive --include='*.py' --exclude='*' \
+    "$ROOT_DIR/" "$WORKSPACE_DIR/"
   # Rust embeds the shared migration SQL from the repository-relative path in
   # src-tauri/src/sqlite.rs. Keep that source available in the isolated build
   # workspace without copying the Python runtime or its user data.
@@ -110,6 +137,65 @@ prepare_frontend_workspace() {
     "$WORKSPACE_DIR/"
 }
 
+# Install cleanup before any work: failed checks/builds must not retain targets.
+# KEEP_BUNDLE retains only the qualified bundle, not gigabytes of intermediates.
+STAGING_DIR=""
+BUILD_TEMP=""
+BUILD_LOCK="$WORKSPACE_DIR/.build.lock"
+mkdir -p "$WORKSPACE_DIR"
+if [ "$(cd "$WORKSPACE_DIR" && pwd -P)" != "$WORKSPACE_DIR" ] \
+  || [ -L "$FRONTEND_DIR" ] || [ -L "$FRONTEND_DIR/src-tauri" ] \
+  || [ -L "$WORKSPACE_TARGET_DIR" ]; then
+  echo "Refusing aliased build workspace: $WORKSPACE_DIR" >&2
+  exit 1
+fi
+if ! mkdir "$BUILD_LOCK"; then
+  echo "Build workspace is already locked: $BUILD_LOCK" >&2
+  exit 1
+fi
+printf '%s\n' "$$" > "$BUILD_LOCK/pid"
+cleanup_build() {
+  local status=$? saved_bundle="" bundle_path="$WORKSPACE_TARGET_DIR/$TARGET/release/bundle"
+  trap - EXIT
+  trap '' HUP INT TERM
+  if [ -n "$STAGING_DIR" ] && [ -d "$STAGING_DIR" ]; then
+    rm -rf -- "$STAGING_DIR"
+  fi
+  if [ -n "$BUILD_TEMP" ]; then
+    rm -rf -- "$BUILD_TEMP" || status=1
+  fi
+  rm -rf -- "$FRONTEND_DIR/node_modules" "$FRONTEND_DIR/dist" || status=1
+  if [ -d "$WORKSPACE_TARGET_DIR" ] && { [ "$status" -ne 0 ] \
+    || [ "${NFPROGRESS_TAURI_KEEP_BUILD_CACHE:-0}" != "1" ] \
+    || [ "$(du -sk "$WORKSPACE_TARGET_DIR" | awk '{print $1}')" -ge "$TAURI_TARGET_LIMIT_KB" ]; }; then
+    if [ -L "$WORKSPACE_TARGET_DIR" ] || [ "$(cd "$WORKSPACE_TARGET_DIR" && pwd -P)" != "$WORKSPACE_TARGET_DIR" ]; then
+      echo "Refusing cleanup of aliased Cargo target: $WORKSPACE_TARGET_DIR" >&2
+      exit 1
+    fi
+    if [ "$status" -eq 0 ] && [ "${NFPROGRESS_TAURI_KEEP_BUNDLE:-0}" = "1" ] && [ -d "$bundle_path" ]; then
+      saved_bundle="$(mktemp -d "$WORKSPACE_DIR/.retained-bundle.XXXXXX")"
+      mv "$bundle_path" "$saved_bundle/bundle" || exit 1
+    fi
+    CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" cargo clean --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" || status=1
+    if [ -n "$saved_bundle" ]; then
+      mkdir -p "$(dirname "$bundle_path")"
+      mv "$saved_bundle/bundle" "$bundle_path" || exit 1
+      rmdir "$saved_bundle"
+    fi
+  fi
+  rm -f -- "$BUILD_LOCK/pid"
+  rmdir "$BUILD_LOCK"
+  exit "$status"
+}
+trap cleanup_build EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+BUILD_TEMP="$(mktemp -d "${TMPDIR:-/tmp}/worta-build-$ARCH.XXXXXX")"
+export TMPDIR="$BUILD_TEMP"
+# Bound output growth even when qualification compiles tests before release.
+export CARGO_INCREMENTAL=0
+
 prepare_frontend_workspace
 
 if [ -d "$WORKSPACE_TARGET_DIR" ]; then
@@ -123,13 +209,7 @@ if [ -d "$WORKSPACE_TARGET_DIR" ]; then
   fi
 fi
 
-NODE_MODULES_LOCK="$FRONTEND_DIR/node_modules/.package-lock.json"
-if [ ! -f "$NODE_MODULES_LOCK" ] \
-  || [ "$FRONTEND_DIR/package.json" -nt "$NODE_MODULES_LOCK" ] \
-  || [ "$FRONTEND_DIR/package-lock.json" -nt "$NODE_MODULES_LOCK" ]; then
-  echo "Устанавливаются или обновляются frontend-зависимости..."
-  (cd "$FRONTEND_DIR" && npm ci)
-fi
+python3 "$ROOT_DIR/scripts/maintenance/tauri_npm_cache.py" "$FRONTEND_DIR"
 
 node "$ROOT_DIR/scripts/sync-tauri-versions.mjs" --frontend-dir "$FRONTEND_DIR"
 node "$ROOT_DIR/scripts/apply-tauri-build-profile.mjs" \
@@ -141,11 +221,13 @@ PACKAGE_NAME="$ARTIFACT_PREFIX-$VERSION"
 
 if [ "${NFPROGRESS_TAURI_RUN_FRONTEND_CHECKS:-0}" = "1" ]; then
   echo "Запускаются frontend typecheck и tests для release qualification..."
-  (cd "$FRONTEND_DIR" && npm run typecheck && npm run test)
+  (cd "$FRONTEND_DIR" && npm run typecheck && npm run test -- --maxWorkers=2)
 fi
 
 if [ "${NFPROGRESS_TAURI_RUN_RUST_CHECKS:-0}" = "1" ]; then
   echo "Запускаются Rust fmt/check/tests для release qualification..."
+  export CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR"
+  export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
   cargo fmt --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" --check
   cargo check \
     --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" \
@@ -153,6 +235,7 @@ if [ "${NFPROGRESS_TAURI_RUN_RUST_CHECKS:-0}" = "1" ]; then
   cargo test \
     --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" \
     --target "$TARGET"
+  cargo clean --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml" --profile dev
 fi
 
 mkdir -p "$BUILD_DIR"
@@ -160,7 +243,6 @@ NFPROGRESS_TAURI_FRONTEND_DIR="$FRONTEND_DIR" \
   "$ROOT_DIR/scripts/build-tauri-dmg.sh" "$TARGET" "$DMG_PATH"
 
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/nfprogress-tauri-package.XXXXXX")"
-trap 'rm -rf -- "$STAGING_DIR"' EXIT
 PACKAGE_DIR="$STAGING_DIR/$PACKAGE_NAME"
 mkdir -p "$PACKAGE_DIR"
 cp "$DMG_PATH" "$PACKAGE_DIR/"
@@ -172,8 +254,9 @@ SOURCE_REVISION="$(git -C "$ROOT_DIR" rev-parse HEAD)"
   printf 'Архив исходного кода: https://github.com/nevskyforever/worta/archive/%s.zip\n' "$SOURCE_REVISION"
 } >> "$PACKAGE_DIR/SOURCE_CODE.txt"
 
-rm -f "$ARTIFACT_PATH"
-ditto -c -k --norsrc --keepParent "$PACKAGE_DIR" "$ARTIFACT_PATH"
+# Replace the last archive only after packaging succeeds.
+ditto -c -k --norsrc --keepParent "$PACKAGE_DIR" "$STAGING_DIR/$PACKAGE_NAME.zip"
+mv -f -- "$STAGING_DIR/$PACKAGE_NAME.zip" "$ARTIFACT_PATH"
 
 # The ZIP is the portable release package. Release qualification may retain the
 # DMG and app bundle for direct inspection; ordinary local builds keep the
@@ -191,16 +274,6 @@ find "$BUILD_DIR" -mindepth 1 -maxdepth 1 -type f \
 # bundle that is already contained in the release ZIP.
 if [ "${NFPROGRESS_TAURI_KEEP_BUNDLE:-0}" != "1" ]; then
   rm -rf -- "$FRONTEND_DIR/src-tauri/target/$TARGET/release/bundle"
-fi
-
-# A regular local test build only needs the ZIP in build-tauri-*/. Keep the
-# large Rust target only for explicit release qualification, which inspects the
-# retained app bundle after this script returns.
-if [ "${NFPROGRESS_TAURI_KEEP_BUILD_CACHE:-0}" != "1" ] \
-  && [ "${NFPROGRESS_TAURI_KEEP_BUNDLE:-0}" != "1" ]; then
-  echo "Очищается временный Tauri build target: $WORKSPACE_TARGET_DIR"
-  CARGO_TARGET_DIR="$WORKSPACE_TARGET_DIR" \
-    cargo clean --manifest-path "$FRONTEND_DIR/src-tauri/Cargo.toml"
 fi
 
 echo "✅ Локальная Tauri-сборка завершена: $ARTIFACT_PATH"

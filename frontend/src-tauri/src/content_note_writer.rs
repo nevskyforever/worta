@@ -517,7 +517,8 @@ pub(crate) fn seal(
     expected: &[u8],
     envelope: notes::EncryptedNoteSyncEnvelope,
 ) -> Result<(), String> {
-    let compression_view = crate::frame_compression::canonical_view(expected).map_err(str::to_owned)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(expected).map_err(str::to_owned)?;
     let expected = compression_view.as_ref();
     metadata::assert_runtime_scope(
         db,
@@ -1129,12 +1130,19 @@ mod tests {
             .unwrap();
             assert!(intent.is_some());
             assert_eq!(
-                tx.query_row("SELECT COUNT(*) FROM cloud_content_note_writer_events", [], |row| row.get::<_, i64>(0)).unwrap(),
+                tx.query_row(
+                    "SELECT COUNT(*) FROM cloud_content_note_writer_events",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )
+                .unwrap(),
                 0
             );
             tx.commit().unwrap();
             assert_eq!(
-                notes::list_unsealed_note_sync_intents(&mut db, 8, false).unwrap().len(),
+                notes::list_unsealed_note_sync_intents(&mut db, 8, false)
+                    .unwrap()
+                    .len(),
                 1
             );
             drop(db);

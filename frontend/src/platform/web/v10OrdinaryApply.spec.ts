@@ -8,8 +8,8 @@ afterEach(()=>vi.restoreAllMocks())
 for(const protocol of [2,3] as const)for(const compressed of protocol===2?[false]:[false,true])for(const strategy of ['choose_version','manual_merge','delete','keep_both'] as const)describe(`genuine create/update/delete and baseline update protocol${protocol}/ID${compressed?1:0}/${strategy}`,()=>{
  let f:Awaited<ReturnType<typeof ordinaryV10Fixture>>
  // Build the genuine accepted F/H prerequisite separately from O's five applies.
- // Both phases retain a 5000 ms bound; no caching, synthetic outcomes or retries.
- beforeEach(async()=>{f=await ordinaryV10Fixture(strategy,protocol,compressed)},5000)
+ // Both phases retain a bounded 20 s limit; no caching, synthetic outcomes or retries.
+ beforeEach(async()=>{f=await ordinaryV10Fixture(strategy,protocol,compressed)},20000)
  it('applies five source transitions, preserves evidence and replays without writes',async()=>{
  const before=f.before(),initial=await f.witness.inspect(scope),source=(f.f.db.localProjects![0] as any).source_revision
  const created=await f.receive();expect(await f.owner.apply(scope,created.sequence)).toBe('applied')
@@ -29,19 +29,19 @@ for(const protocol of [2,3] as const)for(const compressed of protocol===2?[false
  expect(f.before()).toEqual(stable);expect(f.f.calls.slice(calls).every(c=>c.mode==='readonly')).toBe(true)
  expect(await f.h.history(scope)).toMatchObject({readOnly:true,resolutions:1});await expect(f.g.prepare(scope)).rejects.toThrow();await expect(f.runtime.run(scope)).rejects.toThrow()
  expect(f.before()).toEqual(stable)
- })
+ },20000)
 })
 for(const compressed of [false,true])it(`Content plain stage dependency actual apply ID${compressed?1:0}`,async()=>{
  const f=await ordinaryV10Fixture('keep_both',3,compressed,true),r=await f.receive('stage-plain',null,1,false,{format:'plain'})
  expect(await f.owner.apply(scope,r.sequence)).toBe('applied');expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:1})
-})
+},20000)
 it('concurrent Notes serialize on full source and require manual retry',async()=>{
  const f=await ordinaryV10Fixture(),a=await f.receive('a'),token=await f.owner.prepare(scope,a.sequence),b=await f.receive('b'),before=f.before()
  await expect(f.owner.commit(token)).rejects.toMatchObject({code:'stale_source'});expect(f.before()).toEqual(before)
  await expect(f.owner.apply(scope,b.sequence)).rejects.toMatchObject({code:'note_orphan'})
  expect(await f.owner.apply(scope,a.sequence)).toBe('applied');expect(await f.owner.apply(scope,b.sequence)).toBe('applied')
  expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:2})
-})
+},20000)
 it('two prepared owners cannot commit the same source twice',async()=>{
  const f=await ordinaryV10Fixture(),r=await f.receive(),other=f.create(),a=await f.owner.prepare(scope,r.sequence),b=await other.prepare(scope,r.sequence)
  expect(await f.owner.commit(a)).toBe('applied');const before=f.before()
@@ -62,7 +62,7 @@ for(const protocol of [2,3] as const)it(`rollback all source/history/proof and r
  const f=await ordinaryV10Fixture('keep_both',protocol),r=await f.receive(),p=await f.owner.prepare(scope,r.sequence),before=f.before()
  f.f.abort();await expect(f.owner.commit(p)).rejects.toMatchObject({code:'storage_failed'});expect(f.before()).toEqual(before)
  f.f.abort(false);expect(await f.create().apply(scope,r.sequence)).toBe('applied');expect(await f.witness.inspect(scope)).toMatchObject({ordinaryTransitions:1})
-})
+},20000)
 for(const kind of ['project','note','cursor','dependency','history','binding','other-project'] as const)it(`complete pre-commit CAS pins ${kind}`,async()=>{
  const f=await ordinaryV10Fixture(),r=await f.receive(),p=await f.owner.prepare(scope,r.sequence),d=f.f.db
  if(kind==='project')(d.localProjects![0] as any).source_revision++

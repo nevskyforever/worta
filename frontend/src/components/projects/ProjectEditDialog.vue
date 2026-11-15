@@ -226,7 +226,7 @@ async function submit(): Promise<void> {
     props.project.stages_enabled
     && !form.stagesEnabled
     && !window.confirm(t(
-      'Все записи источников будут перенесены в проект в хронологическом порядке. Цели и прогресс источников сложатся и будут пересчитаны как записи одного проекта. Карты источников не объединяются с картой проекта и будут удалены.',
+      'Все записи этапов будут перенесены в проект в хронологическом порядке. Цели и прогресс этапов сложатся и будут пересчитаны как записи одного проекта. Карты этапов не объединяются с картой проекта и будут удалены.',
     ))
   ) return
   if (
@@ -424,7 +424,7 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
           </label>
           <label class="workspace-check">
             <input v-model="form.stagesEnabled" type="checkbox" />
-            <span><strong>{{ t('Проект с источниками') }}</strong></span>
+            <span><strong>{{ t('Проект с этапами') }}</strong></span>
           </label>
           <label v-if="globalStreakEnabled" class="workspace-check">
             <input id="edit-project-streak-enabled" v-model="form.streakEnabled" name="streak_enabled" type="checkbox" />
@@ -440,8 +440,8 @@ watch(() => form.recalculatePlan, updateDeadline, { flush: 'sync' })
           <label v-if="form.stagesEnabled" class="workspace-check">
             <input v-model="form.combineStageMindmaps" type="checkbox" />
             <span>
-              <strong>{{ t('Объединять карты источников') }}</strong>
-              <small>{{ t('Показывать карты источников как единую карту проекта') }}</small>
+              <strong>{{ t('Объединять карты этапов') }}</strong>
+              <small>{{ t('Показывать карты этапов как единую карту проекта') }}</small>
             </span>
           </label>
           <label v-if="canRecalculatePlan" class="workspace-check">

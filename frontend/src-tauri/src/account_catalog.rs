@@ -248,10 +248,22 @@ pub(crate) fn frame(e: &Event) -> Result<Vec<u8>> {
 }
 pub(crate) fn unframe(raw: &[u8]) -> Result<Event> {
     let normalized;
-    let raw = if raw.len()>=20 && raw[11]!=0 && [4,5,6,7].contains(&raw[9]) && [1].contains(&raw[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(raw,&[4,5,6,7],&[1],MAX_BYTES).map_err(Error::Code)?;
+    let raw = if raw.len() >= 20
+        && raw[11] != 0
+        && [4, 5, 6, 7].contains(&raw[9])
+        && [1].contains(&raw[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            raw,
+            &[4, 5, 6, 7],
+            &[1],
+            MAX_BYTES,
+        )
+        .map_err(Error::Code)?;
         normalized.as_slice()
-    } else {raw};
+    } else {
+        raw
+    };
 
     if raw.len() < 20
         || raw.len() > MAX_BYTES + 20
@@ -877,8 +889,23 @@ fn project_coverage(
     Ok(())
 }
 // Shared consumer boundary; catalog recovery semantics stay unchanged.
-pub(crate) fn project_reference_ready(db: &Connection, account: &str, project: &str, bootstrap: &str, reference: &str) -> Result<()> {
-    project_coverage(db, account, project, &ProjectProof { bootstrap_id: bootstrap.into(), metadata_event_id: reference.into() }, &mut ProofBudget(DEPENDENCY_TOTAL_NODES))
+pub(crate) fn project_reference_ready(
+    db: &Connection,
+    account: &str,
+    project: &str,
+    bootstrap: &str,
+    reference: &str,
+) -> Result<()> {
+    project_coverage(
+        db,
+        account,
+        project,
+        &ProjectProof {
+            bootstrap_id: bootstrap.into(),
+            metadata_event_id: reference.into(),
+        },
+        &mut ProofBudget(DEPENDENCY_TOTAL_NODES),
+    )
 }
 // true means a known incompatible live-set/destructive evolution: retain a
 // complete conflict, never use that payload as an exact current projection.
@@ -2215,8 +2242,15 @@ pub(crate) mod tests {
         let cmd:crate::note_sync::CommitMixedSyncInboundPageCommand=serde_json::from_value(json!({"account_id":"a","canonical_user_id":USER,"device_id":DEVICE,"expected_cursor":11,"next_cursor":12,"has_more":false,"items":[{"event_id":id(800),"server_sequence":12,"source_device_id":id(500),"project_id":"C1","entity_id":"S1","entity_type":"stage","operation":"upsert","revision":1,"updated_at":NOW,"deleted_at":null,"envelope":{"crypto_version":1,"aad_version":1,"nonce":crate::note_sync::encode_canonical_base64url(&[0u8;24]),"ciphertext":crate::note_sync::encode_canonical_base64url(&encrypted)}}]})).unwrap();
         crate::note_sync::commit_mixed_sync_inbound_page(&mut db, &cmd).unwrap();
         assert_eq!(
-            crate::stage_sync::apply_received(&mut db, "a", &id(800), &stage_frame, &[0; 24], &encrypted)
-                .unwrap(),
+            crate::stage_sync::apply_received(
+                &mut db,
+                "a",
+                &id(800),
+                &stage_frame,
+                &[0; 24],
+                &encrypted
+            )
+            .unwrap(),
             "applied"
         );
         drop(db);
@@ -2224,8 +2258,14 @@ pub(crate) mod tests {
         assert_eq!(arrival(&mut db, &pending_order, 10), "conflict_preserved");
         let mut expected = vec![pending_order.header.event_id.clone(), rid];
         expected.sort();
-        assert_eq!(tips(&db, "a", "folder_order", "folder_order").unwrap(), expected);
-        assert_eq!(local(&db, "a", "folder_order", "folder_order").unwrap(), r.payload);
+        assert_eq!(
+            tips(&db, "a", "folder_order", "folder_order").unwrap(),
+            expected
+        );
+        assert_eq!(
+            local(&db, "a", "folder_order", "folder_order").unwrap(),
+            r.payload
+        );
         assert!(ack_proven(&db, "a", 10).unwrap());
         let ack = crate::note_sync::prepare_note_sync_ack(
             &mut db,
@@ -2450,7 +2490,8 @@ pub(crate) mod tests {
                 "folder_order",
                 json!({"ids":["F2","F1"]}),
             );
-            let old_relation = next_event(&db, "folder_membership", "C1", json!({"folder_id":"F2"}));
+            let old_relation =
+                next_event(&db, "folder_membership", "C1", json!({"folder_id":"F2"}));
             if deletion {
                 let removal = next_event(&db, "folder_membership", "C2", json!({"folder_id":null}));
                 assert_eq!(arrival(&mut db, &removal, 9), "applied");
@@ -2492,7 +2533,10 @@ pub(crate) mod tests {
             assert_eq!(arrival(&mut db, &r, 12), "applied");
             if deletion {
                 assert_eq!(arrival(&mut db, &old_relation, 13), "conflict_preserved");
-                assert_eq!(local(&db, "a", "folder_membership", "C1").unwrap(), json!({"folder_id":"F1"}));
+                assert_eq!(
+                    local(&db, "a", "folder_membership", "C1").unwrap(),
+                    json!({"folder_id":"F1"})
+                );
                 assert!(ack_proven(&db, "a", 13).unwrap());
             }
             let raw = frame(&old).unwrap();

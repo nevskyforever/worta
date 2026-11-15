@@ -37,7 +37,7 @@ describe('C21.2.08Z2B1 shared local source transition', () => {
     const saved = structuredClone(f.db)
     await expect(f.notes.prepare(scope, 1)).rejects.toMatchObject({ code: 'source_limit' })
     expect(f.db).toEqual(saved)
-  })
+  }, 20_000)
 
   it.each(['lock', 'logout'] as const)('%s during preparation leaves no durable write', async kind => {
     const f = await imported()

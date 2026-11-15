@@ -79,7 +79,7 @@ describe('progressShare', () => {
     expect(context.arc).toHaveBeenCalledTimes(2)
     expect(context.fillText).toHaveBeenCalledWith('43%', 540, 435)
     expect(context.fillText).toHaveBeenCalledWith('nf', expect.any(Number), 1027)
-    expect(context.fillText).toHaveBeenCalledWith('nfprogress', expect.any(Number), 1026)
+    expect(context.fillText).toHaveBeenCalledWith('worta', expect.any(Number), 1026)
   })
 
   it('starts the browser clipboard write before the PNG is generated', async () => {
@@ -124,7 +124,7 @@ describe('progressShare', () => {
     expect(context.clip).toHaveBeenCalledTimes(1)
     expect(context.drawImage).toHaveBeenCalled()
     expect(context.fillText).toHaveBeenCalledWith('Роман: Глава 3', 370, expect.any(Number))
-    expect(context.fillText).toHaveBeenCalledWith('nfprogress', expect.any(Number), 1025)
+    expect(context.fillText).toHaveBeenCalledWith('worta', expect.any(Number), 1025)
   })
 
   it('uses the native clipboard in the desktop application', async () => {

@@ -10,8 +10,8 @@ SSH_UPLOAD_USER="${SSH_UPLOAD_USER:-nevskyfore}"
 SSH_UPLOAD_DIR="${SSH_UPLOAD_DIR:-nfproject/public_html/app}"
 SSH_UPLOAD_PORT="${SSH_UPLOAD_PORT:-22}"
 SSH_UPLOAD_KEY_PATH="${SSH_UPLOAD_KEY_PATH:-}"
-if [ -z "$SSH_UPLOAD_KEY_PATH" ] && [ -f "$HOME/.ssh/nfprogress_spaceweb" ]; then
-  SSH_UPLOAD_KEY_PATH="$HOME/.ssh/nfprogress_spaceweb"
+if [ -z "$SSH_UPLOAD_KEY_PATH" ] && [ -f "$HOME/.ssh/worta_hosting" ]; then
+  SSH_UPLOAD_KEY_PATH="$HOME/.ssh/worta_hosting"
 fi
 
 if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
@@ -19,7 +19,7 @@ if [ -z "$ARTIFACT_PATH" ] || [ ! -f "$ARTIFACT_PATH" ]; then
   exit 1
 fi
 if [ -z "$SSH_UPLOAD_KEY_PATH" ] || [ ! -f "$SSH_UPLOAD_KEY_PATH" ]; then
-  echo "Не найден SSH-ключ. Задайте SSH_UPLOAD_KEY_PATH или положите ключ в ~/.ssh/nfprogress_spaceweb." >&2
+  echo "Не найден SSH-ключ. Задайте SSH_UPLOAD_KEY_PATH или положите ключ в ~/.ssh/worta_hosting." >&2
   exit 1
 fi
 

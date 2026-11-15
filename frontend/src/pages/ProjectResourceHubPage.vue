@@ -98,7 +98,7 @@ onIonViewWillEnter(loadProjects)
             <div v-else class="resource-tile__placeholder"><IonIcon :icon="icon" aria-hidden="true" /></div>
             <div class="resource-tile__body">
               <h2>{{ project.name }}</h2>
-              <p>{{ project.stages_enabled ? `${t('Источников')}: ${project.stages.length}` : t('Весь проект') }}</p>
+              <p>{{ project.stages_enabled ? `${t(project.name === 'Общий проект' ? 'Источников' : 'Этапов')}: ${project.stages.length}` : t('Весь проект') }}</p>
               <div>
                 <button class="nf-button" type="button" @click="openHere(project)">{{ t('Открыть здесь') }}</button>
                 <button class="nf-button nf-button--secondary" type="button" @click="openSeparate(project)">

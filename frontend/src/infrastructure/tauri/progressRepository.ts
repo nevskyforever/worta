@@ -20,9 +20,11 @@ export class TauriProgressRepository implements ProgressRepository {
 
   remove(input: RemoveProgressInput): Promise<Project> {
     return invoke<Project>('delete_progress', {
-      projectId: input.projectId,
-      entryId: input.entryId,
-      stageId: input.stageId ?? null,
+      command: {
+        projectId: input.projectId,
+        entryId: input.entryId,
+        stageId: input.stageId ?? null,
+      },
     })
   }
 }

@@ -377,11 +377,13 @@ mod tests {
     #[test]
     fn provision_creates_one_atomic_identity_without_touching_notes_or_sync_work() {
         let mut connection = empty_database();
-        connection.execute(
-            "INSERT INTO projects(id,name,infinite,unit,status,payload_json)
+        connection
+            .execute(
+                "INSERT INTO projects(id,name,infinite,unit,status,payload_json)
              VALUES('local-only','Local only',0,'symbols','active','{}')",
-            [],
-        ).unwrap();
+                [],
+            )
+            .unwrap();
         let identity = provision_cloud_identity(&mut connection, USER_ONE).unwrap();
 
         assert_ne!(identity.local_account_id, USER_ONE);
@@ -403,10 +405,36 @@ mod tests {
             ).unwrap(),
             USER_ONE,
         );
-        assert_eq!(connection.query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_outbox", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_inbox", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT status FROM projects WHERE id='local-only'", [], |row| row.get::<_, String>(0)).unwrap(), "active");
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM notes", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_outbox", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_inbox", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT status FROM projects WHERE id='local-only'",
+                    [],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "active"
+        );
     }
 
     #[test]
@@ -416,12 +444,21 @@ mod tests {
             let mut connection = Connection::open(&path).unwrap();
             crate::sqlite::apply_migrations(&connection).unwrap();
             let provisioned = provision_cloud_identity(&mut connection, USER_ONE).unwrap();
-            assert_eq!(provision_cloud_identity(&mut connection, USER_ONE).unwrap(), provisioned);
+            assert_eq!(
+                provision_cloud_identity(&mut connection, USER_ONE).unwrap(),
+                provisioned
+            );
             provisioned
         };
         let mut reopened = Connection::open(&path).unwrap();
-        assert_eq!(read_cloud_identity(&mut reopened, USER_ONE).unwrap(), Some(first.clone()));
-        assert_eq!(provision_cloud_identity(&mut reopened, USER_ONE).unwrap(), first);
+        assert_eq!(
+            read_cloud_identity(&mut reopened, USER_ONE).unwrap(),
+            Some(first.clone())
+        );
+        assert_eq!(
+            provision_cloud_identity(&mut reopened, USER_ONE).unwrap(),
+            first
+        );
         drop(reopened);
         fs::remove_file(path).unwrap();
     }
@@ -441,7 +478,8 @@ mod tests {
                 let mut connection = Connection::open(path).unwrap();
                 connection.busy_timeout(Duration::from_secs(5)).unwrap();
                 barrier.wait();
-                provision_cloud_identity(&mut connection, USER_ONE).map_err(|error| error.to_string())
+                provision_cloud_identity(&mut connection, USER_ONE)
+                    .map_err(|error| error.to_string())
             }));
         }
         barrier.wait();
@@ -449,8 +487,20 @@ mod tests {
         let second = handles.remove(0).join().unwrap().unwrap();
         assert_eq!(first, second);
         let connection = Connection::open(&path).unwrap();
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         drop(connection);
         fs::remove_file(path).unwrap();
     }
@@ -474,40 +524,88 @@ mod tests {
             (DEVICE_ID.to_string(), 7, 3),
         );
         assert!(matches!(
-            ensure_cloud_account_binding(&mut connection, &EnsureCloudAccountBindingCommand {
-                local_account_id: identity.local_account_id.clone(), canonical_user_id: USER_TWO.to_string(),
-            }),
+            ensure_cloud_account_binding(
+                &mut connection,
+                &EnsureCloudAccountBindingCommand {
+                    local_account_id: identity.local_account_id.clone(),
+                    canonical_user_id: USER_TWO.to_string(),
+                }
+            ),
             Err(AccountBindingError::IdentityMismatch)
         ));
-        assert_eq!(read_cloud_identity(&mut connection, USER_ONE).unwrap(), Some(identity));
+        assert_eq!(
+            read_cloud_identity(&mut connection, USER_ONE).unwrap(),
+            Some(identity)
+        );
     }
 
     #[test]
     fn incomplete_bound_state_is_fail_closed_without_repair_or_rebinding() {
         let mut connection = empty_database();
         let identity = provision_cloud_identity(&mut connection, USER_ONE).unwrap();
-        connection.execute_batch("PRAGMA ignore_check_constraints = ON;").unwrap();
-        connection.execute(
-            "UPDATE cloud_sync_state SET device_id='corrupt' WHERE account_id=?1",
-            [&identity.local_account_id],
-        ).unwrap();
-        connection.execute_batch("PRAGMA ignore_check_constraints = OFF;").unwrap();
-        assert!(matches!(read_cloud_identity(&mut connection, USER_ONE), Err(AccountBindingError::CorruptIdentityState)));
-        assert!(matches!(provision_cloud_identity(&mut connection, USER_ONE), Err(AccountBindingError::CorruptIdentityState)));
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
-        assert_eq!(connection.query_row("SELECT device_id FROM cloud_sync_state WHERE account_id=?1", [&identity.local_account_id], |row| row.get::<_, String>(0)).unwrap(), "corrupt");
+        connection
+            .execute_batch("PRAGMA ignore_check_constraints = ON;")
+            .unwrap();
+        connection
+            .execute(
+                "UPDATE cloud_sync_state SET device_id='corrupt' WHERE account_id=?1",
+                [&identity.local_account_id],
+            )
+            .unwrap();
+        connection
+            .execute_batch("PRAGMA ignore_check_constraints = OFF;")
+            .unwrap();
+        assert!(matches!(
+            read_cloud_identity(&mut connection, USER_ONE),
+            Err(AccountBindingError::CorruptIdentityState)
+        ));
+        assert!(matches!(
+            provision_cloud_identity(&mut connection, USER_ONE),
+            Err(AccountBindingError::CorruptIdentityState)
+        ));
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            connection
+                .query_row(
+                    "SELECT device_id FROM cloud_sync_state WHERE account_id=?1",
+                    [&identity.local_account_id],
+                    |row| row.get::<_, String>(0)
+                )
+                .unwrap(),
+            "corrupt"
+        );
     }
 
     #[test]
     fn binding_insert_failure_rolls_back_the_new_identity() {
         let mut connection = empty_database();
-        connection.execute_batch(
-            "CREATE TRIGGER cloud_identity_test_fail_binding
+        connection
+            .execute_batch(
+                "CREATE TRIGGER cloud_identity_test_fail_binding
              BEFORE INSERT ON cloud_account_bindings
              BEGIN SELECT RAISE(ABORT, 'injected binding failure'); END;",
-        ).unwrap();
+            )
+            .unwrap();
         assert!(provision_cloud_identity(&mut connection, USER_ONE).is_err());
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-        assert_eq!(connection.query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_sync_state", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            connection
+                .query_row("SELECT count(*) FROM cloud_account_bindings", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
     }
 }

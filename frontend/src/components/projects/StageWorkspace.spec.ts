@@ -12,6 +12,19 @@ describe('StageWorkspace', () => {
     document.body.innerHTML = ''
   })
 
+  it.each([
+    { name: 'Роман', heading: 'Этапы', add: 'Добавить этап', empty: 'Создать первый этап' },
+    { name: 'Общий проект', heading: 'Источники', add: 'Добавить источник', empty: 'Создать первый источник' },
+  ])('uses project-specific terminology for $name', ({ name, heading, add, empty }) => {
+    const wrapper = mount(StageWorkspace, {
+      props: { project: projectFixture({ name, stages_enabled: true, stages: [] }), busy: false },
+      global: { plugins: [createPinia()], stubs: { IonIcon: true } },
+    })
+    expect(wrapper.get('#stages-heading').text()).toBe(heading)
+    expect(wrapper.text()).toContain(add)
+    expect(wrapper.text()).toContain(empty)
+  })
+
   it('reorders stages through pointer events', async () => {
     const first = projectFixture({ id: 'stage-a', name: 'Первая глава', goal: 10_000 })
     const second = projectFixture({ id: 'stage-b', name: 'Вторая глава', goal: 10_000 })
@@ -100,7 +113,7 @@ describe('StageWorkspace', () => {
       global: { plugins: [createPinia()], stubs: { IonIcon: true } },
     })
 
-    await wrapper.get('button[aria-label="Источники: Черновик"]').trigger('click')
+    await wrapper.get('button[aria-label="Этапы: Черновик"]').trigger('click')
 
     expect(wrapper.emitted('open')?.[0]?.[0]).toEqual(stage)
     expect(wrapper.find('.progress-ring').exists()).toBe(true)
@@ -184,7 +197,7 @@ describe('StageWorkspace', () => {
       global: { plugins: [createPinia()], stubs: { IonIcon: true } },
     })
 
-    expect(wrapper.get('.stage-streak').attributes('aria-label')).toContain('Стрик источника')
+    expect(wrapper.get('.stage-streak').attributes('aria-label')).toContain('Стрик этапа')
     expect(wrapper.get('.stage-streak').attributes('aria-label')).toContain('3 дн.')
   })
 })

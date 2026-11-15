@@ -118,9 +118,7 @@ impl From<StorageError> for RepositoryError {
         match error {
             StorageError::UnsupportedSchema(version) => Self::UnsupportedSchema(version),
             StorageError::CorruptSchema(message) => Self::MigrationConflict(message),
-            StorageError::RemoteApplyAuthorization(message) => {
-                Self::MigrationConflict(message)
-            }
+            StorageError::RemoteApplyAuthorization(message) => Self::MigrationConflict(message),
             StorageError::Database(error) => Self::Database(error),
         }
     }
@@ -1202,7 +1200,9 @@ mod tests {
             ("domain_events", 0),
         ] {
             let count: i64 = connection
-                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| row.get(0))
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
                 .unwrap();
             assert_eq!(count, expected, "cloud-bound delete changed {table}");
         }

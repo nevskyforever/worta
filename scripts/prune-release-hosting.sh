@@ -10,8 +10,8 @@ SSH_UPLOAD_DIR="${SSH_UPLOAD_DIR:-nfproject/public_html/app}"
 SSH_UPLOAD_PORT="${SSH_UPLOAD_PORT:-22}"
 SSH_UPLOAD_KEY_PATH="${SSH_UPLOAD_KEY_PATH:-}"
 SSH_UPLOAD_STRICT_HOST_KEY_CHECKING="${SSH_UPLOAD_STRICT_HOST_KEY_CHECKING:-}"
-if [ -z "$SSH_UPLOAD_KEY_PATH" ] && [ -f "$HOME/.ssh/nfprogress_spaceweb" ]; then
-  SSH_UPLOAD_KEY_PATH="$HOME/.ssh/nfprogress_spaceweb"
+if [ -z "$SSH_UPLOAD_KEY_PATH" ] && [ -f "$HOME/.ssh/worta_hosting" ]; then
+  SSH_UPLOAD_KEY_PATH="$HOME/.ssh/worta_hosting"
 fi
 
 if ! [[ "$KEEP_COUNT" =~ ^[1-9][0-9]*$ ]]; then

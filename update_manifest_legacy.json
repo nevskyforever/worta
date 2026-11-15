@@ -1,10 +1,10 @@
 {
-  "version": "5.3.8",
+  "version": "5.3.10",
   "notes": "Исправлены старые баги, добавлены новые.",
-  "windows_version": "5.3.8",
-  "windows_url": "https://nfproject.ru/app/nfprogress-windows-x86_64-5.3.8-setup.exe",
-  "macos_arm_version": "5.3.8",
-  "macos_arm_url": "https://nfproject.ru/app/nfprogress-mac-arm-5.3.8.zip",
-  "macos_intel_version": "5.3.8",
-  "macos_intel_url": "https://nfproject.ru/app/nfprogress-mac-intel-5.3.8.zip"
+  "windows_version": "5.3.9",
+  "windows_url": "https://nfproject.ru/app/nfprogress-windows-x86_64-5.3.9-setup.exe",
+  "macos_arm_version": "5.3.10",
+  "macos_arm_url": "https://nfproject.ru/app/nfprogress-mac-arm-5.3.10.zip",
+  "macos_intel_version": "5.3.10",
+  "macos_intel_url": "https://nfproject.ru/app/nfprogress-mac-intel-5.3.10.zip"
 }

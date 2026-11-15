@@ -60,6 +60,28 @@ const shop: ShopCatalog = {
 }
 
 describe('InventoryShopPanel', () => {
+  it('shows only owned items, updates after the last item is removed and keeps the shop catalog', async () => {
+    const data = structuredClone(inventory)
+    data.categories[0]!.items[0]!.count = 0
+    data.categories[0]!.items[1]!.count = 2
+    data.categories[0]!.items[2]!.count = 0
+    const catalog: ShopCatalog = { ...shop, categories: structuredClone(data.categories) }
+    const wrapper = mount(InventoryShopPanel, {
+      props: { inventory: data, shop: catalog, busy: false, view: 'inventory', canOpenCredit: false },
+      global: { plugins: [createPinia()] },
+    })
+    expect(wrapper.findAll('.item-card')).toHaveLength(1)
+    expect(wrapper.get('.count-badge').text()).toBe('×2')
+    const depleted = structuredClone(data)
+    depleted.categories[0]!.items[1]!.count = 0
+    await wrapper.setProps({ inventory: depleted })
+    expect(wrapper.findAll('.item-card')).toHaveLength(0)
+    expect(wrapper.get('.empty-copy').text()).toContain('В этой категории пока нет предметов.')
+    await wrapper.setProps({ view: 'shop' })
+    expect(wrapper.findAll('.item-card')).toHaveLength(3)
+    expect(data.categories[0]!.items).toHaveLength(3)
+  })
+
   it('restores and emits the persisted inventory category without changing shop state', async () => {
     const wrapper = mount(InventoryShopPanel, {
       props: {

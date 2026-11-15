@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { documentsApi } from '@/api/documents'
 import { projectsApi } from '@/api/projects'
+import { pickDesktopWordFile } from '@/platform/files'
+import { useNotificationsStore } from '@/stores/notifications'
 import { projectFixture } from '@/test/fixtures'
+import { gameStateFixture } from '@/test/gameFixtures'
 import type { ProjectDocument, TiptapDocument } from '@/types/documents'
 import NFDocumentEditor from './editor/NFDocumentEditor.vue'
 import DocumentEditorView from './DocumentEditorView.vue'
@@ -17,7 +20,11 @@ vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 vi.mock('@/api/projects', () => ({ projectsApi: { get: vi.fn() } }))
-vi.mock('@/platform/runtime', () => ({ currentPlatform: vi.fn(() => 'tauri') }))
+vi.mock('@/platform/files', () => ({ pickDesktopWordFile: vi.fn(), pickDesktopWordSavePath: vi.fn() }))
+vi.mock('@/platform/runtime', () => ({
+  currentPlatform: vi.fn(() => 'tauri'),
+  isDeveloperModeAvailable: vi.fn(() => false),
+}))
 vi.mock('@/services/documentDocx', () => ({
   blobToBase64: vi.fn(),
   exportDocx: vi.fn(async () => new Blob(['copy'])),
@@ -65,13 +72,13 @@ type CustomEditorExpose = {
   setContent: (content: TiptapDocument, emitUpdate?: boolean) => void
 }
 
-function mountEditor(project = projectFixture(), document = documentFixture) {
+function mountEditor(project = projectFixture(), document = documentFixture, stageId?: string) {
   vi.mocked(projectsApi.get).mockResolvedValue(project)
   vi.mocked(documentsApi.get).mockResolvedValue(document)
   vi.mocked(documentsApi.save).mockResolvedValue(document)
   vi.mocked(documentsApi.writeDocxContent).mockResolvedValue(document)
   return mount(DocumentEditorView, {
-    props: { scope: { projectId: 'project-id' }, title: 'Текст' },
+    props: { scope: { projectId: 'project-id', ...(stageId ? { stageId } : {}) }, title: 'Текст' },
     global: { plugins: [createPinia()] },
   })
 }
@@ -105,6 +112,23 @@ describe('DocumentEditorView custom editor integration', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('offers Word linking in the header and shows the panel only when the file needs attention', async () => {
+    const wrapper = mountEditor()
+    await flushPromises()
+    expect(wrapper.find('.local-word-binding').exists()).toBe(false)
+
+    const path = '/tmp/draft.docx'
+    vi.mocked(pickDesktopWordFile).mockResolvedValueOnce(path)
+    vi.mocked(documentsApi.link).mockResolvedValueOnce({
+      ...documentFixture, docx_path: path, sync_state: 'external_proposal',
+    })
+    await wrapper.get('button[aria-label="Связать с файлом Word"]').trigger('click')
+    await flushPromises()
+    expect(documentsApi.link).toHaveBeenCalledWith({ projectId: 'project-id' }, path)
+    expect(wrapper.get('.local-word-binding').text()).toContain('Word отличается от WORTA')
+    wrapper.unmount()
   })
 
   it('loads the document and autosaves emitted JSON through useDocumentSync', async () => {
@@ -291,7 +315,7 @@ describe('DocumentEditorView custom editor integration', () => {
     await vi.advanceTimersByTimeAsync(5000)
     await flushPromises()
 
-    const keepButton = wrapper.findAll('[role="alertdialog"] button').find((button) => button.text() === 'Оставить nfprogress')
+    const keepButton = wrapper.findAll('[role="alertdialog"] button').find((button) => button.text() === 'Оставить worta')
     expect(keepButton).toBeDefined()
     await keepButton!.trigger('click')
     await flushPromises()
@@ -340,18 +364,98 @@ describe('DocumentEditorView custom editor integration', () => {
     wrapper.unmount()
   })
 
-  it('keeps document and daily-goal progress in the shared status bar', async () => {
-    const wrapper = mountEditor(projectFixture({
-      total: 0,
+  it('shows the stage plan and updates its progress across editing, recording and reopening', async () => {
+    const stage = projectFixture({
+      id: 'stage-id',
+      parent_project_id: 'project-id',
+      total: 14,
       goal: 100,
-      today_goal: 100,
-      plan_daily_goal: 100,
-      added_today: 40,
-    }))
+      today_goal: 18,
+      plan_daily_goal: 6,
+      added_today: 2,
+    })
+    const project = projectFixture({ today_goal: null, stages: [stage] })
+    const document = { ...documentFixture, stage_id: stage.id }
+    const wrapper = mountEditor(project, document, stage.id)
     await flushPromises()
 
+    const progress = () => wrapper.get('[role="progressbar"]').attributes('aria-valuenow')
     expect(wrapper.get('.document-editor-view__unit-count').text()).toContain('14 / 100')
-    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('54')
+    expect(progress()).toBe('33')
+    const api = wrapper.getComponent(NFDocumentEditor).vm as unknown as CustomEditorExpose
+    const draft = (text: string): TiptapDocument => ({
+      type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }],
+    })
+
+    api.setContent(draft('коротко'), true)
+    await wrapper.vm.$nextTick()
+    expect(progress()).toBe('0')
+
+    const content = draft('Новый текст этапа!')
+    const savedDocument = { ...document, content, symbols: 18 }
+    const recordedProject = {
+      ...project,
+      stages: [{ ...stage, total: 18, added_today: 6, streak_status: 'Start' }],
+    }
+    vi.mocked(documentsApi.save).mockResolvedValue(savedDocument)
+    vi.mocked(documentsApi.recordProgress).mockResolvedValue({
+      changed: true,
+      symbols: 18,
+      document: savedDocument,
+      progress: {
+        project: recordedProject,
+        entry: { id: 'entry', added: 4, added_symbols: 4, added_progress: 4, new_total: 18, new_total_symbols: 18, created_at: '2026-11-12T09:00:00Z' },
+        added_symbols: 4,
+        game: {
+          ok: true,
+          message: null,
+          messages: [],
+          result: {
+            progress_rewards: [
+              { kind: 'writing', coins: 1, experience: 20 },
+              { kind: 'local_streak_started', coins: 50, experience: 0 },
+            ],
+          },
+          state: gameStateFixture(),
+        },
+        warning: null,
+      },
+    })
+    api.setContent(content, true)
+    await vi.advanceTimersByTimeAsync(700)
+    expect(progress()).toBe('100')
+    expect(vi.mocked(documentsApi.save).mock.lastCall?.[0]).toEqual({ projectId: 'project-id', stageId: stage.id })
+    expect(vi.mocked(documentsApi.save).mock.lastCall?.[1]).toMatchObject(content)
+    expect(documentsApi.recordProgress).not.toHaveBeenCalled()
+
+    vi.mocked(projectsApi.get).mockResolvedValue(recordedProject)
+    const record = wrapper.findAll('button').find((button) => button.text().includes('Добавить запись'))!
+    await record.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(documentsApi.recordProgress).mock.lastCall?.[0]).toEqual({ projectId: 'project-id', stageId: stage.id })
+    expect(vi.mocked(documentsApi.recordProgress).mock.lastCall?.[1]).toMatchObject(content)
+    expect(wrapper.get('.document-editor-view__today-goal').text()).toContain('Цель на день выполнена!')
+    expect(progress()).toBe('100')
+    expect(record.attributes('disabled')).toBeDefined()
+    expect(useNotificationsStore().notifications.map(notification => notification.message)).toEqual(
+      expect.arrayContaining([
+        'Вы получили награду 1 монет и 20 оп.',
+        'Получен бонус 50 монет за старт стрика в проекте.',
+      ]),
+    )
+
+    wrapper.unmount()
+    const reopened = mountEditor(recordedProject, savedDocument, stage.id)
+    await flushPromises()
+    expect(reopened.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('100')
+    reopened.unmount()
+  })
+
+  it('uses the cumulative target when previous writing fell short', async () => {
+    const wrapper = mountEditor(projectFixture({ total: 14, added_today: 10, today_goal: 24, plan_daily_goal: 10 }))
+    await flushPromises()
+    expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('50')
+    expect(wrapper.get('.document-editor-view__today-goal').text()).not.toContain('Цель на день выполнена!')
     wrapper.unmount()
   })
 

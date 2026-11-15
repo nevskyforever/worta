@@ -288,8 +288,9 @@ class ProjectDocumentService:
                 self._symbol_count(target.get('content', {})) > 0
                 or target.get('docx_path')
         ):
-            del records[source_key]
-            return True
+            # Both records are recovery-significant. Preserve the original
+            # scope conflict until a caller resolves it explicitly.
+            return False
 
         moved = dict(source)
         moved.update({'project_id': project_id, 'stage_id': stage_id})

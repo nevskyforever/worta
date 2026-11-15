@@ -19,7 +19,7 @@ from nfprogress.core.legacy_decoder import (
     UnsupportedLegacyObject,
     load_legacy_pickle,
 )
-from nfprogress.core.sqlite.connection import open_database
+from nfprogress.core.sqlite.connection import open_database, register_remote_apply_authorization_guard
 from nfprogress.core import recovery
 from nfprogress.migration_helper import (
     HelperError,
@@ -173,6 +173,22 @@ def test_sqlite_transition_profiles_are_detected_and_ambiguous_v6_is_rejected(
     assert inspection.supported is supported
 
 
+def test_prepared_schema_seven_is_recognized_without_weakening_markers(tmp_path):
+    _fixture(tmp_path)
+    assert prepare(tmp_path).outcome == OUTCOME_MIGRATION_VERIFIED
+    with sqlite3.connect(tmp_path / "nfprogress.db") as db:
+        db.execute("UPDATE schema_info SET schema_version=7")
+        db.commit()
+    inspection = inspect_source(tmp_path)
+    assert inspection.source_profile == "I_prepared_v6"
+    assert inspection.supported is True
+    assert verify_prepared_profile(tmp_path) == (True, [])
+    with sqlite3.connect(tmp_path / "nfprogress.db") as db:
+        db.execute("UPDATE storage_ownership SET owner='pickle' WHERE subsystem='notes'")
+        db.commit()
+    assert verify_prepared_profile(tmp_path)[0] is False
+
+
 def test_complete_fixture_migrates_bundle_domains_and_keeps_legacy_sources(tmp_path):
     project, _state = _fixture(tmp_path)
     before = {name: (tmp_path / name).read_bytes() for name in ("data.pkl", "settings.pkl", "gamer.pkl", "documents.json")}
@@ -263,7 +279,7 @@ def test_refresh_test_data_profile_recovers_order_and_prepares_destination(tmp_p
     _fixture(source, documents=True)
     prepare(source)
 
-    with sqlite3.connect(source / "nfprogress.db") as db:
+    with open_database(source) as db:
         db.execute("DELETE FROM project_order")
         db.execute("DELETE FROM stage_order")
         db.execute("DELETE FROM progress_order")
@@ -574,6 +590,7 @@ def test_project_order_recovery_does_not_mutate_healthy_database(tmp_path):
 def test_project_order_recovery_rejects_invalid_stage_or_progress_order(tmp_path):
     _order_fixture(tmp_path)
     with sqlite3.connect(tmp_path / "nfprogress.db") as db:
+        register_remote_apply_authorization_guard(db)
         db.execute(
             "INSERT INTO stages(id,project_id,name,infinite,unit,status,payload_json) "
             "VALUES('stage-1','project-0','Stage',0,'symbols','активен','{}')"

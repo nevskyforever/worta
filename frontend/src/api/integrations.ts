@@ -32,7 +32,7 @@ async function nativeInvoke<T>(command: string, args?: Record<string, unknown>):
 export const integrationsApi = {
   getSync(projectId: string, stageId?: string | null): Promise<SyncSummary> {
     if (currentPlatform() === 'tauri') {
-      return nativeInvoke<SyncSummary>('get_document_sync', { projectId, stageId: stageId ?? null })
+      return nativeInvoke<SyncSummary>('get_document_sync', { command: { projectId, stageId: stageId ?? null } })
     }
     return apiRequest<SyncSummary>(`${projectSyncPath(projectId)}${stageQuery(stageId)}`)
   },
@@ -46,7 +46,13 @@ export const integrationsApi = {
 
   configureSync(projectId: string, payload: SyncConfigure): Promise<SyncSummary> {
     if (currentPlatform() === 'tauri') {
-      return nativeInvoke<SyncSummary>('configure_document_sync', { projectId, ...payload })
+      return nativeInvoke<SyncSummary>('configure_document_sync', { command: {
+        projectId,
+        stageId: payload.stage_id ?? null,
+        type: payload.type,
+        path: payload.path,
+        itemId: payload.item_id ?? null,
+      } })
     }
     return apiRequest<SyncSummary>(projectSyncPath(projectId), {
       method: 'PUT',
@@ -56,7 +62,7 @@ export const integrationsApi = {
 
   removeSync(projectId: string, stageId?: string | null): Promise<SyncSummary> {
     if (currentPlatform() === 'tauri') {
-      return nativeInvoke<SyncSummary>('remove_document_sync', { projectId, stageId: stageId ?? null })
+      return nativeInvoke<SyncSummary>('remove_document_sync', { command: { projectId, stageId: stageId ?? null } })
     }
     return apiRequest<SyncSummary>(`${projectSyncPath(projectId)}${stageQuery(stageId)}`, {
       method: 'DELETE',
@@ -97,7 +103,7 @@ export const integrationsApi = {
 
   inspectScrivener(path: string): Promise<ScrivenerItem[]> {
     if (currentPlatform() === 'tauri') {
-      return nativeInvoke<ScrivenerItem[]>('inspect_scrivener', { path })
+      return nativeInvoke<ScrivenerItem[]>('inspect_scrivener', { command: { path } })
     }
     const params = new URLSearchParams({ path })
     return apiRequest<ScrivenerItem[]>(`/api/integrations/scrivener/items?${params.toString()}`)

@@ -18,6 +18,13 @@ describe('native Game repository adapter', () => {
     vi.mocked(invoke).mockResolvedValue({})
   })
 
+  it.each(['sellItem', 'useItem'] as const)('wraps %s inventory arguments', async (method) => {
+    await gameApi[method]({ category: 'Предметы', item_id: 'Лотерейный билет', count: 1 })
+    expect(invoke).toHaveBeenLastCalledWith(method === 'sellItem' ? 'game_sell_item' : 'game_use_item', {
+      payload: { category: 'Предметы', itemId: 'Лотерейный билет', count: 1 },
+    })
+  })
+
   it('reads and mutates Game through typed Tauri commands without HTTP', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
 
@@ -27,9 +34,7 @@ describe('native Game repository adapter', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(invoke).toHaveBeenNthCalledWith(1, 'game_state', undefined)
     expect(invoke).toHaveBeenNthCalledWith(2, 'game_buy_item', {
-      category: 'Предметы',
-      itemId: 'Лотерейный билет',
-      count: 1,
+      payload: { category: 'Предметы', itemId: 'Лотерейный билет', count: 1 },
     })
     fetchSpy.mockRestore()
   })

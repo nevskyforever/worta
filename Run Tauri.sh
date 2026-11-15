@@ -74,6 +74,11 @@ case "$TARGET" in
     ;;
 esac
 
+# Serialize users of the shared target through the maintenance runner.
+if [ -z "${CARGO_TARGET_DIR:-}" ]; then
+  exec python3 "$ROOT_DIR/scripts/maintenance/build_cache.py" run --target "$TARGET" -- bash "$ROOT_DIR/Run Tauri.sh" "$@"
+fi
+
 LEGACY_TAURI_TARGET_DIR="$TAURI_DIR/target"
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
   case "$CARGO_TARGET_DIR" in
@@ -138,7 +143,9 @@ if [ "$MODE" != "--check" ] && lsof -nP -iTCP:5173 -sTCP:LISTEN >/dev/null 2>&1;
 fi
 
 if [ "$MODE" != "--check" ]; then
-  clean_oversized_cargo_target "$TAURI_TARGET_DIR"
+  if [ "${WORTA_MANAGED_CACHE:-0}" != "1" ]; then
+    clean_oversized_cargo_target "$TAURI_TARGET_DIR"
+  fi
   if [ "$TAURI_TARGET_DIR" != "$LEGACY_TAURI_TARGET_DIR" ]; then
     clean_oversized_cargo_target "$LEGACY_TAURI_TARGET_DIR"
   fi

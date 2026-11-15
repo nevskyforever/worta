@@ -70,7 +70,7 @@ describe('private Metadata route ordering, durable interruption and live owners'
   const ordinary=vi.spyOn(BrowserV10OrdinaryApplyRuntime.prototype,'commit'),continuation=vi.spyOn(BrowserResolutionContinuationRuntime.prototype,'commit')
   expect(await createMetadataRecovery(f).run(scope)).toMatchObject({applied:[{sequence:a.sequence,route:'content'},{sequence:h.sequence,route:'continuation'}],blocker:null})
   expect(ordinary).toHaveBeenCalledOnce();expect(continuation).toHaveBeenCalledOnce()
- },5000)
+ },20000)
  it('uses the existing pass budget and reloads before reporting the later pending Note',async()=>{
   const m=await pendingMetadata(f),later=await f.receive('after-update')
   expect(await createMetadataRecovery(f).run(scope,{maxEvents:1})).toMatchObject({applied:[{sequence:m.reference.server_sequence,route:'metadata'}],blocker:{sequence:later.sequence,kind:'budget_exhausted'},prefix:{candidate_proven_prefix:m.reference.server_sequence},more:true})

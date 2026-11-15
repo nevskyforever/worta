@@ -2645,7 +2645,7 @@ class Gamer:
             'available_skill_points': 0,
             'skill_points_awarded_for_level': 1,
             'last_health_recovery_at': get_effective_now(),
-            'items': {'Предметы': {},'Зелья': {},'Награды': {}},
+            'items': {'Предметы': {},'Зелья': {},'Награды': {},'Парфюм': {}},
             'custom_awards': [],
             'custom_awards_inventory': {},
             'notifications': {'new': [], 'read': []},
@@ -2751,7 +2751,9 @@ class Gamer:
 
         # Задаем структуру инвентаря
         if self.items == {}:
-            self.items = {'Предметы': {},'Зелья': {},'Награды': {}}
+            self.items = {'Предметы': {},'Зелья': {},'Награды': {},'Парфюм': {}}
+        for _category in ('Предметы', 'Зелья', 'Награды', 'Парфюм'):
+            self.items.setdefault(_category, {})
         migrated_awards = self.migrate_legacy_award_names()
         migrated_inventory = self.normalize_inventory_item_names()
         migrated_buff_names = self.normalize_buff_names()

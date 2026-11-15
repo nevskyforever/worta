@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router'
-import { currentPlatform } from '@/platform/runtime'
 import { adminSession } from '@/api/admin'
+import { currentPlatform } from '@/platform/runtime'
+import { desktopCloudEnabled } from '@/platform/desktopCloud'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -91,6 +92,7 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (currentPlatform() === 'tauri' && !desktopCloudEnabled() && (to.meta.admin || to.meta.standalone)) return '/projects'
   if (to.name === 'admin-login' && adminSession.active()) return { name: 'admin' }
   if (to.meta.requiresAdmin && !adminSession.active()) return { name: 'admin-login' }
   if (currentPlatform() === 'web' && !to.meta.admin && !to.meta.standalone) return { name: 'web-login' }
@@ -106,8 +108,7 @@ router.beforeEach(async (to) => {
 
 router.afterEach((route) => {
   const pageTitle = typeof route.meta.title === 'string' ? route.meta.title : ''
-  const product = currentPlatform() === 'web' ? 'worta' : 'nfprogress'
-  document.title = pageTitle ? `${pageTitle} · ${product}` : product
+  document.title = pageTitle ? `${pageTitle} · worta` : 'worta'
 })
 
 export default router

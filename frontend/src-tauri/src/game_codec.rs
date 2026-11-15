@@ -222,10 +222,20 @@ pub fn global_freeze_after(before: &Value, writing_day: &str) -> Result<Value> {
 pub fn loss_after(before: &Value, writing_day: &str) -> Result<Value> {
     streak(before)?;
     let history = before["history"].as_array().ok_or("invalid_game_payload")?;
-    let last = history.last().and_then(|v| v["day"].as_str()).and_then(crate::streaks::date_days).ok_or("game_invalid_rule")?;
+    let last = history
+        .last()
+        .and_then(|v| v["day"].as_str())
+        .and_then(crate::streaks::date_days)
+        .ok_or("game_invalid_rule")?;
     let today = crate::streaks::date_days(writing_day).ok_or("invalid_game_payload")?;
-    if before["enabled"] != true || last + 2 > today { return Err("game_invalid_rule".into()); }
-    if before["lost_day"].as_str().and_then(crate::streaks::date_days).is_some_and(|d| d >= last) {
+    if before["enabled"] != true || last + 2 > today {
+        return Err("game_invalid_rule".into());
+    }
+    if before["lost_day"]
+        .as_str()
+        .and_then(crate::streaks::date_days)
+        .is_some_and(|d| d >= last)
+    {
         return Err("game_invalid_rule".into());
     }
     let mut after = before.clone();
@@ -233,7 +243,10 @@ pub fn loss_after(before: &Value, writing_day: &str) -> Result<Value> {
     after["lost_day"] = json!(crate::streaks::date_from_days(last + 2));
     after["lost_length"] = json!(history.len());
     after["freezes"] = json!(0);
-    after["maximum"] = json!(before["maximum"].as_u64().unwrap_or(0).max(history.len() as u64));
+    after["maximum"] = json!(before["maximum"]
+        .as_u64()
+        .unwrap_or(0)
+        .max(history.len() as u64));
     Ok(after)
 }
 pub fn validate(e: &Value) -> Result<()> {
@@ -263,7 +276,11 @@ pub fn validate(e: &Value) -> Result<()> {
         keys.push("entity_type");
     }
     exact(h, &keys)?;
-    if !(e["version"] == 1 || e["version"] == 2 && !project && e["action"]["kind"] == "global_streak" && h["rule"] == "native-game-v1")
+    if !(e["version"] == 1
+        || e["version"] == 2
+            && !project
+            && e["action"]["kind"] == "global_streak"
+            && h["rule"] == "native-game-v1")
         || !uuid(&h["account_id"])
         || !uuid(&h["device_id"])
         || !uuid(&h["event_id"])
@@ -446,9 +463,18 @@ pub fn validate(e: &Value) -> Result<()> {
             }
             heads(&a[refs], e["version"] != 2)?;
             if e["version"] == 2 {
-                if a[refs] != json!([]) || a["reward"] != json!({"coins":"0.000000","experience":"0.000000"}) { return bad(); }
-                let expected = loss_after(&a["before"], a["writing_day"].as_str().ok_or("invalid_game_payload")?)?;
-                if a["after"] != expected { return bad(); }
+                if a[refs] != json!([])
+                    || a["reward"] != json!({"coins":"0.000000","experience":"0.000000"})
+                {
+                    return bad();
+                }
+                let expected = loss_after(
+                    &a["before"],
+                    a["writing_day"].as_str().ok_or("invalid_game_payload")?,
+                )?;
+                if a["after"] != expected {
+                    return bad();
+                }
             }
             streak(&a["before"])?;
             streak(&a["after"])?;
@@ -584,10 +610,22 @@ pub fn frame(e: &Value) -> Result<Vec<u8>> {
 }
 pub fn unframe(f: &[u8], project: bool) -> Result<Value> {
     let normalized;
-    let f = if f.len()>=20 && f[11]!=0 && [if project {12} else {13}].contains(&f[9]) && [1].contains(&f[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(f,&[if project {12} else {13}],&[1],MAX_FRAME_BYTES-20).map_err(str::to_string)?;
+    let f = if f.len() >= 20
+        && f[11] != 0
+        && [if project { 12 } else { 13 }].contains(&f[9])
+        && [1].contains(&f[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            f,
+            &[if project { 12 } else { 13 }],
+            &[1],
+            MAX_FRAME_BYTES - 20,
+        )
+        .map_err(str::to_string)?;
         normalized.as_slice()
-    } else {f};
+    } else {
+        f
+    };
 
     if f.len() > MAX_FRAME_BYTES {
         return Err("game_resource_limit".into());

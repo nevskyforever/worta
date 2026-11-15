@@ -167,8 +167,11 @@ pub(crate) fn new_event_id() -> Result<String, MetadataError> {
 }
 fn validate_metadata(value: &Value) -> Result<(), MetadataError> {
     let o = value.as_object().ok_or(MetadataError::Invalid)?;
-    let mut keys=FIELDS.to_vec();
-    if o.contains_key("cover_reference") {keys.push("cover_reference");crate::project_cover_sync::validate_reference(&o["cover_reference"])?;}
+    let mut keys = FIELDS.to_vec();
+    if o.contains_key("cover_reference") {
+        keys.push("cover_reference");
+        crate::project_cover_sync::validate_reference(&o["cover_reference"])?;
+    }
     if !exact(o, &keys) {
         return Err(MetadataError::Invalid);
     }
@@ -209,11 +212,11 @@ fn validate_metadata(value: &Value) -> Result<(), MetadataError> {
     Ok(())
 }
 
-pub(crate) fn normalize_metadata_numbers(mut metadata:Value)->Value {
-    for key in ["goal","personal_goal"] {
-        if let Some(value)=metadata[key].as_f64() {
-            if value.fract()==0.0 && value>=0.0 && value<=MAX_REVISION as f64 {
-                metadata[key]=json!(value as i64);
+pub(crate) fn normalize_metadata_numbers(mut metadata: Value) -> Value {
+    for key in ["goal", "personal_goal"] {
+        if let Some(value) = metadata[key].as_f64() {
+            if value.fract() == 0.0 && value >= 0.0 && value <= MAX_REVISION as f64 {
+                metadata[key] = json!(value as i64);
             }
         }
     }
@@ -252,7 +255,7 @@ pub(crate) fn capture_legacy_candidate(
         "stages_enabled":original.get("stages_enabled").cloned().unwrap_or(json!(false)),
         "combine_stage_mindmaps":original.get("combine_stage_mindmaps").cloned().unwrap_or(json!(false))
     });
-    let snapshot=normalize_metadata_numbers(snapshot);
+    let snapshot = normalize_metadata_numbers(snapshot);
     validate_metadata(&snapshot)?;
     let extensions: Option<String> = tx.query_row(
         "SELECT payload_json FROM project_extensions WHERE entity_type='project' AND entity_id=?1",
@@ -337,7 +340,9 @@ pub(crate) fn prepare_metadata_genesis(
     let known_history: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM cloud_sync_metadata_tips WHERE account_id=?1 AND project_id=?2)",
         params![account,project],|r|r.get(0))?;
-    if known_history { return Err(MetadataError::Conflict); }
+    if known_history {
+        return Err(MetadataError::Conflict);
+    }
     let active: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM cloud_sync_metadata_candidates WHERE account_id=?1 AND project_id=?2 AND state='publishing')",
         params![account,project], |r|r.get(0))?;
@@ -386,14 +391,16 @@ pub(crate) fn preserve_authenticated_event_checked(
     let value = decode_metadata_event(bytes, project)?;
     let root = value.as_object().ok_or(MetadataError::Invalid)?;
     let header = root["header"].as_object().ok_or(MetadataError::Invalid)?;
-    let event_id = str_field(header,"event_id")?;
-    let device = str_field(header,"device_id")?;
-    let bootstrap = str_field(header,"bootstrap_id")?;
-    let operation = str_field(header,"operation")?;
-    let revision = positive(header,"revision")?;
-    let generation = positive(header,"generation")?;
-    let updated = str_field(header,"updated_at")?;
-    let parents = header["parent_event_ids"].as_array().ok_or(MetadataError::Invalid)?;
+    let event_id = str_field(header, "event_id")?;
+    let device = str_field(header, "device_id")?;
+    let bootstrap = str_field(header, "bootstrap_id")?;
+    let operation = str_field(header, "operation")?;
+    let revision = positive(header, "revision")?;
+    let generation = positive(header, "generation")?;
+    let updated = str_field(header, "updated_at")?;
+    let parents = header["parent_event_ids"]
+        .as_array()
+        .ok_or(MetadataError::Invalid)?;
     let deleted = root["deleted_at"].as_str();
     let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let bound: Option<String> = tx.query_row("SELECT a.canonical_user_id FROM cloud_sync_project_bindings b JOIN cloud_account_bindings a ON a.local_account_id=b.account_id JOIN cloud_sync_project_bootstraps boot ON boot.project_id=b.project_id AND boot.account_id=b.account_id WHERE b.account_id=?1 AND b.project_id=?2 AND boot.bootstrap_id=?3",
@@ -401,7 +408,9 @@ pub(crate) fn preserve_authenticated_event_checked(
     if bound.as_deref() != header["account_id"].as_str() {
         return Err(MetadataError::Scope);
     }
-    if let Some(reference)=root["metadata"].get("cover_reference") {crate::project_cover_sync::require_material(&tx,account,project,reference)?;}
+    if let Some(reference) = root["metadata"].get("cover_reference") {
+        crate::project_cover_sync::require_material(&tx, account, project, reference)?;
+    }
     if let Some((stored, outcome)) = tx.query_row(
         "SELECT canonical_payload,outcome FROM cloud_sync_metadata_apply_ledger WHERE account_id=?1 AND event_id=?2",
         params![account,event_id], |r| Ok((r.get::<_,Vec<u8>>(0)?, r.get::<_,String>(1)?))
@@ -455,7 +464,10 @@ pub(crate) fn preserve_authenticated_event_checked(
     let Some((crypto_version, aad_version, nonce, ciphertext)) = object else {
         return Err(MetadataError::Scope);
     };
-    if crypto_version != 1 || aad_version != 1 || expected_object.is_some_and(|(n, c)| n != nonce || c != ciphertext) {
+    if crypto_version != 1
+        || aad_version != 1
+        || expected_object.is_some_and(|(n, c)| n != nonce || c != ciphertext)
+    {
         return Err(MetadataError::Scope);
     }
     let local_event: Option<(Option<String>,String,String,String,String,i64,i64,String,String)> = tx.query_row(
@@ -464,11 +476,28 @@ pub(crate) fn preserve_authenticated_event_checked(
     let existing_orphan = local_event
         .as_ref()
         .is_some_and(|(candidate, _, state, ..)| candidate.is_none() && state == "orphan");
-    let self_echo = if let Some((candidate_id, stored_payload, state, stored_operation, stored_parents,
-        stored_revision, stored_generation, stored_bootstrap, stored_device)) = &local_event {
-        if stored_operation!=operation || stored_parents!=&serde_json::to_string(parents).map_err(|_|MetadataError::Invalid)?
-            || *stored_revision!=revision || *stored_generation!=generation
-            || stored_bootstrap!=bootstrap || stored_device!=device { return Err(MetadataError::Conflict); }
+    let self_echo = if let Some((
+        candidate_id,
+        stored_payload,
+        state,
+        stored_operation,
+        stored_parents,
+        stored_revision,
+        stored_generation,
+        stored_bootstrap,
+        stored_device,
+    )) = &local_event
+    {
+        if stored_operation != operation
+            || stored_parents
+                != &serde_json::to_string(parents).map_err(|_| MetadataError::Invalid)?
+            || *stored_revision != revision
+            || *stored_generation != generation
+            || stored_bootstrap != bootstrap
+            || stored_device != device
+        {
+            return Err(MetadataError::Conflict);
+        }
         if existing_orphan {
             if stored_payload
                 != &if operation == "delete" {
@@ -497,7 +526,9 @@ pub(crate) fn preserve_authenticated_event_checked(
                 let sealed: bool = tx.query_row(
                     "SELECT EXISTS(SELECT 1 FROM cloud_sync_outbox WHERE account_id=?1 AND event_id=?2 AND device_id=?3 AND project_id=?4 AND entity_type='project_metadata' AND lifecycle='sealed')",
                     params![account,event_id,device,project], |r|r.get(0))?;
-                if !sealed { return Err(MetadataError::Scope); }
+                if !sealed {
+                    return Err(MetadataError::Scope);
+                }
                 // The authenticated server echo is the lost upload response.
                 tx.execute("INSERT INTO cloud_sync_upload_receipts(account_id,event_id,device_id,server_sequence,duplicate,accepted_at) VALUES(?1,?2,?3,?4,0,?5)",
                     params![account,event_id,device,server_sequence,now])?;
@@ -627,56 +658,87 @@ pub(crate) fn preserve_authenticated_event_checked(
     tx.execute("INSERT INTO cloud_sync_metadata_apply_ledger(account_id,event_id,project_id,outcome,canonical_payload,applied_at) VALUES(?1,?2,?3,?4,?5,?6)",params![account,event_id,project,outcome,bytes,now])?;
     tx.execute("UPDATE cloud_sync_inbox SET state=?1,applied_at=CASE WHEN ?1='applied' THEN ?2 ELSE applied_at END WHERE account_id=?3 AND event_id=?4 AND state IN ('received','orphan')",
         params![if outcome=="applied" {"applied"} else {"conflict"},now,account,event_id])?;
-    if outcome=="applied" && matches!(operation,"resolution"|"genesis_resolution") {
+    if outcome == "applied" && matches!(operation, "resolution" | "genesis_resolution") {
         tx.execute("UPDATE cloud_sync_metadata_candidates SET state='resolved' WHERE account_id=?1 AND project_id=?2 AND state IN ('conflict','published')",params![account,project])?;
     }
     if self_echo {
         tx.execute("UPDATE cloud_sync_metadata_decisions SET state=?1 WHERE account_id=?2 AND event_id=?3 AND state='pending'",
             params![if outcome=="applied" {"applied"} else {"conflict"},account,event_id])?;
     }
-    if outcome=="applied" && operation!="delete" && !self_echo {
+    if outcome == "applied" && operation != "delete" && !self_echo {
         let proof:Option<(String,String)>=tx.query_row(
             "SELECT head_event_id,portable_json FROM cloud_sync_metadata_reconciliation WHERE account_id=?1 AND project_id=?2",
             params![account,project],|r|Ok((r.get(0)?,r.get(1)?)),
         ).optional()?;
-        if let Some((head,raw))=proof {
-            let previous:Value=serde_json::from_str(&raw).map_err(|_|MetadataError::Invalid)?;
+        if let Some((head, raw)) = proof {
+            let previous: Value = serde_json::from_str(&raw).map_err(|_| MetadataError::Invalid)?;
             // A verified full resolution covers prior reconciled ancestors and
             // authenticated local edits on its branches. Untracked local edits stay visible.
-            let resolution = matches!(operation,"resolution"|"genesis_resolution");
-            let covered:bool=if resolution { tx.query_row("WITH RECURSIVE ancestors(id) AS (SELECT value FROM json_each(?3) UNION SELECT parent.value FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.project_id=?2 AND e.event_id=ancestors.id JOIN json_each(e.parent_event_ids_json) parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?4)",params![account,project,parents_json,head],|r|r.get(0))? } else { parents.iter().any(|parent|parent.as_str()==Some(&head)) };
-            let visible=visible_metadata(&tx,project)?;
-            let covered_local_change:bool=if resolution { tx.query_row("WITH RECURSIVE ancestors(id) AS (SELECT value FROM json_each(?3) UNION SELECT parent.value FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.project_id=?2 AND e.event_id=ancestors.id JOIN json_each(e.parent_event_ids_json) parent) SELECT EXISTS(SELECT 1 FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.event_id=ancestors.id JOIN cloud_sync_metadata_decisions d ON d.account_id=e.account_id AND d.event_id=e.event_id WHERE e.project_id=?2 AND e.payload_json=?4 AND e.state IN ('applied','conflict_preserved'))",params![account,project,parents_json,visible.to_string()],|r|r.get(0))? } else { false };
-            if covered && (visible==previous || covered_local_change) {
-                write_visible_metadata(&tx,project,&root["metadata"],now)?;
+            let resolution = matches!(operation, "resolution" | "genesis_resolution");
+            let covered: bool = if resolution {
+                tx.query_row("WITH RECURSIVE ancestors(id) AS (SELECT value FROM json_each(?3) UNION SELECT parent.value FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.project_id=?2 AND e.event_id=ancestors.id JOIN json_each(e.parent_event_ids_json) parent) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?4)",params![account,project,parents_json,head],|r|r.get(0))?
+            } else {
+                parents.iter().any(|parent| parent.as_str() == Some(&head))
+            };
+            let visible = visible_metadata(&tx, project)?;
+            let covered_local_change: bool = if resolution {
+                tx.query_row("WITH RECURSIVE ancestors(id) AS (SELECT value FROM json_each(?3) UNION SELECT parent.value FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.project_id=?2 AND e.event_id=ancestors.id JOIN json_each(e.parent_event_ids_json) parent) SELECT EXISTS(SELECT 1 FROM ancestors JOIN cloud_sync_metadata_events e ON e.account_id=?1 AND e.event_id=ancestors.id JOIN cloud_sync_metadata_decisions d ON d.account_id=e.account_id AND d.event_id=e.event_id WHERE e.project_id=?2 AND e.payload_json=?4 AND e.state IN ('applied','conflict_preserved'))",params![account,project,parents_json,visible.to_string()],|r|r.get(0))?
+            } else {
+                false
+            };
+            if covered && (visible == previous || covered_local_change) {
+                write_visible_metadata(&tx, project, &root["metadata"], now)?;
             }
         }
     }
-    if outcome=="applied"
-        && visible_metadata(&tx,project).ok().as_ref()==Some(&root["metadata"]) {
+    if outcome == "applied"
+        && visible_metadata(&tx, project).ok().as_ref() == Some(&root["metadata"])
+    {
         tx.execute("INSERT INTO cloud_sync_metadata_reconciliation(account_id,project_id,head_event_id,portable_json,reconciled_at) VALUES(?1,?2,?3,?4,?5) \
             ON CONFLICT(account_id,project_id) DO UPDATE SET head_event_id=excluded.head_event_id,portable_json=excluded.portable_json,reconciled_at=excluded.reconciled_at",
             params![account,project,event_id,payload_json,now])?;
     }
-    if outcome=="applied" && root["metadata"].get("cover_reference").is_some() {
+    if outcome == "applied" && root["metadata"].get("cover_reference").is_some() {
         // Existing full-record conflict handling decides the winner; project the verified winner only.
-        if visible_metadata(&tx,project).ok().as_ref()==Some(&root["metadata"]) {write_visible_metadata(&tx,project,&root["metadata"],now)?;}
-        tx.execute("DELETE FROM cloud_cover_blockers WHERE account_id=?1 AND event_id=?2",params![account,event_id])?;
+        if visible_metadata(&tx, project).ok().as_ref() == Some(&root["metadata"]) {
+            write_visible_metadata(&tx, project, &root["metadata"], now)?;
+        }
+        tx.execute(
+            "DELETE FROM cloud_cover_blockers WHERE account_id=?1 AND event_id=?2",
+            params![account, event_id],
+        )?;
         tx.execute("UPDATE cloud_cover_intents SET state='active',blocker=NULL WHERE account_id=?1 AND event_id=?2",params![account,event_id])?;
-        if matches!(operation,"resolution"|"genesis_resolution") {tx.execute("UPDATE cloud_cover_intents SET state='active',blocker=NULL WHERE account_id=?1 AND project_id=?2 AND state='metadata_pending'",params![account,project])?;}
+        if matches!(operation, "resolution" | "genesis_resolution") {
+            tx.execute("UPDATE cloud_cover_intents SET state='active',blocker=NULL WHERE account_id=?1 AND project_id=?2 AND state='metadata_pending'",params![account,project])?;
+        }
     }
-    if outcome=="conflict_preserved" {tx.execute("UPDATE cloud_cover_intents SET blocker='cover_conflict' WHERE account_id=?1 AND event_id=?2",params![account,event_id])?;}
-    tx.execute("DELETE FROM cloud_cover_blockers WHERE account_id=?1 AND event_id=?2",params![account,event_id])?;
+    if outcome == "conflict_preserved" {
+        tx.execute("UPDATE cloud_cover_intents SET blocker='cover_conflict' WHERE account_id=?1 AND event_id=?2",params![account,event_id])?;
+    }
+    tx.execute(
+        "DELETE FROM cloud_cover_blockers WHERE account_id=?1 AND event_id=?2",
+        params![account, event_id],
+    )?;
     invalidate_stale_decisions(&tx, account, project, now)?;
     tx.commit()?;
     Ok(outcome)
 }
 
-pub(crate) fn assert_runtime_scope(connection: &Connection, account: &str, user: &str, device: &str) -> Result<(), MetadataError> {
+pub(crate) fn assert_runtime_scope(
+    connection: &Connection,
+    account: &str,
+    user: &str,
+    device: &str,
+) -> Result<(), MetadataError> {
     let stored: Option<(String,String)> = connection.query_row(
         "SELECT binding.canonical_user_id,state.device_id FROM cloud_account_bindings binding JOIN cloud_sync_state state ON state.account_id=binding.local_account_id WHERE binding.local_account_id=?1",
         [account], |r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-    if stored.as_ref().is_none_or(|(u,d)| u != user || d != device) || !uuid(user) || !uuid(device) {
+    if stored
+        .as_ref()
+        .is_none_or(|(u, d)| u != user || d != device)
+        || !uuid(user)
+        || !uuid(device)
+    {
         return Err(MetadataError::Scope);
     }
     Ok(())
@@ -685,9 +747,9 @@ pub(crate) fn assert_runtime_scope(connection: &Connection, account: &str, user:
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MetadataScope {
-    pub account_id:String,
-    pub canonical_user_id:String,
-    pub device_id:String,
+    pub account_id: String,
+    pub canonical_user_id: String,
+    pub device_id: String,
 }
 
 #[derive(Serialize)]
@@ -699,30 +761,80 @@ pub(crate) struct MetadataMigrationStatus {
     pub genesis_tips: i64,
 }
 
-pub(crate) fn migration_status(connection: &Connection, account: &str, project: &str) -> Result<MetadataMigrationStatus, MetadataError> {
+pub(crate) fn migration_status(
+    connection: &Connection,
+    account: &str,
+    project: &str,
+) -> Result<MetadataMigrationStatus, MetadataError> {
     let candidate: Option<(String,String,String)> = connection.query_row(
         "SELECT candidate_id,state,unsupported_json FROM cloud_sync_metadata_candidates WHERE account_id=?1 AND project_id=?2 ORDER BY generation DESC LIMIT 1",
         params![account,project], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
-    let tips: i64 = connection.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_tips WHERE account_id=?1 AND project_id=?2",params![account,project],|r|r.get(0))?;
-    let event: Option<(String,String)> = if let Some((candidate_id,_,_))=&candidate {
+    let tips: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM cloud_sync_metadata_tips WHERE account_id=?1 AND project_id=?2",
+        params![account, project],
+        |r| r.get(0),
+    )?;
+    let event: Option<(String, String)> = if let Some((candidate_id, _, _)) = &candidate {
         connection.query_row("SELECT event_id,state FROM cloud_sync_metadata_events WHERE account_id=?1 AND candidate_id=?2",params![account,candidate_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?
-    } else { None };
-    let blockers: Value = candidate.as_ref().map(|(_,_,raw)|serde_json::from_str(raw)).transpose().map_err(|_|MetadataError::Invalid)?.unwrap_or_else(||json!([]));
+    } else {
+        None
+    };
+    let blockers: Value = candidate
+        .as_ref()
+        .map(|(_, _, raw)| serde_json::from_str(raw))
+        .transpose()
+        .map_err(|_| MetadataError::Invalid)?
+        .unwrap_or_else(|| json!([]));
     let pending_inbox:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_inbox WHERE account_id=?1 AND project_id=?2 AND entity_type='project_metadata' AND state IN ('received','orphan'))",params![account,project],|r|r.get(0))?;
-    let state = if tips > 1 || tips > 0 && candidate.as_ref().is_some_and(|(_,state,_)|state=="candidate")
-        || candidate.as_ref().is_some_and(|(_,state,_)|state=="conflict") { "genesis_conflict" }
-        else if tips == 1 && candidate.is_none() || event.as_ref().is_some_and(|(_,state)|state=="applied") { "authenticated_metadata_active" }
-        else if blockers.as_array().is_some_and(|a|a.iter().any(|v|v=="bootstrap_lineage_missing")) { "blocked_missing_bootstrap" }
-        else if blockers.as_array().is_some_and(|a|!a.is_empty()) { "blocked_unsupported" }
-        else if pending_inbox { "apply_blocked" }
-        else if event.as_ref().is_some_and(|(_,state)|state=="accepted") { "awaiting_remote_confirmation" }
-        else if event.as_ref().is_some_and(|(_,state)|matches!(state.as_str(),"unsealed"|"sealed")) { "genesis_pending" }
-        else if candidate.is_some() { "legacy_candidate_present" }
-        else { "legacy_local" };
-    Ok(MetadataMigrationStatus { state:state.into(), candidate_id:candidate.as_ref().map(|(id,_,_)|id.clone()),event_id:event.map(|(id,_)|id),blockers,genesis_tips:tips })
+    let state = if tips > 1
+        || tips > 0
+            && candidate
+                .as_ref()
+                .is_some_and(|(_, state, _)| state == "candidate")
+        || candidate
+            .as_ref()
+            .is_some_and(|(_, state, _)| state == "conflict")
+    {
+        "genesis_conflict"
+    } else if tips == 1 && candidate.is_none()
+        || event.as_ref().is_some_and(|(_, state)| state == "applied")
+    {
+        "authenticated_metadata_active"
+    } else if blockers
+        .as_array()
+        .is_some_and(|a| a.iter().any(|v| v == "bootstrap_lineage_missing"))
+    {
+        "blocked_missing_bootstrap"
+    } else if blockers.as_array().is_some_and(|a| !a.is_empty()) {
+        "blocked_unsupported"
+    } else if pending_inbox {
+        "apply_blocked"
+    } else if event.as_ref().is_some_and(|(_, state)| state == "accepted") {
+        "awaiting_remote_confirmation"
+    } else if event
+        .as_ref()
+        .is_some_and(|(_, state)| matches!(state.as_str(), "unsealed" | "sealed"))
+    {
+        "genesis_pending"
+    } else if candidate.is_some() {
+        "legacy_candidate_present"
+    } else {
+        "legacy_local"
+    };
+    Ok(MetadataMigrationStatus {
+        state: state.into(),
+        candidate_id: candidate.as_ref().map(|(id, _, _)| id.clone()),
+        event_id: event.map(|(id, _)| id),
+        blockers,
+        genesis_tips: tips,
+    })
 }
 
-pub(crate) fn unsealed_genesis(connection: &Connection, account: &str, device: &str) -> Result<Vec<Value>, MetadataError> {
+pub(crate) fn unsealed_genesis(
+    connection: &Connection,
+    account: &str,
+    device: &str,
+) -> Result<Vec<Value>, MetadataError> {
     let mut statement=connection.prepare("SELECT e.event_id,e.project_id,e.bootstrap_id,e.payload_json,o.updated_at,e.operation,e.parent_event_ids_json,e.generation,e.revision FROM cloud_sync_metadata_events e JOIN cloud_sync_outbox o ON o.event_id=e.event_id WHERE e.account_id=?1 AND e.device_id=?2 AND e.state='unsealed' AND o.lifecycle='unsealed' AND NOT EXISTS(SELECT 1 FROM cloud_sync_metadata_invalidated_decisions stale WHERE stale.account_id=e.account_id AND stale.event_id=e.event_id) ORDER BY o.local_ordinal LIMIT 8")?;
     let events: Result<Vec<Value>, MetadataError> = statement.query_map(params![account,device],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,String>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,i64>(7)?,r.get::<_,i64>(8)?)))?
         .map(|row| { let (event,project,bootstrap,payload,updated,operation,parents,generation,revision)=row?;
@@ -734,54 +846,158 @@ pub(crate) fn unsealed_genesis(connection: &Connection, account: &str, device: &
     events
 }
 
-pub(crate) fn commit_sealed_genesis(connection:&mut Connection, account:&str, device:&str, event:&str, nonce:&[u8], ciphertext:&[u8]) -> Result<(),MetadataError> {
-    if nonce.len()!=24 || !(16..=MAX_BYTES+64).contains(&ciphertext.len()) {return Err(MetadataError::Invalid);}
-    let tx=connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+pub(crate) fn commit_sealed_genesis(
+    connection: &mut Connection,
+    account: &str,
+    device: &str,
+    event: &str,
+    nonce: &[u8],
+    ciphertext: &[u8],
+) -> Result<(), MetadataError> {
+    if nonce.len() != 24 || !(16..=MAX_BYTES + 64).contains(&ciphertext.len()) {
+        return Err(MetadataError::Invalid);
+    }
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let stale:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_metadata_invalidated_decisions WHERE account_id=?1 AND event_id=?2)",params![account,event],|r|r.get(0))?;
-    if stale { return Err(MetadataError::Conflict); }
+    if stale {
+        return Err(MetadataError::Conflict);
+    }
     let state:Option<(String,String)>=tx.query_row("SELECT e.state,o.lifecycle FROM cloud_sync_metadata_events e JOIN cloud_sync_outbox o ON o.event_id=e.event_id WHERE e.account_id=?1 AND e.device_id=?2 AND e.event_id=?3 AND o.entity_type='project_metadata'",params![account,device,event],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-    if state.as_ref().is_none_or(|(e,o)|e!="unsealed"||o!="unsealed") {return Err(MetadataError::Scope);}
+    if state
+        .as_ref()
+        .is_none_or(|(e, o)| e != "unsealed" || o != "unsealed")
+    {
+        return Err(MetadataError::Scope);
+    }
     tx.execute("INSERT INTO cloud_sync_event_objects(account_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at) VALUES(?1,?2,1,1,?3,?4,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",params![account,event,nonce,ciphertext])?;
-    tx.execute("UPDATE cloud_sync_metadata_events SET state='sealed' WHERE account_id=?1 AND event_id=?2",params![account,event])?;
-    tx.execute("UPDATE cloud_sync_outbox SET lifecycle='sealed' WHERE account_id=?1 AND event_id=?2",params![account,event])?;
-    tx.commit()?;Ok(())
+    tx.execute(
+        "UPDATE cloud_sync_metadata_events SET state='sealed' WHERE account_id=?1 AND event_id=?2",
+        params![account, event],
+    )?;
+    tx.execute(
+        "UPDATE cloud_sync_outbox SET lifecycle='sealed' WHERE account_id=?1 AND event_id=?2",
+        params![account, event],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 #[derive(Serialize)]
 pub(crate) struct MetadataUploadItem {
-    pub event_id:String,pub project_id:String,pub revision:i64,pub updated_at:String,pub nonce:Vec<u8>,pub ciphertext:Vec<u8>,pub metadata_codec_version:i64,
+    pub event_id: String,
+    pub project_id: String,
+    pub revision: i64,
+    pub updated_at: String,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    pub metadata_codec_version: i64,
 }
-pub(crate) fn sealed_genesis(connection:&Connection, account:&str, device:&str)->Result<Vec<MetadataUploadItem>,MetadataError>{
+pub(crate) fn sealed_genesis(
+    connection: &Connection,
+    account: &str,
+    device: &str,
+) -> Result<Vec<MetadataUploadItem>, MetadataError> {
     let mut statement=connection.prepare("SELECT e.event_id,e.project_id,e.revision,o.updated_at,obj.nonce,obj.ciphertext,CASE WHEN json_type(e.payload_json,'$.cover_reference') IS NULL THEN 1 ELSE 2 END FROM cloud_sync_metadata_events e JOIN cloud_sync_outbox o ON o.event_id=e.event_id JOIN cloud_sync_event_objects obj ON obj.account_id=e.account_id AND obj.event_id=e.event_id WHERE e.account_id=?1 AND e.device_id=?2 AND e.state='sealed' AND o.lifecycle='sealed' AND NOT EXISTS(SELECT 1 FROM cloud_sync_metadata_invalidated_decisions stale WHERE stale.account_id=e.account_id AND stale.event_id=e.event_id) ORDER BY o.local_ordinal LIMIT 8")?;
-    let items=statement.query_map(params![account,device],|r|Ok(MetadataUploadItem{event_id:r.get(0)?,project_id:r.get(1)?,revision:r.get(2)?,updated_at:r.get(3)?,nonce:r.get(4)?,ciphertext:r.get(5)?,metadata_codec_version:r.get(6)?}))?.collect::<Result<Vec<_>,_>>()?;
+    let items = statement
+        .query_map(params![account, device], |r| {
+            Ok(MetadataUploadItem {
+                event_id: r.get(0)?,
+                project_id: r.get(1)?,
+                revision: r.get(2)?,
+                updated_at: r.get(3)?,
+                nonce: r.get(4)?,
+                ciphertext: r.get(5)?,
+                metadata_codec_version: r.get(6)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
 
-pub(crate) fn commit_upload_receipt(connection:&mut Connection,account:&str,device:&str,event:&str,sequence:i64,duplicate:bool,now:&str)->Result<(),MetadataError>{
-    if !(1..=MAX_REVISION).contains(&sequence) || !timestamp(now){return Err(MetadataError::Invalid);}
-    let tx=connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+pub(crate) fn commit_upload_receipt(
+    connection: &mut Connection,
+    account: &str,
+    device: &str,
+    event: &str,
+    sequence: i64,
+    duplicate: bool,
+    now: &str,
+) -> Result<(), MetadataError> {
+    if !(1..=MAX_REVISION).contains(&sequence) || !timestamp(now) {
+        return Err(MetadataError::Invalid);
+    }
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let state:Option<String>=tx.query_row("SELECT lifecycle FROM cloud_sync_outbox WHERE account_id=?1 AND device_id=?2 AND event_id=?3 AND entity_type='project_metadata'",params![account,device,event],|r|r.get(0)).optional()?;
-    if !matches!(state.as_deref(),Some("sealed"|"accepted")){return Err(MetadataError::Scope);}
+    if !matches!(state.as_deref(), Some("sealed" | "accepted")) {
+        return Err(MetadataError::Scope);
+    }
     let existing:Option<i64>=tx.query_row("SELECT server_sequence FROM cloud_sync_upload_receipts WHERE account_id=?1 AND event_id=?2",params![account,event],|r|r.get(0)).optional()?;
-    if let Some(old)=existing {if old!=sequence{return Err(MetadataError::Conflict);}}
-    else {tx.execute("INSERT INTO cloud_sync_upload_receipts(account_id,event_id,device_id,server_sequence,duplicate,accepted_at) VALUES(?1,?2,?3,?4,?5,?6)",params![account,event,device,sequence,i64::from(duplicate),now])?;}
+    if let Some(old) = existing {
+        if old != sequence {
+            return Err(MetadataError::Conflict);
+        }
+    } else {
+        tx.execute("INSERT INTO cloud_sync_upload_receipts(account_id,event_id,device_id,server_sequence,duplicate,accepted_at) VALUES(?1,?2,?3,?4,?5,?6)",params![account,event,device,sequence,i64::from(duplicate),now])?;
+    }
     tx.execute("UPDATE cloud_sync_outbox SET lifecycle='accepted' WHERE account_id=?1 AND event_id=?2 AND lifecycle='sealed'",params![account,event])?;
     tx.execute("UPDATE cloud_sync_metadata_events SET state='accepted',server_sequence=?1 WHERE account_id=?2 AND event_id=?3 AND state='sealed'",params![sequence,account,event])?;
-    tx.commit()?;Ok(())
+    tx.commit()?;
+    Ok(())
 }
 
 #[derive(Serialize)]
 pub(crate) struct MetadataInboxItem {
-    pub event_id:String,pub server_sequence:i64,pub source_device_id:String,pub project_id:String,pub entity_id:String,pub revision:i64,pub updated_at:String,pub deleted_at:Option<String>,pub operation:String,pub crypto_version:i64,pub aad_version:i64,pub nonce:Vec<u8>,pub ciphertext:Vec<u8>,
+    pub event_id: String,
+    pub server_sequence: i64,
+    pub source_device_id: String,
+    pub project_id: String,
+    pub entity_id: String,
+    pub revision: i64,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+    pub operation: String,
+    pub crypto_version: i64,
+    pub aad_version: i64,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
 }
-pub(crate) fn received_metadata(connection:&Connection,account:&str,limit:i64,after:i64)->Result<Vec<MetadataInboxItem>,MetadataError>{
-    if !(1..=32).contains(&limit)||!(0..=MAX_REVISION).contains(&after){return Err(MetadataError::Invalid);}
-    let tx=connection.unchecked_transaction()?;
+pub(crate) fn received_metadata(
+    connection: &Connection,
+    account: &str,
+    limit: i64,
+    after: i64,
+) -> Result<Vec<MetadataInboxItem>, MetadataError> {
+    if !(1..=32).contains(&limit) || !(0..=MAX_REVISION).contains(&after) {
+        return Err(MetadataError::Invalid);
+    }
+    let tx = connection.unchecked_transaction()?;
     let mut statement=tx.prepare("SELECT inbox.event_id,inbox.server_sequence,inbox.device_id,inbox.project_id,inbox.entity_id,inbox.sync_revision,inbox.updated_at,inbox.deleted_at,inbox.operation,obj.crypto_version,obj.aad_version,obj.nonce,obj.ciphertext FROM cloud_sync_inbox inbox JOIN cloud_sync_event_objects obj ON obj.account_id=inbox.account_id AND obj.event_id=inbox.event_id WHERE inbox.account_id=?1 AND inbox.entity_type='project_metadata' AND inbox.state IN ('received','orphan') AND inbox.server_sequence>?3 ORDER BY COALESCE((SELECT ordinal FROM cloud_game_reader_visits v WHERE v.account_id=inbox.account_id AND v.event_id=inbox.event_id),0),inbox.server_sequence LIMIT ?2")?;
-    let mut items=statement.query_map(params![account,limit,after],|r|Ok(MetadataInboxItem{event_id:r.get(0)?,server_sequence:r.get(1)?,source_device_id:r.get(2)?,project_id:r.get(3)?,entity_id:r.get(4)?,revision:r.get(5)?,updated_at:r.get(6)?,deleted_at:r.get(7)?,operation:r.get(8)?,crypto_version:r.get(9)?,aad_version:r.get(10)?,nonce:r.get(11)?,ciphertext:r.get(12)?}))?.collect::<Result<Vec<_>,_>>()?;
+    let mut items = statement
+        .query_map(params![account, limit, after], |r| {
+            Ok(MetadataInboxItem {
+                event_id: r.get(0)?,
+                server_sequence: r.get(1)?,
+                source_device_id: r.get(2)?,
+                project_id: r.get(3)?,
+                entity_id: r.get(4)?,
+                revision: r.get(5)?,
+                updated_at: r.get(6)?,
+                deleted_at: r.get(7)?,
+                operation: r.get(8)?,
+                crypto_version: r.get(9)?,
+                aad_version: r.get(10)?,
+                nonce: r.get(11)?,
+                ciphertext: r.get(12)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
-    crate::sqlite::record_sync_reader_visits(&tx,account,items.iter().map(|i|i.event_id.as_str()))?;
-    items.sort_by_key(|i|i.server_sequence);
+    crate::sqlite::record_sync_reader_visits(
+        &tx,
+        account,
+        items.iter().map(|i| i.event_id.as_str()),
+    )?;
+    items.sort_by_key(|i| i.server_sequence);
     tx.commit()?;
     Ok(items)
 }
@@ -833,17 +1049,32 @@ pub(crate) fn write_visible_metadata(
         |r| r.get(0),
     )?;
     let mut payload: Value = serde_json::from_str(&raw).map_err(|_| MetadataError::Invalid)?;
-    if ["unit","goal","infinite"].iter().any(|key|payload[*key]!=metadata[*key]){
+    if ["unit", "goal", "infinite"]
+        .iter()
+        .any(|key| payload[*key] != metadata[*key])
+    {
         let pending:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM cloud_progress_events WHERE project_id=?1 AND state IN ('unsealed','sealed'))",[project],|r|r.get(0))?;
-        if pending{return Err(MetadataError::Conflict)}
+        if pending {
+            return Err(MetadataError::Conflict);
+        }
     }
     let object = payload.as_object_mut().ok_or(MetadataError::Invalid)?;
-    for key in FIELDS {object.insert(key.into(),metadata[key].clone());}
-    if let Some(reference)=metadata.get("cover_reference") {
-        let account:String=tx.query_row("SELECT account_id FROM cloud_sync_project_bindings WHERE project_id=?1",[project],|r|r.get(0))?;
-        let projection=crate::project_cover_sync::require_material(tx,&account,project,reference)?;
-        object.insert("cover_reference".into(),reference.clone());
-        object.insert("cover_image".into(),projection.map(Value::String).unwrap_or(Value::Null));
+    for key in FIELDS {
+        object.insert(key.into(), metadata[key].clone());
+    }
+    if let Some(reference) = metadata.get("cover_reference") {
+        let account: String = tx.query_row(
+            "SELECT account_id FROM cloud_sync_project_bindings WHERE project_id=?1",
+            [project],
+            |r| r.get(0),
+        )?;
+        let projection =
+            crate::project_cover_sync::require_material(tx, &account, project, reference)?;
+        object.insert("cover_reference".into(), reference.clone());
+        object.insert(
+            "cover_image".into(),
+            projection.map(Value::String).unwrap_or(Value::Null),
+        );
     }
     let name = metadata["name"].as_str().ok_or(MetadataError::Invalid)?;
     let unit = metadata["unit"].as_str().ok_or(MetadataError::Invalid)?;
@@ -1092,8 +1323,12 @@ pub(crate) fn prepare_change_in_transaction(
     // choosing its no-cover value. Keep the transition explicit and versioned;
     // an already published cover authority must not silently revert to v1.
     if desired.get("cover_reference").is_none()
-        && view.branches.iter().any(|branch|branch.metadata.get("cover_reference").is_some()) {
-        desired["cover_reference"]=Value::Null;
+        && view
+            .branches
+            .iter()
+            .any(|branch| branch.metadata.get("cover_reference").is_some())
+    {
+        desired["cover_reference"] = Value::Null;
     }
     validate_metadata(&desired)?;
     let tip_json = serde_json::to_string(&tips).map_err(|_| MetadataError::Invalid)?;
@@ -1211,18 +1446,34 @@ pub(crate) fn capture_normal_edit(
     }
     let desired = normalize_metadata_numbers(desired);
     validate_metadata(&desired)?;
-    let old_cover:Option<String>=tx.query_row("SELECT json_extract(payload_json,'$.cover_image') FROM projects WHERE id=?1",[project],|r|r.get(0))?;
-    let new_cover=source.get("cover_image").and_then(Value::as_str);
-    let cover_changed=source.contains_key("cover_image")&&old_cover.as_deref()!=new_cover
-        && view.authenticated.as_ref().is_some_and(|m|m.get("cover_reference").is_some());
+    let old_cover: Option<String> = tx.query_row(
+        "SELECT json_extract(payload_json,'$.cover_image') FROM projects WHERE id=?1",
+        [project],
+        |r| r.get(0),
+    )?;
+    let new_cover = source.get("cover_image").and_then(Value::as_str);
+    let cover_changed = source.contains_key("cover_image")
+        && old_cover.as_deref() != new_cover
+        && view
+            .authenticated
+            .as_ref()
+            .is_some_and(|m| m.get("cover_reference").is_some());
     if cover_changed {
-        if view.state!="active" {return Err(MetadataError::Conflict)}
-        let tips=view.branches.iter().map(|b|b.event_id.clone()).collect::<Vec<_>>();
-        crate::project_cover_sync::capture_in_tx(&tx,&account,project,&device,&local,&desired,new_cover,&tips,now)?;
+        if view.state != "active" {
+            return Err(MetadataError::Conflict);
+        }
+        let tips = view
+            .branches
+            .iter()
+            .map(|b| b.event_id.clone())
+            .collect::<Vec<_>>();
+        crate::project_cover_sync::capture_in_tx(
+            &tx, &account, project, &device, &local, &desired, new_cover, &tips, now,
+        )?;
         // Keep ordinary local editor fields coherent while the new blob is
         // pending. The authenticated old reference remains unchanged until
         // prepare seals the causally bound metadata candidate.
-        write_visible_metadata(&tx,project,&desired,now)?;
+        write_visible_metadata(&tx, project, &desired, now)?;
     } else if desired != local {
         if view.state != "active" {
             return Err(MetadataError::Conflict);
@@ -1257,7 +1508,7 @@ pub(crate) fn capture_normal_edit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{note_sync,sqlite};
+    use crate::{note_sync, sqlite};
     const ACCOUNT: &str = "local-account";
     const USER: &str = "123e4567-e89b-42d3-a456-426614174099";
     const DEVICE: &str = "123e4567-e89b-42d3-a456-426614174003";
@@ -1265,87 +1516,225 @@ mod tests {
     const NOW: &str = "2026-09-21T00:00:00.000000Z";
     #[test]
     fn project_metadata_external_bindings_are_losslessly_local_only() {
-        let (mut db,path)=database();
+        let (mut db, path) = database();
         db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.synch',json(?1),'$.last_synch',?2) WHERE id='project'",params![json!({"path":"/Users/C18_SECRET_PATH/book-private.docx","source_id":"SOURCE-ID-C18-LOCAL-ONLY"}).to_string(),"local-clock-only"]).unwrap();
-        let cid=capture_legacy_candidate(&mut db,ACCOUNT,"project",NOW).unwrap();
+        let cid = capture_legacy_candidate(&mut db, ACCOUNT, "project", NOW).unwrap();
         let (snapshot,unsupported,source):(String,String,String)=db.query_row("SELECT snapshot_json,unsupported_json,source_payload_json FROM cloud_sync_metadata_candidates WHERE candidate_id=?1",[cid],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
-        assert_eq!(unsupported,"[]");assert!(!snapshot.contains("C18_SECRET_PATH"));assert!(!snapshot.contains("SOURCE-ID-C18-LOCAL-ONLY"));assert!(!snapshot.contains("last_synch"));assert!(source.contains("C18_SECRET_PATH"));
-        assert!(db.query_row("SELECT payload_json FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap().contains("C18_SECRET_PATH"));drop(db);let _=std::fs::remove_file(path);
+        assert_eq!(unsupported, "[]");
+        assert!(!snapshot.contains("C18_SECRET_PATH"));
+        assert!(!snapshot.contains("SOURCE-ID-C18-LOCAL-ONLY"));
+        assert!(!snapshot.contains("last_synch"));
+        assert!(source.contains("C18_SECRET_PATH"));
+        assert!(db
+            .query_row(
+                "SELECT payload_json FROM projects WHERE id='project'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap()
+            .contains("C18_SECRET_PATH"));
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
     #[test]
     fn cover_missing_restart_and_atomic_projection_rollback() {
         use crate::project_cover_sync as cover;
-        use sha2::{Digest,Sha256};
-        let (mut db,path)=database();
-        let id="123e4567-e89b-42d3-a456-426614174051";
-        let blob="123e4567-e89b-42d3-a456-426614174052";
-        let envelope=json!({"aad_version":1,"crypto_version":1,"nonce":crate::note_sync::encode_canonical_base64url(&[0;24]),"ciphertext":crate::note_sync::encode_canonical_base64url(&[1;20])});
-        let reference=json!({"version":1,"blob_id":blob,"crypto_version":1,"aad_version":1,"mime_type":"image/jpeg","plaintext_size":4,"key_fingerprint":"a".repeat(64),"envelope_sha256":format!("{:x}",Sha256::digest(envelope.to_string().as_bytes()))});
-        let mut root:Value=serde_json::from_slice(&event(id,DEVICE,"Local name")).unwrap();
-        root["version"]=json!(2);root["metadata"]["cover_reference"]=reference.clone();
-        let payload=serde_json::to_vec(&root).unwrap();
-        inbound(&db,id,DEVICE,1);
-        assert!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&payload,NOW).is_err());
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        let scope=MetadataScope{account_id:ACCOUNT.into(),canonical_user_id:USER.into(),device_id:DEVICE.into()};
-        cover::command(&mut db,&scope,"project","block",&json!({"event_id":id,"reference":reference,"code":"cover_blob_missing"}),NOW).unwrap();
-        drop(db);let mut db=sqlite::open_database(&path).unwrap();
-        assert_eq!(cover::command(&mut db,&scope,"project","status",&json!({}),NOW).unwrap()["blockers"],json!(["cover_blob_missing"]));
+        use sha2::{Digest, Sha256};
+        let (mut db, path) = database();
+        let id = "123e4567-e89b-42d3-a456-426614174051";
+        let blob = "123e4567-e89b-42d3-a456-426614174052";
+        let envelope = json!({"aad_version":1,"crypto_version":1,"nonce":crate::note_sync::encode_canonical_base64url(&[0;24]),"ciphertext":crate::note_sync::encode_canonical_base64url(&[1;20])});
+        let reference = json!({"version":1,"blob_id":blob,"crypto_version":1,"aad_version":1,"mime_type":"image/jpeg","plaintext_size":4,"key_fingerprint":"a".repeat(64),"envelope_sha256":format!("{:x}",Sha256::digest(envelope.to_string().as_bytes()))});
+        let mut root: Value = serde_json::from_slice(&event(id, DEVICE, "Local name")).unwrap();
+        root["version"] = json!(2);
+        root["metadata"]["cover_reference"] = reference.clone();
+        let payload = serde_json::to_vec(&root).unwrap();
+        inbound(&db, id, DEVICE, 1);
+        assert!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &payload, NOW).is_err());
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let scope = MetadataScope {
+            account_id: ACCOUNT.into(),
+            canonical_user_id: USER.into(),
+            device_id: DEVICE.into(),
+        };
+        cover::command(
+            &mut db,
+            &scope,
+            "project",
+            "block",
+            &json!({"event_id":id,"reference":reference,"code":"cover_blob_missing"}),
+            NOW,
+        )
+        .unwrap();
+        drop(db);
+        let mut db = sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            cover::command(&mut db, &scope, "project", "status", &json!({}), NOW).unwrap()
+                ["blockers"],
+            json!(["cover_blob_missing"])
+        );
         cover::command(&mut db,&scope,"project","material",&json!({"reference":reference,"nonce":vec![0;24],"ciphertext":vec![1;20],"jpeg":[255,216,255,217]}),NOW).unwrap();
         db.execute_batch("CREATE TRIGGER interrupted_cover_apply BEFORE UPDATE ON projects BEGIN SELECT RAISE(ABORT,'interrupted apply'); END;").unwrap();
-        assert!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&payload,NOW).is_err());
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_cover_blockers",[],|r|r.get::<_,i64>(0)).unwrap(),1);
-        db.execute_batch("DROP TRIGGER interrupted_cover_apply;").unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&payload,NOW).unwrap(),"applied");
-        assert_eq!(authority_view(&db,ACCOUNT,"project").unwrap().authenticated.unwrap()["cover_reference"],reference);
-        let local:String=db.query_row("SELECT json_extract(payload_json,'$.cover_image') FROM projects",[],|r|r.get(0)).unwrap();
-        assert_eq!(local,"data:image/jpeg;base64,/9j/2Q==");
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_cover_blockers",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        drop(db);let _=std::fs::remove_file(path);
+        assert!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &payload, NOW).is_err());
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_cover_blockers", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        db.execute_batch("DROP TRIGGER interrupted_cover_apply;")
+            .unwrap();
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &payload, NOW).unwrap(),
+            "applied"
+        );
+        assert_eq!(
+            authority_view(&db, ACCOUNT, "project")
+                .unwrap()
+                .authenticated
+                .unwrap()["cover_reference"],
+            reference
+        );
+        let local: String = db
+            .query_row(
+                "SELECT json_extract(payload_json,'$.cover_image') FROM projects",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(local, "data:image/jpeg;base64,/9j/2Q==");
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_cover_blockers", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn cover_reader_rotation_is_bounded_and_survives_restart() {
-        let (db,path)=database();
+        let (db, path) = database();
         for sequence in 1..=41 {
-            let id=format!("123e4567-e89b-42d3-a456-{:012}",sequence+100);
-            inbound(&db,&id,DEVICE,sequence);
+            let id = format!("123e4567-e89b-42d3-a456-{:012}", sequence + 100);
+            inbound(&db, &id, DEVICE, sequence);
         }
-        let mut seen=std::collections::BTreeSet::new();
+        let mut seen = std::collections::BTreeSet::new();
         for _ in 0..6 {
-            let reopened=sqlite::open_database(&path).unwrap();
-            let page=received_metadata(&reopened,ACCOUNT,8,0).unwrap();
-            assert!(page.len()<=8);
-            seen.extend(page.iter().map(|item|item.server_sequence));
+            let reopened = sqlite::open_database(&path).unwrap();
+            let page = received_metadata(&reopened, ACCOUNT, 8, 0).unwrap();
+            assert!(page.len() <= 8);
+            seen.extend(page.iter().map(|item| item.server_sequence));
         }
-        assert!(seen.contains(&41));assert_eq!(seen.len(),41);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_game_reader_visits",[],|r|r.get::<_,i64>(0)).unwrap(),41);
-        assert_eq!(db.query_row("SELECT ack_cursor FROM cloud_sync_state",[],|r|r.get::<_,i64>(0)).unwrap(),0);
-        drop(db);let _=std::fs::remove_file(path);
+        assert!(seen.contains(&41));
+        assert_eq!(seen.len(), 41);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_game_reader_visits", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+            41
+        );
+        assert_eq!(
+            db.query_row("SELECT ack_cursor FROM cloud_sync_state", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn cover_and_v1_name_change_share_full_tip_conflict_and_resolution() {
-        let (mut db,path)=database();
-        let ids=["123e4567-e89b-42d3-a456-426614174061","123e4567-e89b-42d3-a456-426614174062","123e4567-e89b-42d3-a456-426614174063"];
-        inbound(&db,ids[0],DEVICE,1);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(ids[0],DEVICE,"Local name"),NOW).unwrap();
-        let renamed=causal_event(ids[1],DEVICE,"Changed name","update",&[ids[0].into()],2,2);
-        inbound_causal(&db,ids[1],DEVICE,2,2);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&renamed,NOW).unwrap();
-        let mut cover:Value=serde_json::from_slice(&causal_event(ids[2],DEVICE,"Local name","update",&[ids[0].into()],2,2)).unwrap();
-        cover["version"]=json!(2);cover["metadata"]["cover_reference"]=Value::Null;
-        inbound_causal(&db,ids[2],DEVICE,3,2);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&serde_json::to_vec(&cover).unwrap(),NOW).unwrap();
-        let view=authority_view(&db,ACCOUNT,"project").unwrap();assert_eq!(view.state,"metadata_conflict");
-        let tips=view.branches.iter().map(|branch|branch.event_id.clone()).collect::<Vec<_>>();
-        prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"choose_branch",Some(ids[1]),None,view.local.as_ref().unwrap(),&tips,NOW).unwrap();
-        let pending=unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap();
-        let resolution=pending.last().unwrap();
-        assert_eq!(resolution["version"],2);assert_eq!(resolution["metadata"]["name"],"Changed name");
-        assert!(resolution["metadata"]["cover_reference"].is_null());assert_eq!(resolution["header"]["parent_event_ids"],json!(tips));
-        drop(db);let _=std::fs::remove_file(path);
+        let (mut db, path) = database();
+        let ids = [
+            "123e4567-e89b-42d3-a456-426614174061",
+            "123e4567-e89b-42d3-a456-426614174062",
+            "123e4567-e89b-42d3-a456-426614174063",
+        ];
+        inbound(&db, ids[0], DEVICE, 1);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(ids[0], DEVICE, "Local name"),
+            NOW,
+        )
+        .unwrap();
+        let renamed = causal_event(
+            ids[1],
+            DEVICE,
+            "Changed name",
+            "update",
+            &[ids[0].into()],
+            2,
+            2,
+        );
+        inbound_causal(&db, ids[1], DEVICE, 2, 2);
+        preserve_authenticated_event(&mut db, ACCOUNT, "project", &renamed, NOW).unwrap();
+        let mut cover: Value = serde_json::from_slice(&causal_event(
+            ids[2],
+            DEVICE,
+            "Local name",
+            "update",
+            &[ids[0].into()],
+            2,
+            2,
+        ))
+        .unwrap();
+        cover["version"] = json!(2);
+        cover["metadata"]["cover_reference"] = Value::Null;
+        inbound_causal(&db, ids[2], DEVICE, 3, 2);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &serde_json::to_vec(&cover).unwrap(),
+            NOW,
+        )
+        .unwrap();
+        let view = authority_view(&db, ACCOUNT, "project").unwrap();
+        assert_eq!(view.state, "metadata_conflict");
+        let tips = view
+            .branches
+            .iter()
+            .map(|branch| branch.event_id.clone())
+            .collect::<Vec<_>>();
+        prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "project",
+            DEVICE,
+            "choose_branch",
+            Some(ids[1]),
+            None,
+            view.local.as_ref().unwrap(),
+            &tips,
+            NOW,
+        )
+        .unwrap();
+        let pending = unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap();
+        let resolution = pending.last().unwrap();
+        assert_eq!(resolution["version"], 2);
+        assert_eq!(resolution["metadata"]["name"], "Changed name");
+        assert!(resolution["metadata"]["cover_reference"].is_null());
+        assert_eq!(resolution["header"]["parent_event_ids"], json!(tips));
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 
     fn database() -> (Connection, std::path::PathBuf) {
@@ -1366,7 +1755,11 @@ mod tests {
         )
         .unwrap();
         if with_note {
-            db.execute("INSERT INTO notes(id,project_id,payload_json) VALUES('note','project','{}')", []).unwrap();
+            db.execute(
+                "INSERT INTO notes(id,project_id,payload_json) VALUES('note','project','{}')",
+                [],
+            )
+            .unwrap();
         }
         db.execute("INSERT INTO cloud_sync_state(account_id,device_id,pull_cursor,ack_cursor,created_at,updated_at) VALUES(?1,?2,0,0,?3,?3)",params![ACCOUNT,DEVICE,NOW]).unwrap();
         db.execute("INSERT INTO cloud_account_bindings(local_account_id,canonical_user_id,created_at,validated_at) VALUES(?1,?2,?3,?3)",params![ACCOUNT,USER,NOW]).unwrap();
@@ -1377,238 +1770,641 @@ mod tests {
     fn event(id: &str, device: &str, name: &str) -> Vec<u8> {
         serde_json::to_vec(&json!({"version":1,"header":{"account_id":USER,"bootstrap_id":BOOT,"device_id":device,"entity_id":"project","event_id":id,"generation":1,"operation":"create","parent_event_ids":[],"project_id":"project","revision":1,"updated_at":NOW},"metadata":{"name":name,"goal":null,"infinite":true,"unit":"symbols","deadline":null,"status":"active","personal_goal":100,"auto_freeze":true,"streak_enabled":true,"work_method":"manual","stages_enabled":false,"combine_stage_mindmaps":false},"deleted_at":null})).unwrap()
     }
-    fn causal_event(id:&str,device:&str,name:&str,operation:&str,parents:&[String],revision:i64,generation:i64)->Vec<u8>{
-        let mut value:Value=serde_json::from_slice(&event(id,device,name)).unwrap();
-        value["header"]["operation"]=json!(operation);
-        value["header"]["parent_event_ids"]=json!(parents);
-        value["header"]["revision"]=json!(revision);
-        value["header"]["generation"]=json!(generation);
+    fn causal_event(
+        id: &str,
+        device: &str,
+        name: &str,
+        operation: &str,
+        parents: &[String],
+        revision: i64,
+        generation: i64,
+    ) -> Vec<u8> {
+        let mut value: Value = serde_json::from_slice(&event(id, device, name)).unwrap();
+        value["header"]["operation"] = json!(operation);
+        value["header"]["parent_event_ids"] = json!(parents);
+        value["header"]["revision"] = json!(revision);
+        value["header"]["generation"] = json!(generation);
         serde_json::to_vec(&value).unwrap()
     }
-    fn inbound_causal(db:&Connection,id:&str,device:&str,sequence:i64,revision:i64){
+    fn inbound_causal(db: &Connection, id: &str, device: &str, sequence: i64, revision: i64) {
         db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES(?1,?2,?3,?4,'project','project','project_metadata','upsert',?5,?6,'received',?6)",params![ACCOUNT,id,sequence,device,revision,NOW]).unwrap();
         let exists:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_event_objects WHERE account_id=?1 AND event_id=?2)",params![ACCOUNT,id],|r|r.get(0)).unwrap();
-        if !exists {db.execute("INSERT INTO cloud_sync_event_objects(account_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at) VALUES(?1,?2,1,1,zeroblob(24),zeroblob(16),?3)",params![ACCOUNT,id,NOW]).unwrap();}
+        if !exists {
+            db.execute("INSERT INTO cloud_sync_event_objects(account_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at) VALUES(?1,?2,1,1,zeroblob(24),zeroblob(16),?3)",params![ACCOUNT,id,NOW]).unwrap();
+        }
     }
     fn inbound(db: &Connection, id: &str, device: &str, sequence: i64) {
         db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES(?1,?2,?3,?4,'project','project','project_metadata','upsert',1,?5,'received',?5)",params![ACCOUNT,id,sequence,device,NOW]).unwrap();
         db.execute("INSERT INTO cloud_sync_event_objects(account_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at) VALUES(?1,?2,1,1,zeroblob(24),zeroblob(16),?3)",params![ACCOUNT,id,NOW]).unwrap();
     }
-    fn inbox_for_sealed(db:&Connection,id:&str,device:&str,sequence:i64){
+    fn inbox_for_sealed(db: &Connection, id: &str, device: &str, sequence: i64) {
         db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES(?1,?2,?3,?4,'project','project','project_metadata','upsert',1,?5,'received',?5)",params![ACCOUNT,id,sequence,device,NOW]).unwrap();
         let exists:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_sync_event_objects WHERE account_id=?1 AND event_id=?2)",params![ACCOUNT,id],|r|r.get(0)).unwrap();
         if !exists {
-            let nonce=if device==DEVICE {[1_u8;24]} else {[2_u8;24]};
-            let ciphertext=if device==DEVICE {[1_u8;32]} else {[2_u8;32]};
+            let nonce = if device == DEVICE {
+                [1_u8; 24]
+            } else {
+                [2_u8; 24]
+            };
+            let ciphertext = if device == DEVICE {
+                [1_u8; 32]
+            } else {
+                [2_u8; 32]
+            };
             db.execute("INSERT INTO cloud_sync_event_objects(account_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at) VALUES(?1,?2,1,1,?3,?4,?5)",params![ACCOUNT,id,nonce.as_slice(),ciphertext.as_slice(),NOW]).unwrap();
         }
     }
-    fn ack_candidate(db:&mut Connection)->i64{
-        let device=db.query_row("SELECT device_id FROM cloud_sync_state WHERE account_id=?1",[ACCOUNT],|r|r.get(0)).unwrap();
-        note_sync::prepare_note_sync_ack(db,&note_sync::PrepareNoteSyncAckCommand{account_id:ACCOUNT.into(),device_id:device,canonical_user_id:USER.into()}).unwrap().candidate_cursor
+    fn ack_candidate(db: &mut Connection) -> i64 {
+        let device = db
+            .query_row(
+                "SELECT device_id FROM cloud_sync_state WHERE account_id=?1",
+                [ACCOUNT],
+                |r| r.get(0),
+            )
+            .unwrap();
+        note_sync::prepare_note_sync_ack(
+            db,
+            &note_sync::PrepareNoteSyncAckCommand {
+                account_id: ACCOUNT.into(),
+                device_id: device,
+                canonical_user_id: USER.into(),
+            },
+        )
+        .unwrap()
+        .candidate_cursor
     }
     #[test]
-    fn project_metadata_lost_upload_response_self_echo_is_durable_and_ack_safe(){
-        let (mut db,path)=database();
-        let candidate=capture_legacy_candidate(&mut db,ACCOUNT,"project",NOW).unwrap();
-        let id=prepare_metadata_genesis(&mut db,ACCOUNT,&candidate,NOW).unwrap();
-        assert_eq!(unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap().len(),1);
-        commit_sealed_genesis(&mut db,ACCOUNT,DEVICE,&id,&[0;24],&[1;32]).unwrap();
-        assert_eq!(sealed_genesis(&db,ACCOUNT,DEVICE).unwrap().len(),1);
-        inbox_for_sealed(&db,&id,DEVICE,1);
-        db.execute("UPDATE cloud_sync_state SET pull_cursor=1 WHERE account_id=?1",[ACCOUNT]).unwrap();
-        let bytes=event(&id,DEVICE,"Local name");
-        assert_eq!(preserve_authenticated_event_checked(&mut db,ACCOUNT,"project",&bytes,NOW,Some((&[0;24],&[1;32]))).unwrap(),"applied");
-        assert_eq!(ack_candidate(&mut db),1);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_upload_receipts WHERE event_id=?1",[&id],|r|r.get::<_,i64>(0)).unwrap(),1);
+    fn project_metadata_lost_upload_response_self_echo_is_durable_and_ack_safe() {
+        let (mut db, path) = database();
+        let candidate = capture_legacy_candidate(&mut db, ACCOUNT, "project", NOW).unwrap();
+        let id = prepare_metadata_genesis(&mut db, ACCOUNT, &candidate, NOW).unwrap();
+        assert_eq!(unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap().len(), 1);
+        commit_sealed_genesis(&mut db, ACCOUNT, DEVICE, &id, &[0; 24], &[1; 32]).unwrap();
+        assert_eq!(sealed_genesis(&db, ACCOUNT, DEVICE).unwrap().len(), 1);
+        inbox_for_sealed(&db, &id, DEVICE, 1);
+        db.execute(
+            "UPDATE cloud_sync_state SET pull_cursor=1 WHERE account_id=?1",
+            [ACCOUNT],
+        )
+        .unwrap();
+        let bytes = event(&id, DEVICE, "Local name");
+        assert_eq!(
+            preserve_authenticated_event_checked(
+                &mut db,
+                ACCOUNT,
+                "project",
+                &bytes,
+                NOW,
+                Some((&[0; 24], &[1; 32]))
+            )
+            .unwrap(),
+            "applied"
+        );
+        assert_eq!(ack_candidate(&mut db), 1);
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM cloud_sync_upload_receipts WHERE event_id=?1",
+                [&id],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
         drop(db);
-        let mut reopened=sqlite::open_database(&path).unwrap();
-        assert_eq!(preserve_authenticated_event_checked(&mut reopened,ACCOUNT,"project",&bytes,NOW,Some((&[0;24],&[1;32]))).unwrap(),"applied");
-        assert!(matches!(preserve_authenticated_event_checked(&mut reopened,ACCOUNT,"project",&bytes,NOW,Some((&[9;24],&[1;32]))),Err(MetadataError::Scope)));
-        assert_eq!(ack_candidate(&mut reopened),1);
-        assert!(received_metadata(&reopened,ACCOUNT,8,0).unwrap().is_empty());
-        drop(reopened);std::fs::remove_file(path).unwrap();
+        let mut reopened = sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            preserve_authenticated_event_checked(
+                &mut reopened,
+                ACCOUNT,
+                "project",
+                &bytes,
+                NOW,
+                Some((&[0; 24], &[1; 32]))
+            )
+            .unwrap(),
+            "applied"
+        );
+        assert!(matches!(
+            preserve_authenticated_event_checked(
+                &mut reopened,
+                ACCOUNT,
+                "project",
+                &bytes,
+                NOW,
+                Some((&[9; 24], &[1; 32]))
+            ),
+            Err(MetadataError::Scope)
+        ));
+        assert_eq!(ack_candidate(&mut reopened), 1);
+        assert!(received_metadata(&reopened, ACCOUNT, 8, 0)
+            .unwrap()
+            .is_empty());
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn project_metadata_two_device_genesis_survives_restart_without_winner(){
-        let (mut a,path_a)=database();
-        let (mut b,path_b)=database();
-        let b_device="123e4567-e89b-42d3-a456-426614174004";
-        b.execute("UPDATE cloud_sync_state SET device_id=?1 WHERE account_id=?2",params![b_device,ACCOUNT]).unwrap();
-        b.execute("UPDATE projects SET name='Other name' WHERE id='project'",[]).unwrap();
-        let a_candidate=capture_legacy_candidate(&mut a,ACCOUNT,"project",NOW).unwrap();
-        let b_candidate=capture_legacy_candidate(&mut b,ACCOUNT,"project",NOW).unwrap();
-        let a_id=prepare_metadata_genesis(&mut a,ACCOUNT,&a_candidate,NOW).unwrap();
-        let b_id=prepare_metadata_genesis(&mut b,ACCOUNT,&b_candidate,NOW).unwrap();
-        assert_ne!(a_id,b_id);
-        commit_sealed_genesis(&mut a,ACCOUNT,DEVICE,&a_id,&[1;24],&[1;32]).unwrap();
-        commit_sealed_genesis(&mut b,ACCOUNT,b_device,&b_id,&[2;24],&[2;32]).unwrap();
-        for db in [&a,&b] {
-            inbox_for_sealed(db,&a_id,DEVICE,1);
-            inbox_for_sealed(db,&b_id,b_device,2);
-            db.execute("UPDATE cloud_sync_state SET pull_cursor=2 WHERE account_id=?1",[ACCOUNT]).unwrap();
+    fn project_metadata_two_device_genesis_survives_restart_without_winner() {
+        let (mut a, path_a) = database();
+        let (mut b, path_b) = database();
+        let b_device = "123e4567-e89b-42d3-a456-426614174004";
+        b.execute(
+            "UPDATE cloud_sync_state SET device_id=?1 WHERE account_id=?2",
+            params![b_device, ACCOUNT],
+        )
+        .unwrap();
+        b.execute(
+            "UPDATE projects SET name='Other name' WHERE id='project'",
+            [],
+        )
+        .unwrap();
+        let a_candidate = capture_legacy_candidate(&mut a, ACCOUNT, "project", NOW).unwrap();
+        let b_candidate = capture_legacy_candidate(&mut b, ACCOUNT, "project", NOW).unwrap();
+        let a_id = prepare_metadata_genesis(&mut a, ACCOUNT, &a_candidate, NOW).unwrap();
+        let b_id = prepare_metadata_genesis(&mut b, ACCOUNT, &b_candidate, NOW).unwrap();
+        assert_ne!(a_id, b_id);
+        commit_sealed_genesis(&mut a, ACCOUNT, DEVICE, &a_id, &[1; 24], &[1; 32]).unwrap();
+        commit_sealed_genesis(&mut b, ACCOUNT, b_device, &b_id, &[2; 24], &[2; 32]).unwrap();
+        for db in [&a, &b] {
+            inbox_for_sealed(db, &a_id, DEVICE, 1);
+            inbox_for_sealed(db, &b_id, b_device, 2);
+            db.execute(
+                "UPDATE cloud_sync_state SET pull_cursor=2 WHERE account_id=?1",
+                [ACCOUNT],
+            )
+            .unwrap();
         }
         // Each device applies its own self echo and preserves the independent peer genesis.
-        for (db,own_id,own_device,own_name,peer_id,peer_device,peer_name) in [
-            (&mut a,&a_id,DEVICE,"Local name",&b_id,b_device,"Other name"),
-            (&mut b,&b_id,b_device,"Other name",&a_id,DEVICE,"Local name")
+        for (db, own_id, own_device, own_name, peer_id, peer_device, peer_name) in [
+            (
+                &mut a,
+                &a_id,
+                DEVICE,
+                "Local name",
+                &b_id,
+                b_device,
+                "Other name",
+            ),
+            (
+                &mut b,
+                &b_id,
+                b_device,
+                "Other name",
+                &a_id,
+                DEVICE,
+                "Local name",
+            ),
         ] {
-            let own=event(own_id,own_device,own_name);
-            let peer=event(peer_id,peer_device,peer_name);
-            assert_eq!(preserve_authenticated_event(db,ACCOUNT,"project",&own,NOW).unwrap(),"applied");
-            assert_eq!(preserve_authenticated_event(db,ACCOUNT,"project",&peer,NOW).unwrap(),"conflict_preserved");
-            assert_eq!(ack_candidate(db),2);
-            assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_tips",[],|r|r.get::<_,i64>(0)).unwrap(),2);
-            assert_eq!(db.query_row("SELECT name FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap(),own_name);
+            let own = event(own_id, own_device, own_name);
+            let peer = event(peer_id, peer_device, peer_name);
+            assert_eq!(
+                preserve_authenticated_event(db, ACCOUNT, "project", &own, NOW).unwrap(),
+                "applied"
+            );
+            assert_eq!(
+                preserve_authenticated_event(db, ACCOUNT, "project", &peer, NOW).unwrap(),
+                "conflict_preserved"
+            );
+            assert_eq!(ack_candidate(db), 2);
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_tips", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                2
+            );
+            assert_eq!(
+                db.query_row("SELECT name FROM projects WHERE id='project'", [], |r| {
+                    r.get::<_, String>(0)
+                })
+                .unwrap(),
+                own_name
+            );
         }
-        drop(a);drop(b);
-        for (path,device) in [(&path_a,DEVICE),(&path_b,b_device)] {
-            let mut db=sqlite::open_database(path).unwrap();
-            assert_eq!(migration_status(&db,ACCOUNT,"project").unwrap().state,"genesis_conflict");
-            assert_eq!(ack_candidate(&mut db),2);
-            assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_tips",[],|r|r.get::<_,i64>(0)).unwrap(),2);
-            assert_runtime_scope(&db,ACCOUNT,USER,device).unwrap();
-            drop(db);std::fs::remove_file(path).unwrap();
+        drop(a);
+        drop(b);
+        for (path, device) in [(&path_a, DEVICE), (&path_b, b_device)] {
+            let mut db = sqlite::open_database(path).unwrap();
+            assert_eq!(
+                migration_status(&db, ACCOUNT, "project").unwrap().state,
+                "genesis_conflict"
+            );
+            assert_eq!(ack_candidate(&mut db), 2);
+            assert_eq!(
+                db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_tips", [], |r| r
+                    .get::<_, i64>(
+                    0
+                ))
+                .unwrap(),
+                2
+            );
+            assert_runtime_scope(&db, ACCOUNT, USER, device).unwrap();
+            drop(db);
+            std::fs::remove_file(path).unwrap();
         }
     }
     #[test]
-    fn project_metadata_explicit_adoption_preserves_device_only_fields_and_restarts(){
-        let (mut db,path)=database();
+    fn project_metadata_explicit_adoption_preserves_device_only_fields_and_restarts() {
+        let (mut db, path) = database();
         db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.cover_image','device-only') WHERE id='project'",[]).unwrap();
-        let remote="123e4567-e89b-42d3-a456-426614174071";
-        let peer="123e4567-e89b-42d3-a456-426614174004";
-        inbound_causal(&db,remote,peer,1,1);
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(remote,peer,"Remote name"),NOW).unwrap(),"applied");
-        let before=authority_view(&db,ACCOUNT,"project").unwrap();
-        assert_eq!(before.state,"local_differs_from_authenticated");
-        assert_eq!(db.query_row("SELECT name FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap(),"Local name");
-        let after=adopt_authenticated_metadata(&mut db,ACCOUNT,"project",remote,before.local.as_ref().unwrap(),NOW).unwrap();
-        assert_eq!(after.state,"active");
+        let remote = "123e4567-e89b-42d3-a456-426614174071";
+        let peer = "123e4567-e89b-42d3-a456-426614174004";
+        inbound_causal(&db, remote, peer, 1, 1);
+        assert_eq!(
+            preserve_authenticated_event(
+                &mut db,
+                ACCOUNT,
+                "project",
+                &event(remote, peer, "Remote name"),
+                NOW
+            )
+            .unwrap(),
+            "applied"
+        );
+        let before = authority_view(&db, ACCOUNT, "project").unwrap();
+        assert_eq!(before.state, "local_differs_from_authenticated");
+        assert_eq!(
+            db.query_row("SELECT name FROM projects WHERE id='project'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "Local name"
+        );
+        let after = adopt_authenticated_metadata(
+            &mut db,
+            ACCOUNT,
+            "project",
+            remote,
+            before.local.as_ref().unwrap(),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(after.state, "active");
         assert_eq!(db.query_row("SELECT json_extract(payload_json,'$.cover_image') FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap(),"device-only");
         drop(db);
-        let reopened=sqlite::open_database(&path).unwrap();
-        assert_eq!(authority_view(&reopened,ACCOUNT,"project").unwrap().state,"active");
-        drop(reopened);std::fs::remove_file(path).unwrap();
+        let reopened = sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            authority_view(&reopened, ACCOUNT, "project").unwrap().state,
+            "active"
+        );
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn project_metadata_concurrent_rename_requires_full_tip_resolution(){
-        let (mut db,path)=database();
-        let parent="123e4567-e89b-42d3-a456-426614174071";
-        let peer="123e4567-e89b-42d3-a456-426614174004";
-        let gamma="123e4567-e89b-42d3-a456-426614174073";
-        inbound_causal(&db,parent,peer,1,1);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(parent,peer,"Project Alpha"),NOW).unwrap();
-        let before=authority_view(&db,ACCOUNT,"project").unwrap();
-        adopt_authenticated_metadata(&mut db,ACCOUNT,"project",parent,before.local.as_ref().unwrap(),NOW).unwrap();
-        let active=authority_view(&db,ACCOUNT,"project").unwrap();
-        let mut beta=active.local.clone().unwrap();beta["name"]=json!("Project Beta");
-        let beta_id=prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"edit",None,Some(&beta),
-            active.local.as_ref().unwrap(),&[parent.into()],NOW).unwrap();
-        assert_eq!(prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"edit",None,Some(&beta),
-            active.local.as_ref().unwrap(),&[parent.into()],NOW).unwrap(),beta_id);
-        let outbound=unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap();
-        assert_eq!(outbound[0]["header"]["operation"],"update");
-        commit_sealed_genesis(&mut db,ACCOUNT,DEVICE,&beta_id,&[1;24],&[1;32]).unwrap();
-        commit_upload_receipt(&mut db,ACCOUNT,DEVICE,&beta_id,2,false,NOW).unwrap();
-        inbound_causal(&db,&beta_id,DEVICE,2,2);
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",outbound[0].to_string().as_bytes(),NOW).unwrap(),"applied");
-        inbound_causal(&db,gamma,peer,3,2);
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&causal_event(gamma,peer,"Project Gamma","update",&[parent.into()],2,2),NOW).unwrap(),"conflict_preserved");
-        let conflict=authority_view(&db,ACCOUNT,"project").unwrap();
-        assert_eq!(conflict.state,"metadata_conflict");
-        assert_eq!(db.query_row("SELECT name FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap(),"Project Beta");
-        let tips:Vec<String>=conflict.branches.iter().map(|branch|branch.event_id.clone()).collect();
-        assert!(prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"choose_branch",Some(gamma),None,
-            conflict.local.as_ref().unwrap(),&tips[..1],NOW).is_err());
-        let resolution=prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"choose_branch",Some(gamma),None,
-            conflict.local.as_ref().unwrap(),&tips,NOW).unwrap();
-        let resolved=unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap();
-        assert_eq!(resolved[0]["header"]["operation"],"resolution");
-        assert_eq!(resolved[0]["header"]["parent_event_ids"],json!(tips));
-        commit_sealed_genesis(&mut db,ACCOUNT,DEVICE,&resolution,&[2;24],&[2;32]).unwrap();
-        inbound_causal(&db,&resolution,DEVICE,4,3);
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",resolved[0].to_string().as_bytes(),NOW).unwrap(),"applied");
-        assert_eq!(authority_view(&db,ACCOUNT,"project").unwrap().state,"active");
-        assert_eq!(db.query_row("SELECT name FROM projects WHERE id='project'",[],|r|r.get::<_,String>(0)).unwrap(),"Project Gamma");
+    fn project_metadata_concurrent_rename_requires_full_tip_resolution() {
+        let (mut db, path) = database();
+        let parent = "123e4567-e89b-42d3-a456-426614174071";
+        let peer = "123e4567-e89b-42d3-a456-426614174004";
+        let gamma = "123e4567-e89b-42d3-a456-426614174073";
+        inbound_causal(&db, parent, peer, 1, 1);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(parent, peer, "Project Alpha"),
+            NOW,
+        )
+        .unwrap();
+        let before = authority_view(&db, ACCOUNT, "project").unwrap();
+        adopt_authenticated_metadata(
+            &mut db,
+            ACCOUNT,
+            "project",
+            parent,
+            before.local.as_ref().unwrap(),
+            NOW,
+        )
+        .unwrap();
+        let active = authority_view(&db, ACCOUNT, "project").unwrap();
+        let mut beta = active.local.clone().unwrap();
+        beta["name"] = json!("Project Beta");
+        let beta_id = prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "project",
+            DEVICE,
+            "edit",
+            None,
+            Some(&beta),
+            active.local.as_ref().unwrap(),
+            &[parent.into()],
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(
+            prepare_authoritative_change(
+                &mut db,
+                ACCOUNT,
+                "project",
+                DEVICE,
+                "edit",
+                None,
+                Some(&beta),
+                active.local.as_ref().unwrap(),
+                &[parent.into()],
+                NOW
+            )
+            .unwrap(),
+            beta_id
+        );
+        let outbound = unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap();
+        assert_eq!(outbound[0]["header"]["operation"], "update");
+        commit_sealed_genesis(&mut db, ACCOUNT, DEVICE, &beta_id, &[1; 24], &[1; 32]).unwrap();
+        commit_upload_receipt(&mut db, ACCOUNT, DEVICE, &beta_id, 2, false, NOW).unwrap();
+        inbound_causal(&db, &beta_id, DEVICE, 2, 2);
+        assert_eq!(
+            preserve_authenticated_event(
+                &mut db,
+                ACCOUNT,
+                "project",
+                outbound[0].to_string().as_bytes(),
+                NOW
+            )
+            .unwrap(),
+            "applied"
+        );
+        inbound_causal(&db, gamma, peer, 3, 2);
+        assert_eq!(
+            preserve_authenticated_event(
+                &mut db,
+                ACCOUNT,
+                "project",
+                &causal_event(
+                    gamma,
+                    peer,
+                    "Project Gamma",
+                    "update",
+                    &[parent.into()],
+                    2,
+                    2
+                ),
+                NOW
+            )
+            .unwrap(),
+            "conflict_preserved"
+        );
+        let conflict = authority_view(&db, ACCOUNT, "project").unwrap();
+        assert_eq!(conflict.state, "metadata_conflict");
+        assert_eq!(
+            db.query_row("SELECT name FROM projects WHERE id='project'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "Project Beta"
+        );
+        let tips: Vec<String> = conflict
+            .branches
+            .iter()
+            .map(|branch| branch.event_id.clone())
+            .collect();
+        assert!(prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "project",
+            DEVICE,
+            "choose_branch",
+            Some(gamma),
+            None,
+            conflict.local.as_ref().unwrap(),
+            &tips[..1],
+            NOW
+        )
+        .is_err());
+        let resolution = prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "project",
+            DEVICE,
+            "choose_branch",
+            Some(gamma),
+            None,
+            conflict.local.as_ref().unwrap(),
+            &tips,
+            NOW,
+        )
+        .unwrap();
+        let resolved = unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap();
+        assert_eq!(resolved[0]["header"]["operation"], "resolution");
+        assert_eq!(resolved[0]["header"]["parent_event_ids"], json!(tips));
+        commit_sealed_genesis(&mut db, ACCOUNT, DEVICE, &resolution, &[2; 24], &[2; 32]).unwrap();
+        inbound_causal(&db, &resolution, DEVICE, 4, 3);
+        assert_eq!(
+            preserve_authenticated_event(
+                &mut db,
+                ACCOUNT,
+                "project",
+                resolved[0].to_string().as_bytes(),
+                NOW
+            )
+            .unwrap(),
+            "applied"
+        );
+        assert_eq!(
+            authority_view(&db, ACCOUNT, "project").unwrap().state,
+            "active"
+        );
+        assert_eq!(
+            db.query_row("SELECT name FROM projects WHERE id='project'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "Project Gamma"
+        );
         drop(db);
-        let reopened=sqlite::open_database(&path).unwrap();
-        assert_eq!(authority_view(&reopened,ACCOUNT,"project").unwrap().state,"active");
-        drop(reopened);std::fs::remove_file(path).unwrap();
+        let reopened = sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            authority_view(&reopened, ACCOUNT, "project").unwrap().state,
+            "active"
+        );
+        drop(reopened);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn project_metadata_adoption_and_edit_rollback_are_atomic(){
-        let (mut db,path)=database();
-        let parent="123e4567-e89b-42d3-a456-426614174071";
-        let peer="123e4567-e89b-42d3-a456-426614174004";
-        inbound_causal(&db,parent,peer,1,1);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(parent,peer,"Project Alpha"),NOW).unwrap();
-        let before=authority_view(&db,ACCOUNT,"project").unwrap();
+    fn project_metadata_adoption_and_edit_rollback_are_atomic() {
+        let (mut db, path) = database();
+        let parent = "123e4567-e89b-42d3-a456-426614174071";
+        let peer = "123e4567-e89b-42d3-a456-426614174004";
+        inbound_causal(&db, parent, peer, 1, 1);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(parent, peer, "Project Alpha"),
+            NOW,
+        )
+        .unwrap();
+        let before = authority_view(&db, ACCOUNT, "project").unwrap();
         db.execute_batch("CREATE TRIGGER reject_reconciliation BEFORE INSERT ON cloud_sync_metadata_reconciliation BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
-        assert!(adopt_authenticated_metadata(&mut db,ACCOUNT,"project",parent,before.local.as_ref().unwrap(),NOW).is_err());
-        assert_eq!(visible_metadata(&db,"project").unwrap(),before.local.unwrap());
-        db.execute_batch("DROP TRIGGER reject_reconciliation").unwrap();
-        let local=visible_metadata(&db,"project").unwrap();
-        adopt_authenticated_metadata(&mut db,ACCOUNT,"project",parent,&local,NOW).unwrap();
-        let active=visible_metadata(&db,"project").unwrap();
-        let mut desired=active.clone();desired["name"]=json!("Project Beta");
+        assert!(adopt_authenticated_metadata(
+            &mut db,
+            ACCOUNT,
+            "project",
+            parent,
+            before.local.as_ref().unwrap(),
+            NOW
+        )
+        .is_err());
+        assert_eq!(
+            visible_metadata(&db, "project").unwrap(),
+            before.local.unwrap()
+        );
+        db.execute_batch("DROP TRIGGER reject_reconciliation")
+            .unwrap();
+        let local = visible_metadata(&db, "project").unwrap();
+        adopt_authenticated_metadata(&mut db, ACCOUNT, "project", parent, &local, NOW).unwrap();
+        let active = visible_metadata(&db, "project").unwrap();
+        let mut desired = active.clone();
+        desired["name"] = json!("Project Beta");
         db.execute_batch("CREATE TRIGGER reject_decision BEFORE INSERT ON cloud_sync_metadata_decisions BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
-        assert!(capture_normal_edit(&mut db,"project",&desired,NOW).is_err());
-        assert_eq!(visible_metadata(&db,"project").unwrap(),active);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_outbox",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+        assert!(capture_normal_edit(&mut db, "project", &desired, NOW).is_err());
+        assert_eq!(visible_metadata(&db, "project").unwrap(), active);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_sync_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
         db.execute_batch("DROP TRIGGER reject_decision").unwrap();
-        assert!(capture_normal_edit(&mut db,"project",&desired,NOW).unwrap());
-        assert_eq!(authority_view(&db,ACCOUNT,"project").unwrap().state,"resolution_pending");
-        assert_eq!(unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap()[0]["header"]["parent_event_ids"],json!([parent]));
-        drop(db);std::fs::remove_file(path).unwrap();
+        assert!(capture_normal_edit(&mut db, "project", &desired, NOW).unwrap());
+        assert_eq!(
+            authority_view(&db, ACCOUNT, "project").unwrap().state,
+            "resolution_pending"
+        );
+        assert_eq!(
+            unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap()[0]["header"]["parent_event_ids"],
+            json!([parent])
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn project_metadata_peer_descendant_updates_only_previously_reconciled_shell(){
-        let (mut db,path)=database();
-        let parent="123e4567-e89b-42d3-a456-426614174071";
-        let child="123e4567-e89b-42d3-a456-426614174072";
-        let peer="123e4567-e89b-42d3-a456-426614174004";
-        inbound_causal(&db,parent,peer,1,1);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(parent,peer,"Project Alpha"),NOW).unwrap();
-        let local=visible_metadata(&db,"project").unwrap();
-        adopt_authenticated_metadata(&mut db,ACCOUNT,"project",parent,&local,NOW).unwrap();
+    fn project_metadata_peer_descendant_updates_only_previously_reconciled_shell() {
+        let (mut db, path) = database();
+        let parent = "123e4567-e89b-42d3-a456-426614174071";
+        let child = "123e4567-e89b-42d3-a456-426614174072";
+        let peer = "123e4567-e89b-42d3-a456-426614174004";
+        inbound_causal(&db, parent, peer, 1, 1);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(parent, peer, "Project Alpha"),
+            NOW,
+        )
+        .unwrap();
+        let local = visible_metadata(&db, "project").unwrap();
+        adopt_authenticated_metadata(&mut db, ACCOUNT, "project", parent, &local, NOW).unwrap();
         db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.cover_image','local','$.sync_path','private') WHERE id='project'",[]).unwrap();
-        inbound_causal(&db,child,peer,2,2);
-        let update=causal_event(child,peer,"Project Beta","update",&[parent.into()],2,2);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",&update,NOW).unwrap();
-        assert_eq!(authority_view(&db,ACCOUNT,"project").unwrap().state,"active");
-        assert_eq!(visible_metadata(&db,"project").unwrap()["name"],"Project Beta");
-        assert_eq!(db.query_row("SELECT json_extract(payload_json,'$.sync_path') FROM projects",[],|r|r.get::<_,String>(0)).unwrap(),"private");
-        drop(db);let mut db=sqlite::open_database(&path).unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db,ACCOUNT,"project",&update,NOW).unwrap(),"applied");
-        assert_eq!(visible_metadata(&db,"project").unwrap()["name"],"Project Beta");
-        drop(db);std::fs::remove_file(path).unwrap();
+        inbound_causal(&db, child, peer, 2, 2);
+        let update = causal_event(
+            child,
+            peer,
+            "Project Beta",
+            "update",
+            &[parent.into()],
+            2,
+            2,
+        );
+        preserve_authenticated_event(&mut db, ACCOUNT, "project", &update, NOW).unwrap();
+        assert_eq!(
+            authority_view(&db, ACCOUNT, "project").unwrap().state,
+            "active"
+        );
+        assert_eq!(
+            visible_metadata(&db, "project").unwrap()["name"],
+            "Project Beta"
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT json_extract(payload_json,'$.sync_path') FROM projects",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "private"
+        );
+        drop(db);
+        let mut db = sqlite::open_database(&path).unwrap();
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &update, NOW).unwrap(),
+            "applied"
+        );
+        assert_eq!(
+            visible_metadata(&db, "project").unwrap()["name"],
+            "Project Beta"
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn project_metadata_genesis_resolution_preserves_both_original_events(){
-        let (mut db,path)=database();
-        let first="123e4567-e89b-42d3-a456-426614174071";
-        let second="123e4567-e89b-42d3-a456-426614174072";
-        let peer="123e4567-e89b-42d3-a456-426614174004";
-        for (id,sequence,name) in [(first,1,"First candidate"),(second,2,"Second candidate")] {
-            inbound_causal(&db,id,peer,sequence,1);
-            preserve_authenticated_event(&mut db,ACCOUNT,"project",&event(id,peer,name),NOW).unwrap();
+    fn project_metadata_genesis_resolution_preserves_both_original_events() {
+        let (mut db, path) = database();
+        let first = "123e4567-e89b-42d3-a456-426614174071";
+        let second = "123e4567-e89b-42d3-a456-426614174072";
+        let peer = "123e4567-e89b-42d3-a456-426614174004";
+        for (id, sequence, name) in [
+            (first, 1, "First candidate"),
+            (second, 2, "Second candidate"),
+        ] {
+            inbound_causal(&db, id, peer, sequence, 1);
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &event(id, peer, name), NOW)
+                .unwrap();
         }
-        let conflict=authority_view(&db,ACCOUNT,"project").unwrap();
-        assert_eq!(conflict.state,"genesis_conflict");
-        assert_eq!(conflict.local.as_ref().unwrap()["name"],"Local name");
-        let tips=conflict.branches.iter().map(|branch|branch.event_id.clone()).collect::<Vec<_>>();
-        let resolution=prepare_authoritative_change(&mut db,ACCOUNT,"project",DEVICE,"choose_branch",Some(second),None,
-            conflict.local.as_ref().unwrap(),&tips,NOW).unwrap();
-        let outbound=unsealed_genesis(&db,ACCOUNT,DEVICE).unwrap();
-        assert_eq!(outbound[0]["header"]["operation"],"genesis_resolution");
-        assert_eq!(outbound[0]["header"]["parent_event_ids"],json!(tips));
-        commit_sealed_genesis(&mut db,ACCOUNT,DEVICE,&resolution,&[2;24],&[2;32]).unwrap();
-        inbound_causal(&db,&resolution,DEVICE,3,2);
-        preserve_authenticated_event(&mut db,ACCOUNT,"project",outbound[0].to_string().as_bytes(),NOW).unwrap();
-        assert_eq!(authority_view(&db,ACCOUNT,"project").unwrap().state,"active");
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events",[],|r|r.get::<_,i64>(0)).unwrap(),3);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_apply_ledger",[],|r|r.get::<_,i64>(0)).unwrap(),3);
-        drop(db);std::fs::remove_file(path).unwrap();
+        let conflict = authority_view(&db, ACCOUNT, "project").unwrap();
+        assert_eq!(conflict.state, "genesis_conflict");
+        assert_eq!(conflict.local.as_ref().unwrap()["name"], "Local name");
+        let tips = conflict
+            .branches
+            .iter()
+            .map(|branch| branch.event_id.clone())
+            .collect::<Vec<_>>();
+        let resolution = prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "project",
+            DEVICE,
+            "choose_branch",
+            Some(second),
+            None,
+            conflict.local.as_ref().unwrap(),
+            &tips,
+            NOW,
+        )
+        .unwrap();
+        let outbound = unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap();
+        assert_eq!(outbound[0]["header"]["operation"], "genesis_resolution");
+        assert_eq!(outbound[0]["header"]["parent_event_ids"], json!(tips));
+        commit_sealed_genesis(&mut db, ACCOUNT, DEVICE, &resolution, &[2; 24], &[2; 32]).unwrap();
+        inbound_causal(&db, &resolution, DEVICE, 3, 2);
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            outbound[0].to_string().as_bytes(),
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(
+            authority_view(&db, ACCOUNT, "project").unwrap().state,
+            "active"
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM cloud_sync_metadata_apply_ledger",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn project_metadata_candidate_is_durable_and_reused() {
@@ -1879,7 +2675,8 @@ mod tests {
         );
         drop(db);
         std::fs::remove_file(path).unwrap();
-    }    #[test]
+    }
+    #[test]
     fn project_metadata_edge_resolution_invalidation_all_durable_timings() {
         for timing in 0..5 {
             let (mut db, path) = database();
@@ -1929,7 +2726,8 @@ mod tests {
             let c_sequence = if timing == 4 { 4 } else { 3 };
             // R may precede C in server order while C is observed before R's echo.
             if timing >= 3 {
-                commit_upload_receipt(&mut db, ACCOUNT, DEVICE, &r, r_sequence, false, NOW).unwrap();
+                commit_upload_receipt(&mut db, ACCOUNT, DEVICE, &r, r_sequence, false, NOW)
+                    .unwrap();
             }
             drop(db);
             db = sqlite::open_database(&path).unwrap();
@@ -2161,40 +2959,79 @@ mod tests {
         let child = "123e4567-e89b-42d3-a456-426614174072";
         db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.sync_path','/private/book.docx','$.cover_image','local-cover','$.extensions',json('{\"local\":true}'))", []).unwrap();
         inbound_causal(&db, parent, peer, 1, 1);
-        preserve_authenticated_event(&mut db, ACCOUNT, "project", &event(parent, peer, "Base"), NOW).unwrap();
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(parent, peer, "Base"),
+            NOW,
+        )
+        .unwrap();
         let local = visible_metadata(&db, "project").unwrap();
         adopt_authenticated_metadata(&mut db, ACCOUNT, "project", parent, &local, NOW).unwrap();
         let before = visible_metadata(&db, "project").unwrap();
         let desired = json!({"name":"All fields","goal":2500.5,"infinite":false,"unit":"A4","deadline":"2027-01-02","status":"заморожен","personal_goal":125.5,"auto_freeze":false,"streak_enabled":false,"work_method":"app","stages_enabled":true,"combine_stage_mindmaps":true});
-        let mut update: Value = serde_json::from_slice(&causal_event(child, peer, "All fields", "update", &[parent.into()], 2, 2)).unwrap();
+        let mut update: Value = serde_json::from_slice(&causal_event(
+            child,
+            peer,
+            "All fields",
+            "update",
+            &[parent.into()],
+            2,
+            2,
+        ))
+        .unwrap();
         update["metadata"] = desired.clone();
         let bytes = serde_json::to_vec(&update).unwrap();
         inbound_causal(&db, child, peer, 2, 2);
-        db.execute("UPDATE cloud_sync_state SET pull_cursor=2", []).unwrap();
+        db.execute("UPDATE cloud_sync_state SET pull_cursor=2", [])
+            .unwrap();
         // The inbox is durable before apply. A failure at proof commit must undo
         // the visible write, event/tip changes and ACK evidence together.
         db.execute_batch("CREATE TRIGGER reject_peer_proof BEFORE UPDATE ON cloud_sync_metadata_reconciliation BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
         assert!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).is_err());
         assert_eq!(visible_metadata(&db, "project").unwrap(), before);
         assert_eq!(ack_candidate(&mut db), 1);
-        assert_eq!(db.query_row("SELECT state FROM cloud_sync_inbox WHERE event_id=?1", [child], |r|r.get::<_,String>(0)).unwrap(), "received");
+        assert_eq!(
+            db.query_row(
+                "SELECT state FROM cloud_sync_inbox WHERE event_id=?1",
+                [child],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "received"
+        );
         db.execute_batch("DROP TRIGGER reject_peer_proof").unwrap();
         drop(db);
         let mut db = sqlite::open_database(&path).unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(), "applied");
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(),
+            "applied"
+        );
         assert_eq!(visible_metadata(&db, "project").unwrap(), desired);
         assert_eq!(ack_candidate(&mut db), 2);
-        let raw: String = db.query_row("SELECT payload_json FROM projects", [], |r|r.get(0)).unwrap();
+        let raw: String = db
+            .query_row("SELECT payload_json FROM projects", [], |r| r.get(0))
+            .unwrap();
         let payload: Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(payload["sync_path"], "/private/book.docx");
         assert_eq!(payload["cover_image"], "local-cover");
         assert_eq!(payload["extensions"], json!({"local":true}));
-        assert!(!String::from_utf8(bytes.clone()).unwrap().contains("/private/"));
+        assert!(!String::from_utf8(bytes.clone())
+            .unwrap()
+            .contains("/private/"));
         drop(db);
         let mut db = sqlite::open_database(&path).unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(), "applied");
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(),
+            "applied"
+        );
         assert_eq!(visible_metadata(&db, "project").unwrap(), desired);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM notes", [], |r|r.get::<_,i64>(0)).unwrap(), 1);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
         let next = json!({"name":"Local edit","goal":3000,"infinite":true,"unit":"symbols","deadline":null,"status":"active","personal_goal":200,"auto_freeze":true,"streak_enabled":true,"work_method":"manual","stages_enabled":false,"combine_stage_mindmaps":false});
         assert!(capture_normal_edit(&mut db, "project", &next, NOW).unwrap());
         let outbox = unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap();
@@ -2205,8 +3042,12 @@ mod tests {
         drop(db);
         let db = sqlite::open_database(&path).unwrap();
         assert_eq!(visible_metadata(&db, "project").unwrap(), next);
-        assert_eq!(unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap()[0]["header"]["event_id"], pending_id);
-        drop(db); std::fs::remove_file(path).unwrap();
+        assert_eq!(
+            unsealed_genesis(&db, ACCOUNT, DEVICE).unwrap()[0]["header"]["event_id"],
+            pending_id
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -2217,36 +3058,133 @@ mod tests {
         let bytes = event(id, peer, "Remote");
         let before = visible_metadata(&db, "project").unwrap();
         inbound_causal(&db, id, peer, 1, 1);
-        assert!(preserve_authenticated_event(&mut db, "other-account", "project", &bytes, NOW).is_err());
-        assert!(preserve_authenticated_event(&mut db, ACCOUNT, "other-project", &bytes, NOW).is_err());
-        for key in ["account_id", "project_id", "entity_id", "bootstrap_id", "event_id"] {
+        assert!(
+            preserve_authenticated_event(&mut db, "other-account", "project", &bytes, NOW).is_err()
+        );
+        assert!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "other-project", &bytes, NOW).is_err()
+        );
+        for key in [
+            "account_id",
+            "project_id",
+            "entity_id",
+            "bootstrap_id",
+            "event_id",
+        ] {
             let mut invalid: Value = serde_json::from_slice(&bytes).unwrap();
             invalid["header"][key] = json!("123e4567-e89b-42d3-a456-426614174088");
-            assert!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &serde_json::to_vec(&invalid).unwrap(), NOW).is_err(), "{key}");
+            assert!(
+                preserve_authenticated_event(
+                    &mut db,
+                    ACCOUNT,
+                    "project",
+                    &serde_json::to_vec(&invalid).unwrap(),
+                    NOW
+                )
+                .is_err(),
+                "{key}"
+            );
         }
         assert_eq!(visible_metadata(&db, "project").unwrap(), before);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_apply_ledger", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM cloud_sync_metadata_apply_ledger",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
         preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap();
         let candidate = capture_legacy_candidate(&mut db, ACCOUNT, "project", NOW).unwrap();
         assert!(prepare_metadata_genesis(&mut db, "other-account", &candidate, NOW).is_err());
-        assert!(adopt_authenticated_metadata(&mut db, "other-account", "project", id, &before, NOW).is_err());
+        assert!(adopt_authenticated_metadata(
+            &mut db,
+            "other-account",
+            "project",
+            id,
+            &before,
+            NOW
+        )
+        .is_err());
         assert!(assert_runtime_scope(&db, ACCOUNT, peer, DEVICE).is_err());
         assert!(assert_runtime_scope(&db, ACCOUNT, USER, peer).is_err());
-        assert!(prepare_authoritative_change(&mut db, "other-account", "project", DEVICE, "keep_local", None, None, &before, &[id.into()], NOW).is_err());
-        assert!(prepare_authoritative_change(&mut db, ACCOUNT, "other-project", DEVICE, "keep_local", None, None, &before, &[id.into()], NOW).is_err());
-        let mut foreign: Value = serde_json::from_slice(&causal_event("123e4567-e89b-42d3-a456-426614174072", peer, "Foreign", "update", &[id.into()], 2, 2)).unwrap();
+        assert!(prepare_authoritative_change(
+            &mut db,
+            "other-account",
+            "project",
+            DEVICE,
+            "keep_local",
+            None,
+            None,
+            &before,
+            &[id.into()],
+            NOW
+        )
+        .is_err());
+        assert!(prepare_authoritative_change(
+            &mut db,
+            ACCOUNT,
+            "other-project",
+            DEVICE,
+            "keep_local",
+            None,
+            None,
+            &before,
+            &[id.into()],
+            NOW
+        )
+        .is_err());
+        let mut foreign: Value = serde_json::from_slice(&causal_event(
+            "123e4567-e89b-42d3-a456-426614174072",
+            peer,
+            "Foreign",
+            "update",
+            &[id.into()],
+            2,
+            2,
+        ))
+        .unwrap();
         foreign["header"]["project_id"] = json!("other-project");
         foreign["header"]["entity_id"] = json!("other-project");
-        let page = MetadataImportPage { expected_cursor:0, next_cursor:2, has_more:false, page_events:1, page_identity:"a".repeat(64), events:vec![MetadataImportEvent {server_sequence:2, plaintext:serde_json::to_vec(&foreign).unwrap()}] };
-        assert!(commit_metadata_import_page(&mut db, ACCOUNT, USER, "other-project", BOOT, &page).is_err());
+        let page = MetadataImportPage {
+            expected_cursor: 0,
+            next_cursor: 2,
+            has_more: false,
+            page_events: 1,
+            page_identity: "a".repeat(64),
+            events: vec![MetadataImportEvent {
+                server_sequence: 2,
+                plaintext: serde_json::to_vec(&foreign).unwrap(),
+            }],
+        };
+        assert!(
+            commit_metadata_import_page(&mut db, ACCOUNT, USER, "other-project", BOOT, &page)
+                .is_err()
+        );
         let progress = read_metadata_import(&mut db, ACCOUNT, "other-project", BOOT).unwrap();
         assert_eq!(progress.cursor, 0);
         assert!(progress.head.is_none());
-        let wrong_user_page = MetadataImportPage {events:vec![MetadataImportEvent {server_sequence:1, plaintext:bytes}], ..page};
-        assert!(commit_metadata_import_page(&mut db, ACCOUNT, peer, "project", BOOT, &wrong_user_page).is_err());
+        let wrong_user_page = MetadataImportPage {
+            events: vec![MetadataImportEvent {
+                server_sequence: 1,
+                plaintext: bytes,
+            }],
+            ..page
+        };
+        assert!(commit_metadata_import_page(
+            &mut db,
+            ACCOUNT,
+            peer,
+            "project",
+            BOOT,
+            &wrong_user_page
+        )
+        .is_err());
         assert!(read_metadata_import(&mut db, ACCOUNT, "project", peer).is_err());
         assert_eq!(visible_metadata(&db, "project").unwrap(), before);
-        drop(db); std::fs::remove_file(path).unwrap();
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -2256,43 +3194,116 @@ mod tests {
         let parent = "123e4567-e89b-42d3-a456-426614174071";
         let deletion = "123e4567-e89b-42d3-a456-426614174072";
         inbound_causal(&db, parent, peer, 1, 1);
-        preserve_authenticated_event(&mut db, ACCOUNT, "project", &event(parent, peer, "Base"), NOW).unwrap();
+        preserve_authenticated_event(
+            &mut db,
+            ACCOUNT,
+            "project",
+            &event(parent, peer, "Base"),
+            NOW,
+        )
+        .unwrap();
         let local = visible_metadata(&db, "project").unwrap();
         adopt_authenticated_metadata(&mut db, ACCOUNT, "project", parent, &local, NOW).unwrap();
         let before = visible_metadata(&db, "project").unwrap();
         // A malformed intervening Note blocks the shared contiguous prefix.
         db.execute("INSERT INTO cloud_sync_inbox(account_id,event_id,server_sequence,device_id,project_id,entity_id,entity_type,operation,sync_revision,updated_at,state,received_at) VALUES(?1,'123e4567-e89b-42d3-a456-426614174073',2,?2,'project','note','note','upsert',1,?3,'received',?3)", params![ACCOUNT,peer,NOW]).unwrap();
         inbound_causal(&db, deletion, peer, 3, 2);
-        db.execute("UPDATE cloud_sync_inbox SET operation='delete',deleted_at=?1 WHERE event_id=?2", params![NOW,deletion]).unwrap();
-        let mut value: Value = serde_json::from_slice(&causal_event(deletion, peer, "Delete", "delete", &[parent.into()], 2, 2)).unwrap();
+        db.execute(
+            "UPDATE cloud_sync_inbox SET operation='delete',deleted_at=?1 WHERE event_id=?2",
+            params![NOW, deletion],
+        )
+        .unwrap();
+        let mut value: Value = serde_json::from_slice(&causal_event(
+            deletion,
+            peer,
+            "Delete",
+            "delete",
+            &[parent.into()],
+            2,
+            2,
+        ))
+        .unwrap();
         value["metadata"] = Value::Null;
         value["deleted_at"] = json!(NOW);
         let bytes = serde_json::to_vec(&value).unwrap();
-        db.execute("UPDATE cloud_sync_state SET pull_cursor=3", []).unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(), "applied");
+        db.execute("UPDATE cloud_sync_state SET pull_cursor=3", [])
+            .unwrap();
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(),
+            "applied"
+        );
         assert_eq!(ack_candidate(&mut db), 1);
         drop(db);
         let mut db = sqlite::open_database(&path).unwrap();
-        assert_eq!(preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(), "applied");
+        assert_eq!(
+            preserve_authenticated_event(&mut db, ACCOUNT, "project", &bytes, NOW).unwrap(),
+            "applied"
+        );
         assert_eq!(visible_metadata(&db, "project").unwrap(), before);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM notes", [], |r|r.get::<_,i64>(0)).unwrap(), 1);
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_events", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
         assert_eq!(ack_candidate(&mut db), 1);
-        drop(db); std::fs::remove_file(path).unwrap();
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
     fn project_metadata_acceptance_import_byte_cap_preserves_prefix_on_restart() {
         let (mut db, path) = database();
         let id = "123e4567-e89b-42d3-a456-426614174071";
-        let first = MetadataImportPage { expected_cursor:0, next_cursor:1, has_more:true, page_events:1, page_identity:"a".repeat(64), events:vec![MetadataImportEvent {server_sequence:1, plaintext:event(id, DEVICE, "Prefix")}] };
+        let first = MetadataImportPage {
+            expected_cursor: 0,
+            next_cursor: 1,
+            has_more: true,
+            page_events: 1,
+            page_identity: "a".repeat(64),
+            events: vec![MetadataImportEvent {
+                server_sequence: 1,
+                plaintext: event(id, DEVICE, "Prefix"),
+            }],
+        };
         commit_metadata_import_page(&mut db, ACCOUNT, USER, "project", BOOT, &first).unwrap();
         // Model an already verified aggregate at the frozen byte bound without
         // generating a large fixture. The production boundary is checked next.
-        db.execute("UPDATE cloud_sync_metadata_imports SET payload_bytes=16777216 WHERE account_id=?1", [ACCOUNT]).unwrap();
-        let next = MetadataImportPage { expected_cursor:1, next_cursor:2, has_more:false, page_events:1, page_identity:"b".repeat(64), events:vec![MetadataImportEvent {server_sequence:2, plaintext:causal_event("123e4567-e89b-42d3-a456-426614174072", DEVICE, "Tail", "update", &[id.into()], 2, 2)}] };
-        let blocked = commit_metadata_import_page(&mut db, ACCOUNT, USER, "project", BOOT, &next).unwrap();
-        assert_eq!(blocked.blocker.as_deref(), Some("metadata_import_resource_limit"));
+        db.execute(
+            "UPDATE cloud_sync_metadata_imports SET payload_bytes=16777216 WHERE account_id=?1",
+            [ACCOUNT],
+        )
+        .unwrap();
+        let next = MetadataImportPage {
+            expected_cursor: 1,
+            next_cursor: 2,
+            has_more: false,
+            page_events: 1,
+            page_identity: "b".repeat(64),
+            events: vec![MetadataImportEvent {
+                server_sequence: 2,
+                plaintext: causal_event(
+                    "123e4567-e89b-42d3-a456-426614174072",
+                    DEVICE,
+                    "Tail",
+                    "update",
+                    &[id.into()],
+                    2,
+                    2,
+                ),
+            }],
+        };
+        let blocked =
+            commit_metadata_import_page(&mut db, ACCOUNT, USER, "project", BOOT, &next).unwrap();
+        assert_eq!(
+            blocked.blocker.as_deref(),
+            Some("metadata_import_resource_limit")
+        );
         assert_eq!(blocked.cursor, 1);
         assert_eq!(blocked.event_count, 1);
         assert!(blocked.head.is_none() && blocked.metadata.is_none());
@@ -2302,11 +3313,33 @@ mod tests {
         assert_eq!(blocked.state, "blocked");
         assert_eq!(blocked.tips, vec![id.to_string()]);
         assert!(blocked.head.is_none());
-        assert!(commit_metadata_import_page(&mut db, ACCOUNT, USER, "project", BOOT, &next).is_err());
-        assert_eq!(db.query_row("SELECT COUNT(*) FROM cloud_sync_metadata_import_events", [], |r|r.get::<_,i64>(0)).unwrap(), 1);
-        assert_eq!(db.query_row("SELECT pull_cursor+ack_cursor FROM cloud_sync_state", [], |r|r.get::<_,i64>(0)).unwrap(), 0);
-        assert_eq!(visible_metadata(&db, "project").unwrap()["name"], "Local name");
-        drop(db); std::fs::remove_file(path).unwrap();
+        assert!(
+            commit_metadata_import_page(&mut db, ACCOUNT, USER, "project", BOOT, &next).is_err()
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT COUNT(*) FROM cloud_sync_metadata_import_events",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            db.query_row(
+                "SELECT pull_cursor+ack_cursor FROM cloud_sync_state",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            0
+        );
+        assert_eq!(
+            visible_metadata(&db, "project").unwrap()["name"],
+            "Local name"
+        );
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
 }
 
@@ -2319,7 +3352,9 @@ fn decode_metadata_event(bytes: &[u8], project: &str) -> Result<Value, MetadataE
         return Err(MetadataError::Invalid);
     }
     let root = value.as_object().ok_or(MetadataError::Invalid)?;
-    if !exact(root, &["version", "header", "metadata", "deleted_at"]) || !matches!(root["version"].as_u64(),Some(1|2)) {
+    if !exact(root, &["version", "header", "metadata", "deleted_at"])
+        || !matches!(root["version"].as_u64(), Some(1 | 2))
+    {
         return Err(MetadataError::Invalid);
     }
     let header = root["header"].as_object().ok_or(MetadataError::Invalid)?;
@@ -2386,8 +3421,10 @@ fn decode_metadata_event(bytes: &[u8], project: &str) -> Result<Value, MetadataE
     } else if !root["deleted_at"].is_null() {
         return Err(MetadataError::Invalid);
     } else {
-        let has_cover=root["metadata"].get("cover_reference").is_some();
-        if has_cover!=(root["version"]==2) {return Err(MetadataError::Invalid)}
+        let has_cover = root["metadata"].get("cover_reference").is_some();
+        if has_cover != (root["version"] == 2) {
+            return Err(MetadataError::Invalid);
+        }
         validate_metadata(&root["metadata"])?;
     }
     Ok(value)
@@ -2541,7 +3578,9 @@ pub(crate) fn commit_metadata_import_page(
         }
         previous_sequence = item.server_sequence;
         let value = decode_metadata_event(&item.plaintext, project)?;
-        if let Some(reference)=value["metadata"].get("cover_reference"){crate::project_cover_sync::require_material(&tx,account,project,reference)?;}
+        if let Some(reference) = value["metadata"].get("cover_reference") {
+            crate::project_cover_sync::require_material(&tx, account, project, reference)?;
+        }
         let h = value["header"].as_object().ok_or(MetadataError::Invalid)?;
         if str_field(h, "account_id")? != user || str_field(h, "bootstrap_id")? != bootstrap {
             return Err(MetadataError::Scope);
@@ -2607,43 +3646,101 @@ pub(crate) fn commit_metadata_import_page(
     read_metadata_import(connection, account, project, bootstrap)
 }
 
-
 /// Independent native framing verifier; historical v1 is never rewritten.
-pub(crate) fn unframe_metadata_event(frame:&[u8])->Result<Value,MetadataError>{
+pub(crate) fn unframe_metadata_event(frame: &[u8]) -> Result<Value, MetadataError> {
     let normalized;
-    let frame = if frame.len()>=20 && frame[11]!=0 && [1].contains(&frame[9]) && [1,2].contains(&frame[10]) {
-        normalized=crate::frame_compression::normalize_authenticated_frame(frame,&[1],&[1,2],MAX_BYTES).map_err(MetadataError::Compression)?;
+    let frame = if frame.len() >= 20
+        && frame[11] != 0
+        && [1].contains(&frame[9])
+        && [1, 2].contains(&frame[10])
+    {
+        normalized = crate::frame_compression::normalize_authenticated_frame(
+            frame,
+            &[1],
+            &[1, 2],
+            MAX_BYTES,
+        )
+        .map_err(MetadataError::Compression)?;
         normalized.as_slice()
-    } else {frame};
+    } else {
+        frame
+    };
 
- if frame.len()<20||frame.len()>MAX_BYTES+20||&frame[..8]!=b"WORTA-C1"||frame[8]!=1||frame[9]!=1||!matches!(frame[10],1|2)||frame[11]!=0{return Err(MetadataError::Invalid)}
- let len=frame.len()-20;
- if u32::from_be_bytes(frame[12..16].try_into().unwrap()) as usize!=len||u32::from_be_bytes(frame[16..20].try_into().unwrap()) as usize!=len{return Err(MetadataError::Invalid)}
- let value:Value=serde_json::from_slice(&frame[20..]).map_err(|_|MetadataError::Invalid)?;
- let project=value["header"]["project_id"].as_str().ok_or(MetadataError::Invalid)?;
- let value=decode_metadata_event(&frame[20..],project)?;
- if value["version"]!=frame[10] {return Err(MetadataError::Invalid)}
- Ok(value)
+    if frame.len() < 20
+        || frame.len() > MAX_BYTES + 20
+        || &frame[..8] != b"WORTA-C1"
+        || frame[8] != 1
+        || frame[9] != 1
+        || !matches!(frame[10], 1 | 2)
+        || frame[11] != 0
+    {
+        return Err(MetadataError::Invalid);
+    }
+    let len = frame.len() - 20;
+    if u32::from_be_bytes(frame[12..16].try_into().unwrap()) as usize != len
+        || u32::from_be_bytes(frame[16..20].try_into().unwrap()) as usize != len
+    {
+        return Err(MetadataError::Invalid);
+    }
+    let value: Value = serde_json::from_slice(&frame[20..]).map_err(|_| MetadataError::Invalid)?;
+    let project = value["header"]["project_id"]
+        .as_str()
+        .ok_or(MetadataError::Invalid)?;
+    let value = decode_metadata_event(&frame[20..], project)?;
+    if value["version"] != frame[10] {
+        return Err(MetadataError::Invalid);
+    }
+    Ok(value)
 }
 #[cfg(test)]
 mod cover_vectors {
- use super::*;
- #[test]
- fn project_metadata_cover_v2_golden_vectors_preserve_v1(){
-  let vectors:Vec<Value>=serde_json::from_str(include_str!("../../src/cloud/__fixtures__/projectMetadataV2.json")).unwrap();
-  for vector in vectors {
-   let raw=vector["frame_hex"].as_str().unwrap();let bytes=(0..raw.len()).step_by(2).map(|i|u8::from_str_radix(&raw[i..i+2],16).unwrap()).collect::<Vec<_>>();
-   assert_eq!(&bytes[20..],vector["canonical"].as_str().unwrap().as_bytes());
-   assert_eq!(unframe_metadata_event(&bytes).unwrap(),vector["event"]);
-   for offset in [8,9,10,11] {let mut bad=bytes.clone();bad[offset]=255;assert!(unframe_metadata_event(&bad).is_err());}
-   let mut bad=vector["event"].clone();bad["metadata"]["unknown"]=json!(true);assert!(decode_metadata_event(bad.to_string().as_bytes(),"project").is_err());
-   if bad["version"]==2 {bad["metadata"].as_object_mut().unwrap().remove("unknown");bad["version"]=json!(1);assert!(decode_metadata_event(bad.to_string().as_bytes(),"project").is_err());}
-  }
- }
+    use super::*;
+    #[test]
+    fn project_metadata_cover_v2_golden_vectors_preserve_v1() {
+        let vectors: Vec<Value> = serde_json::from_str(include_str!(
+            "../../src/cloud/__fixtures__/projectMetadataV2.json"
+        ))
+        .unwrap();
+        for vector in vectors {
+            let raw = vector["frame_hex"].as_str().unwrap();
+            let bytes = (0..raw.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&raw[i..i + 2], 16).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                &bytes[20..],
+                vector["canonical"].as_str().unwrap().as_bytes()
+            );
+            assert_eq!(unframe_metadata_event(&bytes).unwrap(), vector["event"]);
+            for offset in [8, 9, 10, 11] {
+                let mut bad = bytes.clone();
+                bad[offset] = 255;
+                assert!(unframe_metadata_event(&bad).is_err());
+            }
+            let mut bad = vector["event"].clone();
+            bad["metadata"]["unknown"] = json!(true);
+            assert!(decode_metadata_event(bad.to_string().as_bytes(), "project").is_err());
+            if bad["version"] == 2 {
+                bad["metadata"].as_object_mut().unwrap().remove("unknown");
+                bad["version"] = json!(1);
+                assert!(decode_metadata_event(bad.to_string().as_bytes(), "project").is_err());
+            }
+        }
+    }
 }
 
 /// Reader failure preserves the immutable inbox/object and leaves shared ACK hole.
-pub(crate) fn compression_reader_blocker(db:&Connection,a:&str,event:&str,nonce:&[u8],ciphertext:&[u8],code:&str)->Result<(),MetadataError>{
-    if !crate::frame_compression::CODES.contains(&code){return Err(MetadataError::Invalid);}
-    db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='project_metadata' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",params![code,a,event,nonce,ciphertext])?;Ok(())
+pub(crate) fn compression_reader_blocker(
+    db: &Connection,
+    a: &str,
+    event: &str,
+    nonce: &[u8],
+    ciphertext: &[u8],
+    code: &str,
+) -> Result<(), MetadataError> {
+    if !crate::frame_compression::CODES.contains(&code) {
+        return Err(MetadataError::Invalid);
+    }
+    db.execute("UPDATE cloud_sync_inbox SET state='orphan',error_code=?1 WHERE account_id=?2 AND event_id=?3 AND entity_type='project_metadata' AND state IN ('received','orphan') AND EXISTS(SELECT 1 FROM cloud_sync_event_objects o WHERE o.account_id=?2 AND o.event_id=?3 AND o.nonce=?4 AND o.ciphertext=?5)",params![code,a,event,nonce,ciphertext])?;
+    Ok(())
 }

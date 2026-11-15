@@ -260,11 +260,9 @@ release entry point, and `Release Tauri All.sh` runs only that target by default
 Use `Release Tauri All.sh intel` (or set
 `NFPROGRESS_TAURI_INCLUDE_INTEL=1`) for explicit Intel qualification. Each
 architecture uses its own ignored frontend workspace under
-`.tauri-build-workspaces/`, including `node_modules`, Vite output and Tauri
-target files. Ordinary `Build Tauri` test builds remove the workspace Cargo
-target after packaging; release qualification retains it explicitly for app
-inspection. Set `NFPROGRESS_TAURI_KEEP_BUILD_CACHE=1` only when retaining that
-cache is intentional.
+`.tauri-build-workspaces/`. Both use a shared npm installation and remove
+their private dependency copies and intermediate files when done. See
+[local build caches](docs/build-cache.md) for storage and retention settings.
 
 The build workspace synchronizes the normalized three-component version from
 `engine.py` into the Tauri and Cargo metadata before building, without racing

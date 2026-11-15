@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
       <main class="help-page">
         <header class="help-header">
           <div>
-            <p>{{ t('Справочник nfprogress') }}</p>
+            <p>{{ t('Справочник nfprogress').replace(/nfprogress/gi, 'worta') }}</p>
             <h1>{{ t('Помощь') }}</h1>
             <span>{{ t('Справка всегда соответствует возможностям установленной версии приложения.') }}</span>
           </div>

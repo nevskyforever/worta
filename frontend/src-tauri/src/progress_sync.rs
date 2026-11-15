@@ -902,7 +902,8 @@ pub fn seal(
     {
         return Err("progress_scope_mismatch".into());
     }
-    let compression_view = crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
     let frame = compression_view.as_ref();
     let tx = db
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -1054,18 +1055,7 @@ fn write_projection(
         params![h.project_id, h.stage_id],
     )?;
     // Compact only gaps, preserving every unaffected scope's relative sequence.
-    let remaining = rows(
-        tx,
-        "SELECT entry_id FROM progress_order ORDER BY position",
-        [],
-    )?;
-    for (position, id) in remaining.iter().enumerate() {
-        exec(
-            tx,
-            "UPDATE progress_order SET position=?1 WHERE entry_id=?2 AND position<>?1",
-            params![position as i64, id],
-        )?;
-    }
+    crate::sqlite::compact_progress_order(tx).map_err(sql)?;
     let mut pos: i64 = tx
         .query_row(
             "SELECT COALESCE(MAX(position),-1)+1 FROM progress_order",
@@ -1144,7 +1134,8 @@ pub fn apply(
     nonce: &[u8],
     ciphertext: &[u8],
 ) -> Result<String> {
-    let compression_view = crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
+    let compression_view =
+        crate::frame_compression::canonical_view(frame).map_err(str::to_owned)?;
     let frame = compression_view.as_ref();
     let e = codec::decode(frame)?;
     let h = &e.header;
@@ -1583,12 +1574,17 @@ pub fn received(db: &Connection, a: &str, after: i64, limit: i64) -> Result<Vec<
     if after < 0 || !(1..=32).contains(&limit) {
         return Err("invalid_progress_page".into());
     }
-    let tx=db.unchecked_transaction().map_err(sql)?;
+    let tx = db.unchecked_transaction().map_err(sql)?;
     let mut q=tx.prepare("SELECT i.event_id,i.server_sequence,i.device_id,i.project_id,i.entity_id,i.sync_revision,i.updated_at,o.nonce,o.ciphertext FROM cloud_sync_inbox i JOIN cloud_sync_event_objects o USING(account_id,event_id) LEFT JOIN cloud_game_reader_visits v ON v.account_id=i.account_id AND v.event_id=i.event_id WHERE i.account_id=?1 AND i.entity_type='progress' AND i.operation='event' AND i.state IN ('received','orphan') AND i.server_sequence>?2 ORDER BY COALESCE(v.ordinal,0),i.server_sequence LIMIT ?3").map_err(sql)?;
     let mut rows=q.query_map(params![a,after,limit],|r|Ok(json!({"event_id":r.get::<_,String>(0)?,"server_sequence":r.get::<_,i64>(1)?,"source_device_id":r.get::<_,String>(2)?,"project_id":r.get::<_,String>(3)?,"entity_id":r.get::<_,String>(4)?,"revision":r.get::<_,i64>(5)?,"updated_at":r.get::<_,String>(6)?,"nonce":r.get::<_,Vec<u8>>(7)?,"ciphertext":r.get::<_,Vec<u8>>(8)?}))).map_err(sql)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sql)?;
     drop(q);
     rows.sort_by_key(|r| r["server_sequence"].as_i64().unwrap_or(0));
-    crate::sqlite::record_sync_reader_visits(&tx,a,rows.iter().filter_map(|r|r["event_id"].as_str())).map_err(sql)?;
+    crate::sqlite::record_sync_reader_visits(
+        &tx,
+        a,
+        rows.iter().filter_map(|r| r["event_id"].as_str()),
+    )
+    .map_err(sql)?;
     tx.commit().map_err(sql)?;
     Ok(rows)
 }

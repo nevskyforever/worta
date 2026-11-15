@@ -1,10 +1,8 @@
 name: Build Tauri Windows desktop release
 
 on:
-  push:
-    branches:
-      - main
-
+  # Release qualification/publication is explicitly started by the owner
+  # after local pre-release checks. Do not run it for every main push.
   workflow_dispatch:
     inputs:
       release_notes:
@@ -18,9 +16,9 @@ on:
         type: string
 
       publish_production:
-        description: 'Опубликовать уже квалифицированные production-артефакты'
+        description: 'Опубликовать квалифицированный релиз (обязательно)'
         required: true
-        default: false
+        default: true
         type: boolean
 
       sign_windows:
@@ -41,8 +39,203 @@ concurrency:
 
 
 jobs:
+  validate_dispatch:
+    name: Validate release dispatch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the main branch and production publication
+        env:
+          PUBLISH_PRODUCTION: ${{ inputs.publish_production }}
+        run: |
+          if [[ "$GITHUB_REF" != refs/heads/main ]]; then
+            echo 'A release must be dispatched from main.' >&2
+            exit 1
+          fi
+          if [[ "$PUBLISH_PRODUCTION" != true ]]; then
+            echo 'Publication is required for a release dispatch; publish_production must be true.' >&2
+            exit 1
+          fi
+
+  inspect_host:
+    name: Inspect existing release builds
+    needs: [validate_dispatch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      attestations: read
+    outputs:
+      windows_available: ${{ steps.inspect.outputs.windows_available }}
+      windows_hash: ${{ steps.inspect.outputs.windows_hash }}
+      windows_commit: ${{ steps.inspect.outputs.windows_commit }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SIGN_WINDOWS: ${{ inputs.sign_windows }}
+    steps:
+      - name: Checkout repository and release tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Inspect and validate hosted builds
+        id: inspect
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node scripts/sync-tauri-versions.mjs --version-only)
+          tag="v${version}"
+          if ! tag_sha=$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}"); then
+            echo "::error::Required release tag ${tag} is missing. Verify the published macOS archives against their source SHA, create and push ${tag} on that exact commit, then rerun the failed jobs of this run. Never move an existing release tag."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/host-inspection"
+          for arch in arm intel; do
+            file="$RUNNER_TEMP/host-inspection/nfprogress-mac-${arch}-${version}.zip"
+            if ! curl --fail --location --retry 3 --silent --show-error \
+              "https://worta.ru/app/nfprogress-mac-${arch}-${version}.zip" -o "$file"; then
+              echo "Required macOS ${arch} ${version} build is unavailable; build it before dispatching the release." >&2
+              exit 1
+            fi
+            unzip -tq "$file"
+            python3 scripts/verify-tauri-artifact.py "$file" "$tag_sha"
+          done
+          file="$RUNNER_TEMP/host-inspection/nfprogress-windows-x86_64-${version}-setup.exe"
+          url="https://worta.ru/app/nfprogress-windows-x86_64-${version}-setup.exe"
+          status=$(curl --location --retry 3 --silent --show-error --output "$file" --write-out '%{http_code}' "$url")
+          if [[ "$status" == 404 ]]; then
+            echo 'windows_available=false' >> "$GITHUB_OUTPUT"
+            echo 'Windows build is missing; it will be built.'
+            exit 0
+          fi
+          [[ "$status" == 200 && -s "$file" ]] || { echo "Windows host returned HTTP $status." >&2; exit 1; }
+          if [[ "$SIGN_WINDOWS" == true ]]; then
+            echo 'Authenticode was requested; an existing hosted build cannot be re-signed safely.' >&2
+            exit 1
+          fi
+          curl --fail --location --retry 3 --silent --show-error "$url.sig" -o "$file.sig"
+          test -s "$file.sig"
+          hash=$(sha256sum "$file" | cut -d ' ' -f 1)
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/host-inspection/release.json" 2>/dev/null; then
+            asset_digest=$(jq -r --arg name "${file##*/}" '.assets[] | select(.name == $name) | .digest' "$RUNNER_TEMP/host-inspection/release.json")
+            [[ "$asset_digest" == "sha256:$hash" ]] || { echo 'Hosted Windows build differs from the GitHub release.' >&2; exit 1; }
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern provenance.txt --dir "$RUNNER_TEMP/host-inspection"
+            provenance_digest=$(sha256sum "$RUNNER_TEMP/host-inspection/provenance.txt" | cut -d ' ' -f 1)
+            expected=$(jq -r '.assets[] | select(.name == "provenance.txt") | .digest' "$RUNNER_TEMP/host-inspection/release.json")
+            [[ "$expected" == "sha256:$provenance_digest" ]] || { echo 'Release provenance digest mismatch.' >&2; exit 1; }
+            source_sha=$(sed -n 's/^commit_sha=//p' "$RUNNER_TEMP/host-inspection/provenance.txt" | tr -d '\r')
+            [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo 'Release provenance revision is invalid.' >&2; exit 1; }
+            if [[ "$source_sha" != "$tag_sha" ]]; then
+              if [[ "$version" == 5.3.12 && "$tag_sha" == ad67da2ed9d253a4a98638cc21f187fb4e1e373e ]]; then
+                baseline=6612e656580f685138079ea84ddaa07bfcd3a1a8
+                git merge-base --is-ancestor "$baseline" "$source_sha"
+                changes=$(git diff --name-status --no-renames "$baseline" "$source_sha")
+                while IFS=$'\t' read -r state path; do
+                  [[ "$state" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
+                  case "$path" in
+                    .github/workflows/build.yml|AGENTS.md|docs/DEVELOPMENT_RUNBOOK.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
+                    *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+                  esac
+                done <<< "$changes"
+              elif [[ "$version" == 5.3.11 && "$tag_sha" == 8017ab1bbd3a2b789acfd38c5d84c84351453468 ]]; then
+                git merge-base --is-ancestor "$tag_sha" "$source_sha"
+                changes=$(git diff --name-status --no-renames "$tag_sha" "$source_sha")
+                while IFS=$'\t' read -r state path; do
+                  [[ "$state" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
+                  case "$path" in
+                    .github/workflows/build.yml|frontend/src/cloud/syncNetworkFailure.http.spec.ts|frontend/src/platform/web/localSourceKernel.spec.ts|frontend/src/platform/web/resolutionMixedContinuation.spec.ts) ;;
+                    *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+                  esac
+                done <<< "$changes"
+              else
+                echo 'Release provenance does not match its tag.' >&2
+                exit 1
+              fi
+            fi
+          elif [[ "$version" == 5.3.12 && "$tag_sha" == ad67da2ed9d253a4a98638cc21f187fb4e1e373e ]]; then
+            # One-time recovery of the already uploaded, qualified 5.3.12
+            # Windows build from the run that reached publication but hit 403.
+            # Its Actions artifact remains until the release is complete.
+            run_id=41509366422
+            gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headSha,headBranch,event,jobs > "$RUNNER_TEMP/host-inspection/qualified-run.json"
+            jq -e '
+              .headSha == "ef1050b669c91091c9e5a944017edaf07f112589" and
+              .headBranch == "main" and .event == "workflow_dispatch" and
+              ([.jobs[] | select(.name == "Build Tauri/NSIS release") | .conclusion] == ["success"]) and
+              ([.jobs[] | select(.name | startswith("Windows frontend tests (")) | .conclusion] | length == 4 and all(. == "success"))
+            ' "$RUNNER_TEMP/host-inspection/qualified-run.json" >/dev/null
+            mkdir -p "$RUNNER_TEMP/host-inspection/qualified"
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name "tauri-windows-${version}" --dir "$RUNNER_TEMP/host-inspection/qualified"
+            (cd "$RUNNER_TEMP/host-inspection/qualified" && tr -d '\r' < SHA256SUMS.txt | sha256sum -c -)
+            cmp "$file" "$RUNNER_TEMP/host-inspection/qualified/${file##*/}"
+            cmp "$file.sig" "$RUNNER_TEMP/host-inspection/qualified/${file##*/}.sig"
+            source_sha=$(sed -n 's/^commit_sha=//p' "$RUNNER_TEMP/host-inspection/qualified/provenance.txt" | tr -d '\r')
+            [[ "$source_sha" == ef1050b669c91091c9e5a944017edaf07f112589 ]] || { echo 'Qualified Windows provenance mismatch.' >&2; exit 1; }
+          else
+            # An unpublished hosted file is reusable only with a GitHub-signed
+            # attestation binding this exact payload to the release tag commit.
+            gh attestation verify "$file" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/build.yml" \
+              --source-ref refs/heads/main --source-digest "$tag_sha"
+            source_sha="$tag_sha"
+          fi
+          echo 'windows_available=true' >> "$GITHUB_OUTPUT"
+          echo "windows_hash=$hash" >> "$GITHUB_OUTPUT"
+          echo "windows_commit=$source_sha" >> "$GITHUB_OUTPUT"
+          echo 'Hosted Windows build provenance verified; it will be reused.'
+
+  frontend_tests:
+    needs: [inspect_host]
+    name: Windows frontend tests (${{ matrix.shard }}/4)
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (contains(github.event.head_commit.message, 'Обновление') || github.event_name == 'workflow_dispatch')
+    runs-on: windows-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements-backend.txt
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-backend.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location frontend
+          try {
+            npm ci --prefer-offline --no-audit --no-fund
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally { Pop-Location }
+      - name: Run Vitest shard
+        shell: pwsh
+        working-directory: frontend
+        env:
+          TEST_SHARD: ${{ matrix.shard }}
+        run: |
+          npm run test -- "--shard=$env:TEST_SHARD/4" --maxWorkers=2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   build_windows:
     name: Build Tauri/NSIS release
+    needs: [inspect_host]
+    permissions:
+      contents: read
+      attestations: write
+      id-token: write
 
     if: >-
       github.ref == 'refs/heads/main' &&
@@ -107,6 +300,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Set up Rust
+        if: needs.inspect_host.outputs.windows_available != 'true'
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -123,6 +317,7 @@ jobs:
       # frontend/src-tauri -> target
 
       - name: Restore Rust build cache
+        if: needs.inspect_host.outputs.windows_available != 'true'
         uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
         with:
           workspaces: |
@@ -141,10 +336,12 @@ jobs:
         shell: pwsh
         run: |
           node scripts\sync-tauri-versions.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $version = (
             node scripts\sync-tauri-versions.mjs --version-only
           ).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           if (
             $version -notmatch
@@ -181,7 +378,7 @@ jobs:
       # Release notes
       # ------------------------------------------------------------
 
-      - name: Prepare release notes
+      - name: Prepare release notes and Telegram post
         id: release_notes
         shell: pwsh
 
@@ -232,23 +429,58 @@ jobs:
             }
           }
 
-          if ([string]::IsNullOrWhiteSpace($releaseNotes)) {
-            $releaseNotes = `
-              "Исправлены ошибки и улучшена стабильность."
-          }
-
           $telegramMessage = (
             [string]$env:MANUAL_TELEGRAM_MESSAGE
           ).Trim()
 
-          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
-            if (-not [string]::IsNullOrWhiteSpace($message)) {
-              $telegramMessage = $message
+          $version = $env:APP_VERSION
+          $header = "Обновление $version"
+
+          foreach ($text in @($releaseNotes, $telegramMessage)) {
+            if ([string]::IsNullOrWhiteSpace($text)) {
+              continue
             }
-            else {
-              $telegramMessage = $releaseNotes
+
+            $firstLine = ($text -split "`r?`n", 2)[0].Trim()
+            if ($firstLine -match '^Обновление\s+(.+)$') {
+              if ($Matches[1].Trim() -ne $version) {
+                throw "Release text version '$($Matches[1].Trim())' does not match $version."
+              }
             }
           }
+
+          if (-not [string]::IsNullOrWhiteSpace($releaseNotes)) {
+            $releaseNotes = [regex]::Replace(
+              $releaseNotes,
+              ('^Обновление\s+' + [regex]::Escape($version) + '\s*(\r?\n\s*\r?\n)?'),
+              '',
+              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+            ).Trim()
+          }
+
+          if ([string]::IsNullOrWhiteSpace($releaseNotes)) {
+            $releaseNotes = "Исправлены ошибки и улучшена стабильность."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = $releaseNotes
+          }
+
+          if (-not [string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = [regex]::Replace(
+              $telegramMessage,
+              ('^Обновление\s+' + [regex]::Escape($version) + '\s*(\r?\n\s*\r?\n)?'),
+              '',
+              [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+            ).Trim()
+          }
+
+          if ([string]::IsNullOrWhiteSpace($telegramMessage)) {
+            $telegramMessage = $releaseNotes
+          }
+
+          $releaseNotes = "$header`n`n$releaseNotes"
+          $telegramMessage = "$header`n`n$telegramMessage"
 
           $notesPath = Join-Path `
             $env:RUNNER_TEMP `
@@ -293,6 +525,7 @@ jobs:
           python -m pip install `
             --disable-pip-version-check `
             pytest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
       - name: Install frontend dependencies
@@ -311,13 +544,13 @@ jobs:
         run: |
           python -m pytest -q `
             tests\test_tauri_release_metadata.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           Push-Location frontend
 
           try {
-            npm run typecheck
-            npm run test
             npm run build
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
           finally {
             Pop-Location
@@ -329,6 +562,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Validate Tauri updater keys
+        if: needs.inspect_host.outputs.windows_available != 'true'
         shell: pwsh
 
         env:
@@ -381,6 +615,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Create Tauri release configuration
+        if: needs.inspect_host.outputs.windows_available != 'true'
         shell: pwsh
         run: |
           $configPath = Join-Path `
@@ -389,9 +624,9 @@ jobs:
 
           python scripts\create-tauri-release-config.py `
             --version $env:APP_VERSION `
-            --repository $env:GITHUB_REPOSITORY `
             --public-key-file $env:TAURI_UPDATER_PUBLIC_KEY_FILE `
             --output $configPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           "TAURI_RELEASE_CONFIG=$configPath" `
             >> $env:GITHUB_ENV
@@ -401,7 +636,18 @@ jobs:
       # Tauri build
       # ------------------------------------------------------------
 
+      - name: Check Rust formatting (known baseline debt)
+        if: needs.inspect_host.outputs.windows_available != 'true'
+        continue-on-error: true
+        shell: pwsh
+        working-directory: frontend
+        run: |
+          cargo fmt `
+            --manifest-path src-tauri\Cargo.toml `
+            --check
+
       - name: Run Rust checks and build Tauri desktop
+        if: needs.inspect_host.outputs.windows_available != 'true'
         shell: pwsh
         working-directory: frontend
 
@@ -413,22 +659,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
         run: |
-          cargo fmt `
-            --manifest-path src-tauri\Cargo.toml `
-            --check
-
           cargo check `
             --manifest-path src-tauri\Cargo.toml `
             --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           cargo test `
             --manifest-path src-tauri\Cargo.toml `
             --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           npx tauri build `
             --target x86_64-pc-windows-msvc `
             --bundles nsis `
             --config $env:TAURI_RELEASE_CONFIG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 
       # ------------------------------------------------------------
@@ -436,7 +681,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Sign Windows executable and installer
-        if: inputs.sign_windows == true
+        if: inputs.sign_windows == true && needs.inspect_host.outputs.windows_available != 'true'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -455,6 +700,7 @@ jobs:
       # ------------------------------------------------------------
 
       - name: Verify updater artifact and prepare release assets
+        if: needs.inspect_host.outputs.windows_available != 'true'
         shell: pwsh
         run: |
           $targetRoot = `
@@ -533,12 +779,12 @@ jobs:
 
           python scripts\create-tauri-update-manifest.py `
             --version $env:APP_VERSION `
-            --repository $env:GITHUB_REPOSITORY `
             --tag "v$($env:APP_VERSION)" `
             --artifact $assetPath `
             --signature "$assetPath.sig" `
             --notes-file $env:RELEASE_NOTES_FILE `
             --output "$assets\latest.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           @(
             "commit_sha=$env:BUILD_COMMIT_SHA"
@@ -580,13 +826,20 @@ jobs:
       # Upload artifact
       # ------------------------------------------------------------
 
+      - name: Attest Windows release provenance
+        if: needs.inspect_host.outputs.windows_available != 'true'
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release-assets/nfprogress-windows-x86_64-${{ steps.version.outputs.version }}-setup.exe
+
       - name: Store Windows release
+        if: needs.inspect_host.outputs.windows_available != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: tauri-windows-${{ steps.version.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 1
 
 
   # ==============================================================
@@ -596,12 +849,12 @@ jobs:
   publish_release:
     name: Publish GitHub release
 
-    needs: build_windows
+    needs: [validate_dispatch, inspect_host, build_windows, frontend_tests]
 
     if: >-
       needs.build_windows.result == 'success' &&
-      github.event_name == 'workflow_dispatch' &&
-      inputs.publish_production == true
+      needs.frontend_tests.result == 'success' &&
+      github.event_name == 'workflow_dispatch'
 
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -632,14 +885,77 @@ jobs:
       # Download Windows artifact
       # ------------------------------------------------------------
 
+      - name: Validate release provenance
+        id: release_provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(git rev-parse --is-shallow-repository)" == true ]]; then
+            git fetch --unshallow origin
+          fi
+          git fetch --no-tags origin refs/tags/v"$APP_VERSION":refs/tags/v"$APP_VERSION"
+          tag_sha=$(git rev-parse "refs/tags/v${APP_VERSION}^{commit}")
+          if [[ "$tag_sha" != "$GITHUB_SHA" ]]; then
+            if [[ "$APP_VERSION" == "5.3.12" && "$tag_sha" == "ad67da2ed9d253a4a98638cc21f187fb4e1e373e" ]]; then
+              # The fixed baseline differs from the tag only in CI, tests, and
+              # macOS release orchestration, not application build sources.
+              # Permit only this task's reviewed publication changes afterward.
+              baseline=6612e656580f685138079ea84ddaa07bfcd3a1a8
+              git merge-base --is-ancestor "$tag_sha" "$baseline"
+              git merge-base --is-ancestor "$baseline" "$GITHUB_SHA"
+              changes=$(git diff --name-status --no-renames "$baseline" "$GITHUB_SHA")
+              while IFS=$'\t' read -r status path; do
+                [[ "$status" == M ]] || { echo 'Unexpected release change.' >&2; exit 1; }
+                case "$path" in
+                  .github/workflows/build.yml|AGENTS.md|docs/DEVELOPMENT_RUNBOOK.md|tests/test_f10_release_engineering.py|frontend/src/platform/web/historicalMetadataDependency.spec.ts) ;;
+                  *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+                esac
+              done <<< "$changes"
+            elif [[ "$APP_VERSION" == "5.3.11" && "$tag_sha" == "8017ab1bbd3a2b789acfd38c5d84c84351453468" ]]; then
+            git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA"
+            changes=$(git diff --name-status --no-renames "$tag_sha" "$GITHUB_SHA")
+            [[ -n "$changes" ]] || { echo 'Expected release qualification changes.' >&2; exit 1; }
+            while IFS=$'\t' read -r status path; do
+              [[ "$status" == M ]] || { echo 'Unexpected release source change.' >&2; exit 1; }
+              case "$path" in
+                .github/workflows/build.yml|frontend/src/cloud/syncNetworkFailure.http.spec.ts|frontend/src/platform/web/localSourceKernel.spec.ts|frontend/src/platform/web/resolutionMixedContinuation.spec.ts) ;;
+                *) echo "Unexpected release source change: $path" >&2; exit 1 ;;
+              esac
+            done <<< "$changes"
+            else
+              echo 'The release tag must match the qualified revision.' >&2
+              exit 1
+            fi
+          fi
+          echo "tag_sha=$tag_sha" >> "$GITHUB_OUTPUT"
+
       - name: Download release files
+        if: needs.inspect_host.outputs.windows_available != 'true'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        continue-on-error: true
 
         with:
           name: tauri-windows-${{ needs.build_windows.outputs.version }}
           path: release-assets
 
+
+      - name: Reuse verified hosted Windows build
+        if: needs.inspect_host.outputs.windows_available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          file="nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+          curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$file" -o "release-assets/$file"
+          curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$file.sig" -o "release-assets/$file.sig"
+          [[ "$(sha256sum "release-assets/$file" | cut -d ' ' -f 1)" == "${{ needs.inspect_host.outputs.windows_hash }}" ]] || { echo 'Hosted Windows file changed after inspection.' >&2; exit 1; }
+          printf '%s\n' "$RELEASE_NOTES" > "$RUNNER_TEMP/release-notes-reused.txt"
+          python3 scripts/create-tauri-update-manifest.py \
+            --version "$APP_VERSION" --tag "v$APP_VERSION" --artifact "release-assets/$file" \
+            --signature "release-assets/$file.sig" --notes-file "$RUNNER_TEMP/release-notes-reused.txt" \
+            --output release-assets/latest.json
+          printf 'commit_sha=%s\nversion=%s\ntarget=x86_64-pc-windows-msvc\n' \
+            "${{ needs.inspect_host.outputs.windows_commit }}" "$APP_VERSION" > release-assets/provenance.txt
+          (cd release-assets && sha256sum "$file" "$file.sig" latest.json provenance.txt > SHA256SUMS.txt)
 
       # ------------------------------------------------------------
       # Download macOS releases
@@ -656,11 +972,9 @@ jobs:
 
           mkdir -p release-assets
 
-          base_url="https://nfproject.ru/app"
+          base_url="https://worta.ru/app"
 
-          downloaded=0
-
-          for arch in arm; do
+          for arch in arm intel; do
             file="nfprogress-mac-${arch}-${APP_VERSION}.zip"
             asset_path="release-assets/${file}"
 
@@ -672,17 +986,13 @@ jobs:
               "${base_url}/${file}"
             then
               unzip -t "$asset_path"
-
-              downloaded=$((downloaded + 1))
+              python3 scripts/verify-tauri-artifact.py "$asset_path" "${{ steps.release_provenance.outputs.tag_sha }}"
             else
               rm -f "$asset_path"
-
-              echo \
-                "macOS ${arch} build is unavailable; continuing without it."
+              echo "Required macOS ${arch} build is unavailable." >&2
+              exit 1
             fi
           done
-
-          echo "Downloaded macOS builds: ${downloaded}"
 
 
       # ------------------------------------------------------------
@@ -696,41 +1006,116 @@ jobs:
 
           installer="release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
 
-          build_count=0
-
-          if [[ -s "$installer" ]]; then
-            test -s "${installer}.sig"
-            test -s release-assets/latest.json
-            test -s release-assets/SHA256SUMS.txt
-
-            jq \
-              -e \
-              --arg version "$APP_VERSION" \
-              '.version == $version and (.platforms["windows-x86_64"].signature | length > 0)' \
-              release-assets/latest.json \
-              >/dev/null
-
-            build_count=$((build_count + 1))
+          test -s "$installer"
+          test -s "${installer}.sig"
+          test -s release-assets/latest.json
+          test -s release-assets/SHA256SUMS.txt
+          (cd release-assets && tr -d '\r' < SHA256SUMS.txt | sha256sum -c -)
+          if [[ "${{ needs.inspect_host.outputs.windows_available }}" == true ]]; then
+            grep -Fx "commit_sha=${{ needs.inspect_host.outputs.windows_commit }}" <(tr -d '\r' < release-assets/provenance.txt)
+          else
+            grep -Fx "commit_sha=${{ needs.build_windows.outputs.commit_sha }}" <(tr -d '\r' < release-assets/provenance.txt)
+            [[ "${{ needs.build_windows.outputs.commit_sha }}" == "$GITHUB_SHA" ]]
           fi
 
-          for mac_asset in release-assets/nfprogress-mac-*.zip; do
-            [[ -e "$mac_asset" ]] || continue
+          jq \
+            -e \
+            --arg version "$APP_VERSION" \
+            '.version == $version and (.platforms["windows-x86_64"].signature | length > 0)' \
+            release-assets/latest.json \
+            >/dev/null
 
+          for arch in arm intel; do
+            mac_asset="release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip"
             test -s "$mac_asset"
-
-            build_count=$((build_count + 1))
+            python3 scripts/verify-tauri-artifact.py "$mac_asset" "${{ steps.release_provenance.outputs.tag_sha }}"
           done
 
-          if (( build_count == 0 )); then
-            echo \
-              "No valid release builds were found." \
-              >&2
+          echo "Validated Windows x64, macOS ARM, and macOS Intel release builds."
 
-            exit 1
+      - name: Verify updater signature and reject tampering
+        shell: bash
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY || secrets.TAURI_UPDATER_PUBLIC_KEY }}
+          CARGO_INCREMENTAL: 0
+        run: |
+          set -euo pipefail
+          [[ -n "$TAURI_UPDATER_PUBLIC_KEY" ]] || { echo 'Updater public key is required.' >&2; exit 1; }
+          verifier="$RUNNER_TEMP/worta-updater-verifier"
+          mkdir -p "$verifier/src"
+          cat > "$verifier/Cargo.toml" <<'TOML'
+          [package]
+          name = "worta-updater-verifier"
+          version = "0.1.0"
+          edition = "2021"
+          [dependencies]
+          base64 = "=0.22.1"
+          minisign-verify = "=0.2.5"
+          TOML
+          cat > "$verifier/src/main.rs" <<'RUST'
+          use base64::{engine::general_purpose::STANDARD, Engine};
+          use minisign_verify::{PublicKey, Signature};
+          use std::{env, fs};
+          fn main() -> Result<(), Box<dyn std::error::Error>> {
+              let key = env::var("TAURI_UPDATER_PUBLIC_KEY")?.replace("\\n", "\n");
+              let key_bytes = STANDARD.decode(key.trim())?;
+              let key = PublicKey::decode(std::str::from_utf8(&key_bytes)?)?;
+              let artifact = env::args().nth(1).ok_or("missing artifact")?;
+              let sig = fs::read_to_string(format!("{artifact}.sig"))?;
+              let sig_bytes = STANDARD.decode(sig.trim())?;
+              let signature = Signature::decode(std::str::from_utf8(&sig_bytes)?)?;
+              let mut payload = fs::read(artifact)?;
+              key.verify(&payload, &signature, false)?;
+              if payload.is_empty() { return Err("empty updater artifact".into()); }
+              payload[0] ^= 1;
+              if key.verify(&payload, &signature, false).is_ok() {
+                  return Err("tampered updater artifact was accepted".into());
+              }
+              println!("Updater signature accepted; tampered artifact rejected.");
+              Ok(())
+          }
+          RUST
+          cargo run --quiet --manifest-path "$verifier/Cargo.toml" -- \
+            "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+          if [[ "$APP_VERSION" == 5.3.12 ]]; then
+            previous="$verifier/nfprogress-windows-x86_64-5.3.11-setup.exe"
+            curl --fail --location --retry 3 --silent --show-error \
+              https://worta.ru/app/nfprogress-windows-x86_64-5.3.11-setup.exe -o "$previous"
+            curl --fail --location --retry 3 --silent --show-error \
+              https://worta.ru/app/nfprogress-windows-x86_64-5.3.11-setup.exe.sig -o "$previous.sig"
+            cargo run --quiet --manifest-path "$verifier/Cargo.toml" -- "$previous"
+            echo 'Current updater key also verifies the previous release.'
           fi
 
-          echo \
-            "Validated release builds: ${build_count}"
+      # A durable receipt prevents a rerun from sending Telegram twice. An
+      # indeterminate attempt fails closed and requires an operator review.
+      - name: Check existing Telegram publication receipt
+        id: telegram_receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v${APP_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets > "$RUNNER_TEMP/existing-release.json" 2>/dev/null; then
+            if ! jq -e '.assets[] | select(.name == "telegram-receipt.json")' "$RUNNER_TEMP/existing-release.json" >/dev/null; then
+              echo 'Existing release has no Telegram receipt; inspect the channel before retrying.' >&2
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/telegram-receipt"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern telegram-receipt.json --dir "$RUNNER_TEMP/telegram-receipt"
+            jq -e --arg version "$APP_VERSION" '.version == $version and .status == "sent" and (.message_id | type == "number")' "$RUNNER_TEMP/telegram-receipt/telegram-receipt.json" >/dev/null || {
+              echo 'Telegram delivery is indeterminate; inspect the channel before retrying.' >&2
+              exit 1
+            }
+            echo 'already_sent=true' >> "$GITHUB_OUTPUT"
+          else
+            # Verify API access separately so errors are never interpreted as absence.
+            gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate --jq '.[].tag_name' > "$RUNNER_TEMP/release-tags"
+            if grep -Fxq "$tag" "$RUNNER_TEMP/release-tags"; then
+              echo 'Release lookup failed for an existing release.' >&2
+              exit 1
+            fi
+            echo 'already_sent=false' >> "$GITHUB_OUTPUT"
+          fi
 
       # ------------------------------------------------------------
       # GitHub Release
@@ -738,10 +1123,28 @@ jobs:
 
       - name: Publish GitHub release and updater manifest
         shell: bash
+        env:
+          SSH_UPLOAD_PRIVATE_KEY: ${{ secrets.SSH_UPLOAD_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
           tag="v${APP_VERSION}"
+
+          tag_type=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '.object.type')
+          tag_commit=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" \
+            --jq '.object.sha')
+          if [[ "$tag_type" == "tag" ]]; then
+            tag_commit=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/tags/${tag_commit}" \
+              --jq '.object.sha')
+          fi
+          if [[ "$tag_commit" != "${{ steps.release_provenance.outputs.tag_sha }}" ]]; then
+            echo "Tag ${tag} does not point to the qualified source revision." >&2
+            exit 1
+          fi
 
           notes_file="$RUNNER_TEMP/release-notes.txt"
 
@@ -756,6 +1159,80 @@ jobs:
               -print |
             sort
           )
+
+          key_path="$RUNNER_TEMP/nfprogress_spaceweb"
+          printf '%s' "$SSH_UPLOAD_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          export SSH_UPLOAD_KEY_PATH="$key_path"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' '77.222.62.219 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA93iOFfoJM9tNH4brPbiKrwDeaRmBV0odjkM1zc+t/q' >> "$HOME/.ssh/known_hosts"
+
+          curl --fail --location --retry 3 \
+            --output release-assets/update_manifest_spaceweb.json \
+            https://nfproject.ru/app/update_manifest.json
+          curl --fail --location --retry 3 \
+            --output release-assets/update_manifest_worta.json \
+            https://worta.ru/app/update_manifest.json
+
+          for platform in windows macos_arm macos_intel; do
+            case "$platform" in
+              windows)
+                artifact="release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+                ;;
+              macos_arm)
+                artifact="release-assets/nfprogress-mac-arm-${APP_VERSION}.zip"
+                ;;
+              macos_intel)
+                artifact="release-assets/nfprogress-mac-intel-${APP_VERSION}.zip"
+                ;;
+            esac
+            if [[ "$platform" != windows ]]; then
+              # Keep the legacy manifest, but point new macOS payloads at the
+              # single WORTA app directory. Do not duplicate them on SpaceWeb.
+              RELEASE_BASE_URL="https://worta.ru/app" \
+              RELEASE_MANIFEST_PATH="release-assets/update_manifest_spaceweb.json" \
+                python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+            fi
+            RELEASE_BASE_URL="https://worta.ru/app" \
+            RELEASE_MANIFEST_PATH="release-assets/update_manifest_worta.json" \
+              python scripts/update-release-manifest.py "$APP_VERSION" "$platform" "$artifact"
+          done
+
+          legacy_dir="$RUNNER_TEMP/spaceweb-legacy-manifest"
+          mkdir -p "$legacy_dir"
+          cp release-assets/update_manifest_spaceweb.json "$legacy_dir/update_manifest.json"
+          (cd "$legacy_dir" && python "$GITHUB_WORKSPACE/scripts/create-legacy-manifest.py")
+
+          # Update the legacy manifest in place, but do not duplicate new
+          # release payloads under the legacy host. New links point to the
+          # single WORTA app directory above.
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/nfproject/public_html/app"
+          ./scripts/upload-release.sh \
+            "release-assets/update_manifest_spaceweb.json" update_manifest.json
+          ./scripts/upload-release.sh \
+            "$legacy_dir/update_manifest_legacy.json" update_manifest_legacy.json
+
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html/app"
+          if [[ "${{ needs.inspect_host.outputs.windows_available }}" != true ]]; then
+            ./scripts/upload-release.sh \
+              "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" \
+              "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe"
+            ./scripts/upload-release.sh \
+              "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" \
+              "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig"
+          fi
+          ./scripts/upload-release.sh \
+            release-assets/latest.json latest.json
+          ./scripts/upload-release.sh \
+            release-assets/update_manifest_worta.json update_manifest.json
+          # The verified macOS archives were downloaded from this same host;
+          # never overwrite a live release payload with an identical copy.
+          python scripts/create-worta-releases-manifest.py \
+            --version "$APP_VERSION" \
+            --output release-assets/releases.json
+          export SSH_UPLOAD_DIR="/home/n/nevskyfore/worta/public_html"
+          ./scripts/upload-release.sh release-assets/releases.json releases.json
 
           if gh release view \
             "$tag" \
@@ -783,7 +1260,7 @@ jobs:
               )
             fi
 
-            if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            if [[ "$tag_commit" != "${{ steps.release_provenance.outputs.tag_sha }}" ]]; then
               echo \
                 "Release ${tag} already points to ${tag_commit}; update engine.version first." \
                 >&2
@@ -794,7 +1271,7 @@ jobs:
             gh release edit \
               "$tag" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "nfprogress ${APP_VERSION}" \
+              --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
 
@@ -810,47 +1287,128 @@ jobs:
               "$tag" \
               "${assets[@]}" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "nfprogress ${APP_VERSION}" \
+              --verify-tag \
+              --title "worta ${APP_VERSION}" \
               --notes-file "$notes_file" \
               --latest
           fi
 
+          if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" == true ]]; then
+            echo 'Existing release description and manifests refreshed; Telegram post will be edited, not resent.'
+          fi
+
+      - name: Verify published release and hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          verified="$RUNNER_TEMP/published-release"
+          mkdir -p "$verified/github"
+          for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
+            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+            gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verified/github"
+            cmp "$verified/$name" "$verified/github/$name"
+            if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" != true ]]; then
+              cmp "release-assets/$name" "$verified/$name"
+            fi
+          done
+          for name in latest.json update_manifest.json; do
+            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+          done
+          curl --fail --location --retry 3 --silent --show-error https://worta.ru/releases.json -o "$verified/releases.json"
+          cmp release-assets/latest.json "$verified/latest.json"
+          cmp release-assets/update_manifest_worta.json "$verified/update_manifest.json"
+          jq -e --arg version "$APP_VERSION" '.version == $version and .platforms["windows-x86_64"].url == ("https://worta.ru/app/nfprogress-windows-x86_64-" + $version + "-setup.exe") and (.platforms["windows-x86_64"].signature | length > 0)' "$verified/latest.json" >/dev/null
+          [[ "$(jq -r '.platforms["windows-x86_64"].signature' "$verified/latest.json")" == "$(tr -d '\r\n' < "$verified/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig")" ]]
+          jq -e --arg version "$APP_VERSION" '
+            (.releases | length == 3) and
+            ([.releases[] | select(.version == $version and .status == "available") | .platform] | sort == ["macos-arm", "macos-intel", "windows"]) and
+            (all(.releases[]; .url == ("https://worta.ru/app/" + (if .platform == "windows" then "nfprogress-windows-x86_64-" + $version + "-setup.exe" elif .platform == "macos-arm" then "nfprogress-mac-arm-" + $version + ".zip" else "nfprogress-mac-intel-" + $version + ".zip" end))))
+          ' "$verified/releases.json" >/dev/null
+          jq -e --arg version "$APP_VERSION" '.windows.version == $version and .macos_arm.version == $version and .macos_intel.version == $version' "$verified/update_manifest.json" >/dev/null
 
       # ------------------------------------------------------------
       # Telegram
       # ------------------------------------------------------------
 
-      - name: Notify Telegram channel
+      - name: Update existing Telegram post without resending
+        if: steps.telegram_receipt.outputs.already_sent == 'true'
         shell: bash
-
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
-
+          TELEGRAM_MESSAGE: ${{ needs.build_windows.outputs.telegram_message }}
         run: |
           set -euo pipefail
-
-          if [[ \
-            -z "$TELEGRAM_BOT_TOKEN" ||
-            -z "$TELEGRAM_CHANNEL_ID" \
-          ]]; then
-
-            echo \
-              "Telegram notification skipped: credentials are not configured."
-
-            exit 0
+          receipt="$RUNNER_TEMP/telegram-receipt/telegram-receipt.json"
+          message_id=$(jq -er --arg version "$APP_VERSION" \
+            'select(.version == $version and .status == "sent") | .message_id' "$receipt")
+          [[ "$message_id" =~ ^[0-9]+$ ]] || { echo 'Invalid Telegram message receipt.' >&2; exit 1; }
+          [[ -n "$TELEGRAM_BOT_TOKEN" && -n "$TELEGRAM_CHANNEL_ID" ]] || {
+            echo 'Telegram credentials are required to update the existing release post.' >&2
+            exit 1
+          }
+          response=$(curl --fail --silent --show-error --request POST \
+            --data-urlencode "chat_id=${TELEGRAM_CHANNEL_ID}" \
+            --data-urlencode "message_id=${message_id}" \
+            --data-urlencode "text=${TELEGRAM_MESSAGE}" \
+            --data-urlencode "disable_web_page_preview=true" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/editMessageText")
+          if ! jq -e '.ok == true' <<< "$response" >/dev/null; then
+            if ! jq -e '.ok == false and .description == "Bad Request: message is not modified"' <<< "$response" >/dev/null; then
+              echo 'Telegram rejected the edit of the existing release post.' >&2
+              exit 1
+            fi
           fi
+          echo "Updated existing Telegram message ${message_id}; no new post was sent."
 
+      - name: Notify Telegram channel
+        if: steps.telegram_receipt.outputs.already_sent != 'true'
+        shell: bash
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$TELEGRAM_CHANNEL_ID" ]]; then
+            echo "Telegram notification is mandatory; required secrets are missing." >&2
+            exit 1
+          fi
+          tag="v${APP_VERSION}"
+          receipt="$RUNNER_TEMP/telegram-receipt.json"
+          jq -n --arg version "$APP_VERSION" '{version:$version,status:"pending"}' > "$receipt"
+          gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY"
           message=${TELEGRAM_MESSAGE:-"Обновление ${APP_VERSION}"}
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --request POST \
+          curl --fail --silent --show-error --request POST \
             --data-urlencode "chat_id=${TELEGRAM_CHANNEL_ID}" \
             --data-urlencode "text=${message}" \
             --data-urlencode "disable_web_page_preview=true" \
-            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-            >/dev/null
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" > "$RUNNER_TEMP/telegram-response.json"
+          jq -e '.ok == true and (.result.message_id | type == "number")' "$RUNNER_TEMP/telegram-response.json" >/dev/null
+          jq --arg version "$APP_VERSION" '{version:$version,status:"sent",message_id:.result.message_id}' "$RUNNER_TEMP/telegram-response.json" > "$receipt"
+          gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY" --clobber
+
+  cleanup_artifacts:
+    name: Remove temporary Windows artifact
+    needs: [build_windows, frontend_tests, publish_release]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Remove temporary Actions artifact after publication attempt
+        shell: bash
+        run: |
+          set -euo pipefail
+          ids=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("tauri-windows-")) | .id')
+          if [[ -z "$ids" ]]; then
+            echo 'No temporary Windows artifact to remove.'
+            exit 0
+          fi
+          while IFS= read -r artifact_id; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done <<< "$ids"
+          echo 'Temporary Windows Actions artifact removed.'

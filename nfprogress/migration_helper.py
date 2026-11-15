@@ -48,7 +48,7 @@ from nfprogress.core.recovery import (
     validate_migration_bundle,
     validate_sqlite_file,
 )
-from nfprogress.core.sqlite.connection import open_database
+from nfprogress.core.sqlite.connection import open_database, register_remote_apply_authorization_guard
 from nfprogress.core.sqlite.schema import CURRENT_SCHEMA_VERSION
 from nfprogress.core.sqlite.ordering import (
     OrderInvariantError,
@@ -339,7 +339,7 @@ def analyze_project_order_recovery(source_root: str | Path) -> ProjectOrderRecov
         if connection.execute("PRAGMA foreign_key_check").fetchall():
             raise RecoveryError("corrupt_sqlite: foreign_key_check failed")
         version = int(connection.execute("SELECT schema_version FROM schema_info").fetchone()[0])
-        if version not in (6, CURRENT_SCHEMA_VERSION):
+        if version not in (6, 7, CURRENT_SCHEMA_VERSION):
             raise RecoveryError(f"unsupported_sqlite_schema: {version}")
         project_ids = {
             row[0] for row in connection.execute("SELECT id FROM projects")
@@ -453,6 +453,7 @@ def recover_project_order(data_root: str | Path) -> ProjectOrderRecoveryReport:
         )
         connection = sqlite3.connect(staging / "nfprogress.db")
         connection.row_factory = sqlite3.Row
+        register_remote_apply_authorization_guard(connection)
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             with connection:
@@ -466,7 +467,7 @@ def recover_project_order(data_root: str | Path) -> ProjectOrderRecoveryReport:
         if _project_rows(staging / "nfprogress.db") != before_projects:
             raise RecoveryError("project rows changed during order recovery")
         validate_sqlite_file(
-            staging / "nfprogress.db", allow_versions={6, CURRENT_SCHEMA_VERSION},
+            staging / "nfprogress.db", allow_versions={6, 7, CURRENT_SCHEMA_VERSION},
         )
         if sha256_file(database) != preview.source_sha256:
             raise RecoveryError("source_changed: database checksum changed during recovery")
@@ -525,7 +526,7 @@ def _profile_for(
         supported = has_data
         warnings.append("v5 Game/Documents migration is incomplete until the full bundle is imported")
         return "G_sqlite_v5_game_incomplete", supported, "5", warnings
-    if version in (6, CURRENT_SCHEMA_VERSION):
+    if version in (6, 7, CURRENT_SCHEMA_VERSION):
         # A v6 profile is prepared only when all authority and completion
         # markers are verified by verify_prepared_profile().
         if ownership == {name: "sqlite" for name in ("projects", "settings", "notes", "game")} and not has_data:
@@ -550,7 +551,7 @@ def inspect_source(source_root: str | Path) -> SourceInspection:
         except RecoveryError as error:
             warnings.append(str(error))
             if (
-                schema.get("version") in (6, CURRENT_SCHEMA_VERSION)
+                schema.get("version") in (6, 7, CURRENT_SCHEMA_VERSION)
                 and "project ordering" in str(error)
             ):
                 profile = SQLITE_PROJECT_ORDER_RECOVERY_PROFILE
@@ -576,7 +577,7 @@ def inspect_source(source_root: str | Path) -> SourceInspection:
         and documents_marker.get("status") == "complete"
     )
     sqlite_owners = ownership == {name: "sqlite" for name in ("projects", "settings", "notes", "game")}
-    if schema.get("version") in (6, CURRENT_SCHEMA_VERSION) and sqlite_owners and markers_complete:
+    if schema.get("version") in (6, 7, CURRENT_SCHEMA_VERSION) and sqlite_owners and markers_complete:
         # Recovery copies may remain beside a prepared database.  The marker,
         # not the mere presence of stale PKL/JSON, proves SQLite authority.
         profile, supported = "I_prepared_v6", True
@@ -1010,9 +1011,9 @@ def verify_prepared_profile(data_root: str | Path) -> tuple[bool, list[str]]:
     errors: list[str] = []
     try:
         version = validate_sqlite_file(
-            database, allow_versions={6, CURRENT_SCHEMA_VERSION},
+            database, allow_versions={6, 7, CURRENT_SCHEMA_VERSION},
         )
-        if version not in (6, CURRENT_SCHEMA_VERSION):
+        if version not in (6, 7, CURRENT_SCHEMA_VERSION):
             errors.append("schema is not supported")
     except RecoveryError as error:
         errors.append(str(error))

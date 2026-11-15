@@ -7,6 +7,14 @@ import { projectFixture } from '@/test/fixtures'
 import ProjectCard from './ProjectCard.vue'
 
 describe('ProjectCard', () => {
+  it.each([['Роман', 'Этапов'], ['Общий проект', 'Источников']])('names nested items for %s', (name, label) => {
+    const wrapper = mount(ProjectCard, {
+      props: { project: projectFixture({ name, stages_enabled: true, stages: [projectFixture({ id: 'stage' })] }) },
+      global: { plugins: [createPinia()], stubs: { IonIcon: true, RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    expect(wrapper.text()).toContain(`${label}: 1`)
+  })
+
   it('renders API project progress as an accessible project link', () => {
     const wrapper = mount(ProjectCard, {
       props: { project: projectFixture() },

@@ -542,7 +542,7 @@ onBeforeUnmount(() => {
             <p class="page-eyebrow">{{ t('Творческая мотивация') }}</p>
             <h1>{{ t('Игровой режим') }}</h1>
             <p class="page-introduction">
-              {{ t('Развивайте писательский ритм, а все награды доверяйте правилам nfprogress.') }}
+              {{ t('Развивайте писательский ритм, а все награды доверяйте правилам nfprogress.').replace(/nfprogress/gi, 'worta') }}
             </p>
           </div>
         </header>

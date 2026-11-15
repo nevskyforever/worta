@@ -8,18 +8,15 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
 
 
 SEMVER = re.compile(r'^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$')
-REPOSITORY = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
 TAG = re.compile(r'^[A-Za-z0-9_.-]+$')
 
 
 def update_manifest(
     *,
     version: str,
-    repository: str,
     tag: str,
     artifact_name: str,
     signature: str,
@@ -28,8 +25,6 @@ def update_manifest(
 ) -> dict[str, object]:
     if not SEMVER.fullmatch(version):
         raise ValueError(f'Invalid semantic version: {version!r}.')
-    if not REPOSITORY.fullmatch(repository):
-        raise ValueError(f'Invalid GitHub repository: {repository!r}.')
     if not TAG.fullmatch(tag):
         raise ValueError(f'Invalid release tag: {tag!r}.')
     if Path(artifact_name).name != artifact_name or not artifact_name.lower().endswith('.exe'):
@@ -38,10 +33,7 @@ def update_manifest(
     if not signature:
         raise ValueError('The updater signature is empty.')
 
-    asset_url = (
-        f'https://github.com/{quote(repository, safe="/")}/releases/download/'
-        f'{quote(tag, safe="")}/{quote(artifact_name, safe="")}'
-    )
+    asset_url = f'https://worta.ru/app/{artifact_name}'
     return {
         'version': version,
         'notes': notes.strip(),
@@ -58,7 +50,6 @@ def update_manifest(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--version', required=True)
-    parser.add_argument('--repository', required=True)
     parser.add_argument('--tag', required=True)
     parser.add_argument('--artifact', type=Path, required=True)
     parser.add_argument('--signature', type=Path, required=True)
@@ -74,7 +65,6 @@ def main() -> int:
     published_at = args.published_at or datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     payload = update_manifest(
         version=args.version,
-        repository=args.repository,
         tag=args.tag,
         artifact_name=args.artifact.name,
         signature=args.signature.read_text(encoding='utf-8'),

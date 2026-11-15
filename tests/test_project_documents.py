@@ -10,6 +10,29 @@ from backend.app.main import create_app
 from nfprogress.core.services.documents import ProjectDocumentService
 
 
+def test_stage_document_migration_preserves_both_records_on_content_collision():
+    service = ProjectDocumentService(None, None, allow_local_files=False)
+    source_key = service._key('project', None)
+    target_key = service._key('project', 'stage')
+    source = {
+        'project_id': 'project', 'stage_id': None, 'exists': True,
+        'content': {'type': 'doc', 'content': []}, 'docx_path': '/book.docx',
+    }
+    target = {
+        'project_id': 'project', 'stage_id': 'stage', 'exists': True,
+        'content': {
+            'type': 'doc', 'content': [{
+                'type': 'paragraph',
+                'content': [{'type': 'text', 'text': 'Existing stage text'}],
+            }],
+        },
+    }
+    records = {source_key: source.copy(), target_key: target.copy()}
+
+    assert service._move_project_document(records, 'project', 'stage') is False
+    assert records == {source_key: source, target_key: target}
+
+
 def test_document_autosave_and_linked_word_change_are_tracked(tmp_path):
     app = create_app(RuntimeConfig(
         data_dir=tmp_path, platform='desktop', allow_local_files=True,

@@ -116,7 +116,7 @@ watch(
           ? t('Включена синхронизация. Ручная запись прогресса недоступна.')
           : selectedEntity.work_method === 'app'
             ? t('Прогресс добавляется из текста во встроенном редакторе.')
-          : t('Завершённый проект или источник доступен только для просмотра.') }}
+          : t(sharedProject ? 'Завершённый проект или источник доступен только для просмотра.' : 'Завершённый проект или этап доступен только для просмотра.') }}
     </p>
 
     <div class="progress-entry-layout">
@@ -130,7 +130,7 @@ watch(
             <strong>{{ locale.formatNumber(selectedEntity.total, fractionDigits) }}</strong>
           </div>
           <label v-if="project.stages.length && !fixedStageId" class="progress-stage-select" for="progress-entity">
-            <span>{{ t('Источник') }}</span>
+            <span>{{ t(sharedProject ? 'Источник' : 'Этап') }}</span>
             <span class="progress-stage-select__control">
               <IonIcon :icon="layersOutline" aria-hidden="true" />
               <select id="progress-entity" v-model="selectedEntityId" :disabled="busy || lifecycleReadOnly">

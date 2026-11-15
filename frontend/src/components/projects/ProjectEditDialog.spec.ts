@@ -133,7 +133,7 @@ describe('ProjectEditDialog', () => {
       global: { plugins: [createPinia()], stubs: ionicStubs },
     })
 
-    const stagesToggle = wrapper.findAll('label').find((item) => item.text().includes('Проект с источниками'))
+    const stagesToggle = wrapper.findAll('label').find((item) => item.text().includes('Проект с этапами'))
     await stagesToggle?.get('input').setValue(false)
     await wrapper.get('form').trigger('submit')
 

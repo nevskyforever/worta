@@ -42,6 +42,18 @@ describe('project planning calculations', () => {
     })).toBe('2026-08-31')
   })
 
+  it('restarts the deadline from current progress when today is clamped to the goal', () => {
+    expect(automaticEditedDeadline({
+      goal: 16_000,
+      total: 14_464,
+      dailyGoal: 250,
+      todayGoal: 16_000,
+      previousDailyGoal: 500,
+      recalculate: false,
+      today: new Date('2026-09-19T12:00:00'),
+    })).toBe('2026-09-25')
+  })
+
   it('uses the current cumulative target when an edited total goal changes', () => {
     expect(automaticDeadlineAfterGoalChange({
       goal: 2_000,
