@@ -839,8 +839,6 @@ jobs:
           name: tauri-windows-${{ steps.version.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
-          # GitHub only accepts whole days. The cleanup workflow enforces
-          # the shorter window if this run cannot delete the artifact itself.
           retention-days: 1
 
 
