@@ -147,8 +147,9 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     assert "--verify-tag" in workflow
     assert "--target \"${{ steps.release_provenance.outputs.tag_sha }}\"" not in workflow
-    assert "retention-days: 1" in workflow
-    assert "Remove temporary Actions artifact after publication attempt" in workflow
+    assert "retention-days: 7" in workflow
+    cleanup = workflow.split("\n  cleanup_artifacts:\n", 1)[1]
+    assert "if: ${{ needs.publish_release.result == 'success' }}" in cleanup
     assert "actions: write" in workflow
 
 

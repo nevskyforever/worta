@@ -839,7 +839,7 @@ jobs:
           name: tauri-windows-${{ steps.version.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
 
   # ==============================================================
@@ -1303,8 +1303,12 @@ jobs:
           set -euo pipefail
           verified="$RUNNER_TEMP/published-release"
           mkdir -p "$verified/github"
+          download_hosted() {
+            curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
+              --silent --show-error "$1" -o "$2"
+          }
           for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
-            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+            download_hosted "https://worta.ru/app/$name" "$verified/$name"
             gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verified/github"
             cmp "$verified/$name" "$verified/github/$name"
             if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" != true ]]; then
@@ -1312,9 +1316,9 @@ jobs:
             fi
           done
           for name in latest.json update_manifest.json; do
-            curl --fail --location --retry 3 --silent --show-error "https://worta.ru/app/$name" -o "$verified/$name"
+            download_hosted "https://worta.ru/app/$name" "$verified/$name"
           done
-          curl --fail --location --retry 3 --silent --show-error https://worta.ru/releases.json -o "$verified/releases.json"
+          download_hosted https://worta.ru/releases.json "$verified/releases.json"
           cmp release-assets/latest.json "$verified/latest.json"
           cmp release-assets/update_manifest_worta.json "$verified/update_manifest.json"
           jq -e --arg version "$APP_VERSION" '.version == $version and .platforms["windows-x86_64"].url == ("https://worta.ru/app/nfprogress-windows-x86_64-" + $version + "-setup.exe") and (.platforms["windows-x86_64"].signature | length > 0)' "$verified/latest.json" >/dev/null
@@ -1389,8 +1393,8 @@ jobs:
 
   cleanup_artifacts:
     name: Remove temporary Windows artifact
-    needs: [build_windows, frontend_tests, publish_release]
-    if: ${{ always() }}
+    needs: [publish_release]
+    if: ${{ needs.publish_release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -1398,7 +1402,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Remove temporary Actions artifact after publication attempt
+      - name: Remove temporary Actions artifact after successful publication
         shell: bash
         run: |
           set -euo pipefail
