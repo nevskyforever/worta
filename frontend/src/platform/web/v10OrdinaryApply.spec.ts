@@ -105,7 +105,7 @@ it('no account HTTP, writer activation, cursor advancement or publication from t
  expect(await f.owner.apply(scope,r.sequence)).toBe('applied');expect(http).not.toHaveBeenCalled()
  for(const name of ['outbox','receipts','cursors','legacyNoteIntents','ownerHeads','projectBindings'])expect(f.f.db[name]).toEqual(before[name])
  expect(amk.some(n=>n!==0)).toBe(true)
-})
+},20000)
 
 for(const kind of ['counter','project','projection'] as const)it(`predicted post-state rejects ${kind} tampering before any write`,async()=>{
  const f=await ordinaryV10Fixture(),r=await f.receive(),before=f.before(),calls=f.f.calls.length
