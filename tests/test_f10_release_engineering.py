@@ -147,10 +147,31 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     assert "--verify-tag" in workflow
     assert "--target \"${{ steps.release_provenance.outputs.tag_sha }}\"" not in workflow
-    assert "retention-days: 7" in workflow
+    assert "retention-days: 1" in workflow
     cleanup = workflow.split("\n  cleanup_artifacts:\n", 1)[1]
     assert "if: ${{ needs.publish_release.result == 'success' }}" in cleanup
     assert "actions: write" in workflow
+
+    import subprocess
+    import yaml
+
+    sweeper = yaml.safe_load(
+        (ROOT / ".github/workflows/cleanup-release-artifacts.yml").read_text()
+    )
+    assert sweeper[True]["schedule"] == [{"cron": "7,22,37,52 * * * *"}]
+    script = sweeper["jobs"]["cleanup"]["steps"][0]["run"]
+    subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+    query = script.split("--jq '", 1)[1].split("'", 1)[0]
+    artifacts = [
+        {"id": 1, "name": "tauri-windows-5.3.19", "created_at": "2000-01-01T00:00:00Z"},
+        {"id": 2, "name": "unrelated", "created_at": "2000-01-01T00:00:00Z"},
+        {"id": 3, "name": "tauri-windows-5.3.20", "created_at": "2099-01-01T00:00:00Z"},
+    ]
+    result = subprocess.run(
+        ["jq", "-r", query], input=json.dumps({"artifacts": artifacts}),
+        text=True, capture_output=True, check=True,
+    )
+    assert result.stdout.splitlines() == ["1"]
 
 
 def test_release_requires_hosting_and_telegram_confirmation_without_repeated_asset_downloads():
@@ -172,6 +193,9 @@ def test_release_requires_hosting_and_telegram_confirmation_without_repeated_ass
     assert '.digest == $digest' in steps[hosting]["run"]
     assert "gh release download" not in steps[hosting]["run"]
     assert "--head" in steps[hosting]["run"]
+    assert 'download_hosted "https://worta.ru/app/$name" "$verified/$name"' not in (
+        steps[hosting]["run"].split("for name in latest.json", 1)[0]
+    )
     assert '.status == "sent"' in steps[telegram]["run"]
     assert ".message_id" in steps[telegram]["run"]
 

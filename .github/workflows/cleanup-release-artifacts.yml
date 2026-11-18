@@ -1,0 +1,38 @@
+name: Clean temporary Desktop release artifacts
+
+on:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+
+concurrency:
+  group: cleanup-desktop-release-artifacts
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Delete temporary Windows release artifacts older than one hour
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Give the scheduled cleanup an hour of margin for runner delays.
+          ids=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select((.name | test("^tauri-windows-[0-9]+\\.[0-9]+\\.[0-9]+$")) and
+              (now - (.created_at | fromdateiso8601) >= 3600)) | .id')
+          for id in $ids; do
+            # The release run may have deleted the same artifact.
+            if ! result=$(gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" 2>&1); then
+              if [[ "$result" != *"(HTTP 404)"* ]]; then
+                echo "$result" >&2
+                exit 1
+              fi
+            fi
+          done

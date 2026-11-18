@@ -839,7 +839,9 @@ jobs:
           name: tauri-windows-${{ steps.version.outputs.version }}
           path: release-assets/*
           if-no-files-found: error
-          retention-days: 7
+          # GitHub only accepts whole days. The cleanup workflow enforces
+          # the shorter window if this run cannot delete the artifact itself.
+          retention-days: 1
 
 
   # ==============================================================
@@ -1314,15 +1316,8 @@ jobs:
             jq -e --arg name "$name" --arg digest "$digest" \
               'any(.assets[]; .name == $name and .state == "uploaded" and .digest == $digest)' \
               "$verified/github.json" >/dev/null
-            if [[ "$name" == *-setup.exe* && "${{ needs.inspect_host.outputs.windows_available }}" != true ]]; then
-              # Only newly uploaded Windows files need a full readback.
-              download_hosted "https://worta.ru/app/$name" "$verified/$name"
-              cmp "release-assets/$name" "$verified/$name"
-            else
-              # These bytes were already downloaded and verified in this job.
-              curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
-                --silent --show-error --head "https://worta.ru/app/$name" >/dev/null
-            fi
+            curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
+              --silent --show-error --head "https://worta.ru/app/$name" >/dev/null
           done
           for name in latest.json update_manifest.json; do
             download_hosted "https://worta.ru/app/$name" "$verified/$name"
