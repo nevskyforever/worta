@@ -153,6 +153,29 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     assert "actions: write" in workflow
 
 
+def test_release_requires_hosting_and_telegram_confirmation_without_repeated_asset_downloads():
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/build.yml").read_text())
+    steps = workflow["jobs"]["publish_release"]["steps"]
+    positions = {step["name"]: index for index, step in enumerate(steps)}
+    hosting = positions["Verify published release and hosting"]
+    telegram = positions["Confirm Telegram publication"]
+    assert hosting < positions["Update existing Telegram post without resending"] < telegram
+    assert hosting < positions["Notify Telegram channel"] < telegram
+    for step in (steps[hosting], steps[telegram]):
+        assert "if" not in step
+        assert not step.get("continue-on-error", False)
+        subprocess.run(["bash", "-n"], input=step["run"], text=True, check=True)
+
+    assert '.digest == $digest' in steps[hosting]["run"]
+    assert "gh release download" not in steps[hosting]["run"]
+    assert "--head" in steps[hosting]["run"]
+    assert '.status == "sent"' in steps[telegram]["run"]
+    assert ".message_id" in steps[telegram]["run"]
+
+
 def test_desktop_release_notes_and_telegram_use_versioned_user_facing_format():
     workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")

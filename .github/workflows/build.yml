@@ -1302,17 +1302,26 @@ jobs:
         run: |
           set -euo pipefail
           verified="$RUNNER_TEMP/published-release"
-          mkdir -p "$verified/github"
+          mkdir -p "$verified"
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$APP_VERSION" > "$verified/github.json"
+          jq -e '.draft == false and .prerelease == false' "$verified/github.json" >/dev/null
           download_hosted() {
             curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
               --silent --show-error "$1" -o "$2"
           }
           for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
-            download_hosted "https://worta.ru/app/$name" "$verified/$name"
-            gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$verified/github"
-            cmp "$verified/$name" "$verified/github/$name"
-            if [[ "${{ steps.telegram_receipt.outputs.already_sent }}" != true ]]; then
+            digest="sha256:$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)"
+            jq -e --arg name "$name" --arg digest "$digest" \
+              'any(.assets[]; .name == $name and .state == "uploaded" and .digest == $digest)' \
+              "$verified/github.json" >/dev/null
+            if [[ "$name" == *-setup.exe* && "${{ needs.inspect_host.outputs.windows_available }}" != true ]]; then
+              # Only newly uploaded Windows files need a full readback.
+              download_hosted "https://worta.ru/app/$name" "$verified/$name"
               cmp "release-assets/$name" "$verified/$name"
+            else
+              # These bytes were already downloaded and verified in this job.
+              curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
+                --silent --show-error --head "https://worta.ru/app/$name" >/dev/null
             fi
           done
           for name in latest.json update_manifest.json; do
@@ -1322,7 +1331,7 @@ jobs:
           cmp release-assets/latest.json "$verified/latest.json"
           cmp release-assets/update_manifest_worta.json "$verified/update_manifest.json"
           jq -e --arg version "$APP_VERSION" '.version == $version and .platforms["windows-x86_64"].url == ("https://worta.ru/app/nfprogress-windows-x86_64-" + $version + "-setup.exe") and (.platforms["windows-x86_64"].signature | length > 0)' "$verified/latest.json" >/dev/null
-          [[ "$(jq -r '.platforms["windows-x86_64"].signature' "$verified/latest.json")" == "$(tr -d '\r\n' < "$verified/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig")" ]]
+          [[ "$(jq -r '.platforms["windows-x86_64"].signature' "$verified/latest.json")" == "$(tr -d '\r\n' < "release-assets/nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig")" ]]
           jq -e --arg version "$APP_VERSION" '
             (.releases | length == 3) and
             ([.releases[] | select(.version == $version and .status == "available") | .platform] | sort == ["macos-arm", "macos-intel", "windows"]) and
@@ -1390,6 +1399,15 @@ jobs:
           jq -e '.ok == true and (.result.message_id | type == "number")' "$RUNNER_TEMP/telegram-response.json" >/dev/null
           jq --arg version "$APP_VERSION" '{version:$version,status:"sent",message_id:.result.message_id}' "$RUNNER_TEMP/telegram-response.json" > "$receipt"
           gh release upload "$tag" "$receipt" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Confirm Telegram publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "v${APP_VERSION}" --repo "$GITHUB_REPOSITORY" \
+            --pattern telegram-receipt.json --output - |
+            jq -e --arg version "$APP_VERSION" \
+              '.version == $version and .status == "sent" and (.message_id | type == "number" and . > 0)' >/dev/null
 
   cleanup_artifacts:
     name: Remove temporary Windows artifact
