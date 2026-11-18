@@ -188,8 +188,18 @@ echo "Запускается Tauri dev. Это не production-сборка; п�
 cd "$FRONTEND_DIR"
 # Для обычной разработки incremental-артефакты и debug-символы не нужны:
 # они со временем раздувают target на несколько гигабайт.
+TAURI_CONFIG_ARGS=(--config "$TAURI_CONFIG")
+if [ "${NFPROGRESS_BUILD_PROFILE:-test}" = "test" ]; then
+  TEST_TAURI_CONFIG="$(mktemp "${TMPDIR:-/tmp}/worta-tauri-test-config.XXXXXX")"
+  trap 'rm -f -- "$TEST_TAURI_CONFIG"' EXIT
+  cat > "$TEST_TAURI_CONFIG" <<'JSON'
+{"identifier":"app.nfprogress.tracker.test","app":{"windows":[{"title":"worta Test"}]}}
+JSON
+  TAURI_CONFIG_ARGS+=(--config "$TEST_TAURI_CONFIG")
+fi
+
 CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}" \
 CARGO_PROFILE_DEV_DEBUG="${CARGO_PROFILE_DEV_DEBUG:-0}" \
 CARGO_TARGET_DIR="$TAURI_TARGET_DIR" \
 NFPROGRESS_BUILD_PROFILE=test NFPROGRESS_DATA_DIR="$DATA_ROOT" \
-  exec npm run tauri:dev -- --config "$TAURI_CONFIG"
+  npm run tauri:dev -- "${TAURI_CONFIG_ARGS[@]}"
