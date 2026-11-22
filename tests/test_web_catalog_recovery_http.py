@@ -18,6 +18,7 @@ from test_cloud_c18_structural_integration import publish_pending, pull_structur
 from test_cloud_c18_content_note_acceptance import content, note, emit, receive
 from test_cloud_c18_content_note_gate import capabilities
 from test_cloud_c18_document_acceptance import document, emit as emit_documents, support as support_documents
+from test_cloud_c18_document_acceptance import heads as document_heads, receive as receive_documents
 from nfprogress.core.sqlite.connection import register_remote_apply_authorization_guard
 
 
@@ -32,11 +33,20 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
         register_remote_apply_authorization_guard(connection)
         connection.execute("UPDATE projects SET status='активен' WHERE id=?", (PROJECT_ID,))
         connection.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.stages_enabled',json('true')) WHERE id=?", (PROJECT_ID,))
+    stage = json.loads((ROOT / "frontend/src/cloud/__fixtures__/stageCodecV1.json").read_text())["event"]["stage"]
+    with sqlite3.connect(db) as connection:
+        details = dict(stage, name="Stage S1", work_method="app")
+        connection.execute("INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)",
+            ("S1", PROJECT_ID, details["name"], details["goal"], int(details["infinite"]), details["unit"], details["status"], details["created_at"], json.dumps(details)))
+        connection.execute("INSERT INTO stage_order VALUES(?,?,?)", ("S1", PROJECT_ID, 0))
+    content(tmp_path, db, identity, user, "create", note_id="native-note", stage_id="S1", content_format="plain")
     assert client.put(f"/api/v1/sync/devices/{identity['device_id']}", headers=headers).status_code == 200
     boot = bootstrap(tmp_path, db, identity, "bootstrap_prepare")["bootstrap_id"]
     assert client.post(f"/api/v1/cloud/projects/{PROJECT_ID}/bootstrap", headers=headers,
         json={"bootstrap_id": boot, "device_id": identity["device_id"]}).status_code == 200
-    bootstrap(tmp_path, db, identity, "bootstrap_prepare_capture", bootstrap_id=boot, remote_high_water=0)
+    captured = bootstrap(tmp_path, db, identity, "bootstrap_prepare_capture", bootstrap_id=boot, remote_high_water=0)
+    assert captured["record"]["initial_event_count"] == 0
+    assert captured["event_ids"] == []
     assert client.post(f"/api/v1/cloud/projects/{PROJECT_ID}/bootstrap/complete", headers=headers,
         json={"bootstrap_id": boot, "device_id": identity["device_id"], "initial_event_count": 0, "initial_max_server_sequence": 0}).status_code == 200
     bootstrap(tmp_path, db, identity, "bootstrap_confirm_active", bootstrap_id=boot, remote_high_water=0)
@@ -49,12 +59,6 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
     publish(client, tmp_path, token, db, identity, user, amk)
     assert sync(client, tmp_path, token, db, identity, user, amk)["view"]["state"] == "active"
 
-    stage = json.loads((ROOT / "frontend/src/cloud/__fixtures__/stageCodecV1.json").read_text())["event"]["stage"]
-    with sqlite3.connect(db) as connection:
-        details = dict(stage, name="Stage S1", work_method="app")
-        connection.execute("INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)",
-            ("S1", PROJECT_ID, details["name"], details["goal"], int(details["infinite"]), details["unit"], details["status"], details["created_at"], json.dumps(details)))
-        connection.execute("INSERT INTO stage_order VALUES(?,?,?)", ("S1", PROJECT_ID, 0))
     structural(tmp_path, db, identity, user, "begin")
     assert len(publish_pending(client, tmp_path, token, db, identity, user, amk)) == 1
     pull_structure(client, tmp_path, token, db, identity, user, amk)
@@ -62,7 +66,6 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
     pull_structure(client, tmp_path, token, db, identity, user, amk)
     pull_structure(client, tmp_path, token, db, identity, user, amk)
 
-    content(tmp_path, db, identity, user, "create", note_id="native-note", stage_id="S1", content_format="plain")
     content(tmp_path, db, identity, user, "begin")
     pending = content(tmp_path, db, identity, user, "pending")
     assert len(pending) == 1
@@ -94,18 +97,15 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
 
     support_documents(client, headers, identity['device_id'])
     manuscript = 'Formatted manuscript from Desktop'
-    saved = document(tmp_path, db, identity, user, 'save', stage_id='S1', content={
-        'type': 'doc', 'content': [{'type': 'paragraph', 'content': [
-            {'type': 'text', 'text': manuscript, 'marks': [{'type': 'bold'},
-                {'type': 'link', 'attrs': {'href': 'https://example.invalid/private'}}]},
-        ]}],
-    })
+    text_node = {'type': 'text', 'text': manuscript, 'marks': [{'type': 'bold'},
+        {'type': 'link', 'attrs': {'href': 'https://example.invalid/private'}}]}
+    formatted = {'type': 'doc', 'content': [{'type': 'paragraph', 'content': [text_node]}]}
+    saved = document(tmp_path, db, identity, user, 'save', stage_id='S1', content=formatted)
     assert 'error' not in saved, saved
     document(tmp_path, db, identity, user, 'begin')
     assert len(emit_documents(client, tmp_path, token, db, identity, user, amk)) == 1
 
-    run_browser(client, tmp_path, {
-        "amk": amk,
+    browser_project = {
         "projectId": PROJECT_ID,
         "sequence": sequence,
         "expectedContent": expected_content,
@@ -113,8 +113,18 @@ def test_web_catalog_recovery_http(cloud_client, tmp_path):
         "stageId": "S1",
         "stages": ["S1"],
         "expectedProjectName": "Cross-runtime project",
-        "manuscript": manuscript,
-    })
+    }
+    run_browser(client, tmp_path, {**browser_project, "amk": amk, "manuscript": manuscript})
+
+    assert receive_documents(client, tmp_path, token, db, identity, user, amk) == ['applied']
+    updated_manuscript = 'Updated formatted manuscript from Desktop'
+    text_node['text'] = updated_manuscript
+    updated = document(tmp_path, db, identity, user, 'save', stage_id='S1', content=formatted,
+        expected=document_heads(tmp_path, db, identity, user, saved['document_id']))
+    assert 'error' not in updated, updated
+    document(tmp_path, db, identity, user, 'begin')
+    assert len(emit_documents(client, tmp_path, token, db, identity, user, amk)) == 1
+    run_browser(client, tmp_path, {**browser_project, "manuscript": updated_manuscript, "reload": True})
 
 
 def test_web_created_empty_project_reopens_in_fresh_browser(cloud_client, tmp_path):

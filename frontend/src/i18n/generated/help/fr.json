@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Lecture de documents cloud sur le Web</h2>\n<p>Connectez-vous à votre compte cloud et déverrouillez la clé avec votre mot de passe de cryptage. Dans la section Projets, ouvrez le projet souhaité, sélectionnez une étape ou un projet, puis sélectionnez un document dans la liste Documents.</p>\n<p>Le document s'ouvre avec un formatage en mode lecture. Pour obtenir les modifications depuis Desktop, revenez à la liste des projets et ouvrez à nouveau le projet. Le choix de l'étape est retenu. Après le redémarrage, connectez-vous à nouveau et déverrouillez la clé. Une connexion au serveur est requise. Le verrouillage des touches masque le texte en clair.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous à votre compte cloud et déverrouillez la clé. Ouvrez Textes ou Notes, choisissez un projet, puis sélectionnez Projet ou une étape.</p>\n<p>Les textes conservent leur mise en forme. Cliquez sur Actualiser pour récupérer les modifications de Desktop. La lecture nécessite une connexion au serveur. Le verrouillage de la clé masque le contenu.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Lire les documents cloud sur le Web"
   },

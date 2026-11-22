@@ -14,7 +14,7 @@ import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
-const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean }>()
+const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean; section?: 'project' | 'texts' | 'notes' }>()
 const emit = defineEmits<{ invalidated: [] }>()
 const locale = useLocaleStore(), t = locale.translate
 const NFDocumentEditor = defineAsyncComponent(() => import('@/components/documents/editor/NFDocumentEditor.vue'))
@@ -92,6 +92,9 @@ function documentText(node: Record<string, unknown>): string {
   const content = Array.isArray(node.content) ? node.content.map(child => documentText(child as Record<string, unknown>)).join('') : ''
   return content + (['paragraph', 'heading', 'codeBlock'].includes(String(node.type)) ? '\n' : '')
 }
+const showProject = computed(() => !props.section || props.section === 'project')
+const showTexts = computed(() => showProject.value || props.section === 'texts')
+const showNotes = computed(() => showProject.value || props.section === 'notes')
 const selectedDocument = ref<string | null>(null)
 const stageDocuments = computed(() => recovery.value?.documents?.filter(document => document.stage_id === selectedStage.value) ?? [])
 const selectedMap = computed(() => recovery.value?.maps?.find(map => map.project_id === props.projectId && map.stage_id === selectedStage.value))
@@ -193,6 +196,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     <button v-if="workspace && error" class="nf-button nf-button--secondary" type="button" @click="openRecovery">{{ t('Повторить загрузку') }}</button>
     <article v-if="result" data-testid="cloud-project-metadata">
       <h3>{{ result.metadata.name }}</h3>
+      <button v-if="workspace && result.empty" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
       <StatePanel v-if="result.empty" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
       <p v-else>{{ words.partial }}</p>
       <dl v-if="!result.empty">
@@ -203,26 +207,30 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     </article>
     <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
+      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
       <p v-if="workspace" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
       <nav v-if="recovery.stages.length" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
         <button class="nf-button nf-button--secondary" type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in recovery.stages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
-      <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
-      <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
-      <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
-      <section v-if="stageDocuments.length" class="cloud-reader__panel" data-testid="cloud-document-list">
-        <h4>{{ documentLabels[locale.language] }}</h4>
-        <div class="cloud-reader__stages">
+      <template v-if="showProject">
+        <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
+        <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
+        <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
+      </template>
+      <section v-if="showTexts && (stageDocuments.length || section === 'texts')" class="cloud-reader__panel" data-testid="cloud-document-list">
+        <h4>{{ section === 'texts' ? t('Тексты') : documentLabels[locale.language] }}</h4>
+        <StatePanel v-if="!stageDocuments.length" :title="t('Нет данных')" />
+        <div v-else class="cloud-reader__stages">
           <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
         </div>
       </section>
-      <section v-if="activeDocument" class="cloud-reader__panel" data-testid="cloud-document-read">
+      <section v-if="showTexts && activeDocument" class="cloud-reader__panel" data-testid="cloud-document-read">
         <h5>{{ activeDocument.title }}</h5>
         <NFDocumentEditor v-if="workspace && documentForReading" :key="activeDocument.id" :initial-content="documentForReading" :translate="t" read-only />
         <p v-else data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
       </section>
-      <section v-if="projectMap" data-testid="cloud-map-read">
+      <section v-if="showProject && projectMap" data-testid="cloud-map-read">
         <h4>{{ t('Карта') }}</h4>
         <MindMapEditor :key="recovery.maps?.find(map => map.stage_id === selectedStage)?.event_id" :map="projectMap" secure-read-only :persist="refuseMapWrite" :import-x-mind="refuseMapWrite" />
         <ul data-testid="cloud-map-annotations"><li v-for="annotation in mapAnnotations" :key="annotation.node">
@@ -230,9 +238,10 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
           <ul><li v-for="item in annotation.checklist" :key="item.id">{{ item.checked ? '☑' : '☐' }} {{ item.text }}</li></ul>
         </li></ul>
       </section>
-      <section v-if="workspace && stageNotes.length" class="cloud-reader__panel">
+      <section v-if="workspace && showNotes && (stageNotes.length || section === 'notes')" class="cloud-reader__panel">
         <h4>{{ recoveryLabels[locale.language].heading }}</h4>
-        <div class="cloud-reader__notes">
+        <StatePanel v-if="!stageNotes.length" :title="t('Заметок пока нет')" />
+        <div v-else class="cloud-reader__notes">
           <NoteCard v-for="note in stageNotes" :key="note.id" :note="cloudNoteCard(note)" reading>
             <iframe v-if="note.content_format === 'html'" data-testid="cloud-note-html" :title="note.title" sandbox="" referrerpolicy="no-referrer" :srcdoc="noteHtmlDocument(note.content)" />
             <p v-else class="cloud-reader__note-text">{{ note.content }}</p>
@@ -255,6 +264,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
 .cloud-reader { display: grid; gap: var(--nf-space-4); min-width: 0; overflow-wrap: anywhere; }
 .cloud-reader h3, .cloud-reader h4, .cloud-reader h5, .cloud-reader p { margin: 0; }
 .cloud-reader h3 { font: clamp(1.5rem, 4vw, 2.4rem) var(--nf-font-serif); }
+.cloud-reader__refresh { justify-self: start; }
 .cloud-reader__notice { color: var(--nf-color-text-muted); }
 .cloud-reader__stages { display: flex; flex-wrap: wrap; gap: var(--nf-space-2); }
 .cloud-reader__stages [aria-pressed='true'] { border-color: var(--nf-color-primary); color: var(--nf-color-primary); }

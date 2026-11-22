@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Lendo documentos na nuvem na Web</h2>\n<p>Faça login em sua conta na nuvem e desbloqueie a chave com sua senha de criptografia. Na seção Projetos, abra o projeto desejado, selecione uma etapa ou Projeto e, em seguida, selecione um documento na lista Documentos.</p>\n<p>O documento é aberto com formatação no modo de leitura. Para obter alterações no Desktop, volte para a lista de projetos e abra o projeto novamente. A escolha do palco é lembrada. Após reiniciar, faça login novamente e desbloqueie a chave. É necessária uma conexão com o servidor. O bloqueio de teclas oculta o texto simples.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem e desbloqueie a chave. Abra Textos ou Notas, escolha um projeto e selecione Projeto ou uma etapa.</p>\n<p>Os textos mantêm a formatação. Clique em Atualizar para receber as alterações do Desktop. A leitura exige conexão com o servidor. Bloquear a chave oculta o conteúdo.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Ler documentos na nuvem na Web"
   },

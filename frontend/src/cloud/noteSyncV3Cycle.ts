@@ -82,12 +82,14 @@ export class NoteSyncV3Cycle {
     const result = (): NoteSyncV3CycleResult => ({ stages, noteUploaded, resolutionUploaded, metadataUploaded,
       pulled, noteApply, metadataApply, structuralApply, mapApply, documentApply, progressApply, gameApply, ack, blocked, errors, hasRemainingWork })
     const stage = async (name: string, action: () => Promise<void>): Promise<boolean> => {
+      if (abort) return false
       stages.push(name)
       try { await action(); return true }
       catch (error) {
-        errors.push({ stage: name, code: syncStageErrorCode(error) })
+        const code = syncStageErrorCode(error)
+        errors.push({ stage: name, code })
         hasRemainingWork = true
-        abort ||= error instanceof StaleAuthContextError
+        abort ||= code === 'request_timeout' || error instanceof StaleAuthContextError
           || (error instanceof Error && 'code' in error && error.code === 'sync_transport_mode_incompatible')
         return false
       }
@@ -116,10 +118,17 @@ export class NoteSyncV3Cycle {
       const pass = await sealPendingNoteSyncIntents(this.intents, this.keys, { limit: limits.sealLimit })
       hasRemainingWork ||= pass.listed === limits.sealLimit || pass.results.some(item => item.status.includes('failure') || item.status === 'blocked_skipped')
     })) return result()
-    await stage('seal_metadata', async () => { await mode(); hasRemainingWork ||= (await this.metadata.sealOnce(accountId, deviceId)) === 8 })
+    await stage('seal_metadata', async () => { await mode(); const count = await this.metadata.sealOnce(accountId, deviceId); hasRemainingWork ||= count === 8 })
     if (this.structural) await stage('seal_structure', async () => { await mode(); const count = await this.structural!.sealOnce(accountId, deviceId); hasRemainingWork ||= count === 8 })
-    if(this.accountReader?.sealCatalog) await stage('seal_catalog',async()=>{await mode();hasRemainingWork ||= await this.accountReader!.sealCatalog!(accountId,deviceId)===8})
-    if(this.contentNotes?.sealNotes) await stage('seal_content_notes',async()=>{hasRemainingWork ||= await this.contentNotes!.sealNotes!(accountId,deviceId)===8})
+    if (this.accountReader?.sealCatalog) await stage('seal_catalog', async () => {
+      await mode()
+      const count = await this.accountReader!.sealCatalog!(accountId, deviceId)
+      hasRemainingWork ||= count === 8
+    })
+    if (this.contentNotes?.sealNotes) await stage('seal_content_notes', async () => {
+      const count = await this.contentNotes!.sealNotes!(accountId, deviceId)
+      hasRemainingWork ||= count === 8
+    })
     if(this.progress) await stage('seal_progress',async()=>{const count=await this.progress!.sealProgress(accountId,deviceId);hasRemainingWork ||= count===8})
     if(gameAvailable)await stage('seal_game',async()=>{const count=await this.game!.sealGame(accountId,deviceId);hasRemainingWork ||= count===8})
     if(this.documents) await stage('seal_documents',async()=>{const count=await this.documents!.sealDocuments(accountId,deviceId);hasRemainingWork ||= count===8})

@@ -106,7 +106,8 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
   let details: unknown
   try {
     details = await response.json()
-  } catch {
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
     details = undefined
   }
 
@@ -136,6 +137,47 @@ async function errorFromResponse(response: Response): Promise<ApiError> {
   )
 }
 
+const CLOUD_REQUEST_TIMEOUT_MS = 20_000
+
+async function requestAndRead<T>(
+  path: string,
+  options: RequestInit,
+  read: (response: Response) => Promise<T>,
+): Promise<T> {
+  const callerSignal = options.signal
+  const cloudRequest = /^\/?api\/v[123]\//.test(path)
+  const controller = cloudRequest ? new AbortController() : undefined
+  const cancel = () => controller?.abort(callerSignal?.reason)
+  if (controller && callerSignal) {
+    if (callerSignal.aborted) cancel()
+    else callerSignal.addEventListener('abort', cancel, { once: true })
+  }
+  let timedOut = false
+  const timer = controller && setTimeout(() => {
+    if (controller.signal.aborted) return
+    timedOut = true
+    controller.abort()
+  }, CLOUD_REQUEST_TIMEOUT_MS)
+
+  try {
+    let response: Response
+    try {
+      response = await fetch(requestUrl(path), { ...options, signal: controller?.signal ?? callerSignal })
+    } catch (error) {
+      if (callerSignal?.aborted || error instanceof DOMException && error.name === 'AbortError') throw error
+      throw new ApiError(0, 'network_error', connectionMessage(), error)
+    }
+    return await read(response)
+  } catch (error) {
+    if (timedOut) throw new ApiError(0, 'request_timeout', connectionMessage())
+    if (callerSignal?.aborted) throw callerSignal.reason
+    throw error
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    if (controller) callerSignal?.removeEventListener('abort', cancel)
+  }
+}
+
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
   const {
     body: jsonBody,
@@ -158,33 +200,12 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     body = JSON.stringify(jsonBody)
   }
 
-  let response: Response
-  try {
-    response = await fetch(requestUrl(path), {
-      ...requestOptions,
-      headers,
-      body,
-    })
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') {
-      throw error
-    }
-    throw new ApiError(
-      0,
-      'network_error',
-      connectionMessage(),
-      error,
-    )
-  }
-
-  if (!response.ok) {
-    throw await errorFromResponse(response)
-  }
-  if (response.status === 204) {
-    return undefined as T
-  }
-  if (maxResponseBytes !== undefined) return await boundedJson(response, maxResponseBytes) as T
-  return (await readResponseBody(() => response.json())) as T
+  return requestAndRead(path, { ...requestOptions, headers, body }, async response => {
+    if (!response.ok) throw await errorFromResponse(response)
+    if (response.status === 204) return undefined as T
+    if (maxResponseBytes !== undefined) return await readResponseBody(() => boundedJson(response, maxResponseBytes)) as T
+    return (await readResponseBody(() => response.json())) as T
+  })
 }
 
 export async function apiBinaryRequest(path: string, options: ApiRequestOptions = {}): Promise<{ bytes: Uint8Array; headers: Headers }> {
@@ -192,15 +213,10 @@ export async function apiBinaryRequest(path: string, options: ApiRequestOptions 
   if (jsonBody !== undefined || rawBody !== undefined) throw new TypeError('Binary API request does not accept a request body.')
   const headers = new Headers(suppliedHeaders)
   headers.set('Accept', 'application/octet-stream')
-  let response: Response
-  try {
-    response = await fetch(requestUrl(path), { ...requestOptions, headers })
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new ApiError(0, 'network_error', connectionMessage(), error)
-  }
-  if (!response.ok) throw await errorFromResponse(response)
-  return { bytes: new Uint8Array(await readResponseBody(() => response.arrayBuffer())), headers: response.headers }
+  return requestAndRead(path, { ...requestOptions, headers }, async response => {
+    if (!response.ok) throw await errorFromResponse(response)
+    return { bytes: new Uint8Array(await readResponseBody(() => response.arrayBuffer())), headers: response.headers }
+  })
 }
 
 export function apiErrorMessage(error: unknown): string {

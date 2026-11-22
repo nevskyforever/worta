@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Cloud-Dokumente im Web lesen</h2>\n<p>Melden Sie sich bei Ihrem Cloud-Konto an und entsperren Sie den Schlüssel mit Ihrem Verschlüsselungskennwort. Öffnen Sie im Abschnitt „Projekte“ das gewünschte Projekt, wählen Sie eine Phase oder ein Projekt aus und wählen Sie dann ein Dokument aus der Liste „Dokumente“ aus.</p>\n<p>Das Dokument wird mit der Formatierung im Lesemodus geöffnet. Um Änderungen vom Desktop zu erhalten, kehren Sie zur Projektliste zurück und öffnen Sie das Projekt erneut. Die Wahl der Bühne bleibt im Gedächtnis. Melden Sie sich nach dem Neustart erneut an und entsperren Sie den Schlüssel. Eine Verbindung zum Server ist erforderlich. Durch die Tastensperre wird der Klartext ausgeblendet.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich beim Cloudkonto an und entsperre den Schlüssel. Öffne Texte oder Notizen, wähle ein Projekt und dann Projekt oder eine Etappe.</p>\n<p>Texte werden formatiert angezeigt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen. Zum Lesen ist eine Serververbindung nötig. Das Sperren des Schlüssels blendet die Inhalte aus.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Clouddokumente im Web lesen"
   },

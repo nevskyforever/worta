@@ -49,7 +49,7 @@ const t = locale.translate
 const words = computed(() => copy[locale.language])
 const createWords = computed(() => creationCopy[locale.language])
 const setupWords = computed(() => setupCopy[locale.language])
-const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean }>()
+const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean; section?: 'project' | 'texts' | 'notes' }>()
 const emit = defineEmits<{ statusChange: [status: BrowserCloudAccountSession['status']] }>()
 const session = props.session ?? new BrowserCloudAccountSession()
 const status = ref(session.status)
@@ -477,9 +477,10 @@ watch(status, next => {
             </option>
           </select>
         </div>
-        <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace @invalidated="refresh(); clearCloudCatalog()" />
+        <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @invalidated="refresh(); clearCloudCatalog()" />
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
+        <h2 v-if="section && section !== 'project'">{{ t(section === 'texts' ? 'Тексты' : 'Заметки') }}</h2>
         <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
         <StatePanel v-if="cloudCatalogBusy" :title="t('Загружаем с сервера…')" loading />
         <p v-else-if="cloudCatalogError" role="alert">{{ cloudCatalogError }}</p>

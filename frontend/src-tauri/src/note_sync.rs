@@ -391,7 +391,7 @@ mod cloud_project_bootstrap_tests {
             .unwrap();
         let registered = registered(&mut connection, &[("a", "first")]);
         connection.execute(
-            "UPDATE notes SET payload_json=json_set(payload_json,'$.content_format','plain') WHERE id='a'", [],
+            "UPDATE notes SET payload_json=json_set(payload_json,'$.content_format','unknown') WHERE id='a'", [],
         ).unwrap();
         assert!(capture_initial_note_sync_intents(&mut connection, &scope(&registered)).is_err());
         assert_eq!(
@@ -403,6 +403,29 @@ mod cloud_project_bootstrap_tests {
                 )
                 .unwrap(),
             0
+        );
+    }
+
+    #[test]
+    fn stage_note_stays_local_until_stage_history_is_published() {
+        let mut connection = database(&[("a", "first"), ("b", "stage note")]);
+        connection.execute(
+            "INSERT INTO stages(id,project_id,name,infinite,unit,status,payload_json)
+             VALUES('stage','p','Stage',0,'symbols','активен','{}')", [],
+        ).unwrap();
+        connection.execute(
+            "UPDATE notes SET stage_id='stage',payload_json=json_set(payload_json,'$.stage_id','stage') WHERE id='b'", [],
+        ).unwrap();
+        let registered = registered(&mut connection, &[("a", "first"), ("b", "stage note")]);
+        let captured = capture_initial_note_sync_intents(&mut connection, &scope(&registered)).unwrap();
+        assert_eq!(captured.initial_event_count, 1);
+        assert_eq!(
+            connection.query_row("SELECT entity_id FROM cloud_sync_outbox", [], |row| row.get::<_, String>(0)).unwrap(),
+            "a"
+        );
+        assert_eq!(
+            connection.query_row("SELECT stage_id FROM notes WHERE id='b'", [], |row| row.get::<_, String>(0)).unwrap(),
+            "stage"
         );
     }
 
@@ -9241,13 +9264,13 @@ pub(crate) fn preflight_note_sync_project(
         return Err(NoteSyncError::InvalidSnapshot("missing project identity"));
     }
     let mut statement =
-        connection.prepare("SELECT id,payload_json FROM notes WHERE project_id=?1 ORDER BY id")?;
+        connection.prepare("SELECT id,stage_id,payload_json FROM notes WHERE project_id=?1 ORDER BY id")?;
     let rows = statement.query_map([project_id], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, String>(2)?))
     })?;
     let mut issues = Vec::new();
     for row in rows {
-        let (note_id, snapshot_json) = row?;
+        let (note_id, stage_id, snapshot_json) = row?;
         let Ok(snapshot) = serde_json::from_str::<serde_json::Value>(&snapshot_json) else {
             issues.push(NoteSyncPreflightIssue {
                 note_id,
@@ -9287,27 +9310,31 @@ pub(crate) fn preflight_note_sync_project(
                 });
             }
         }
-        if object.get("stage_id").is_some_and(|value| !value.is_null())
-            || object
-                .get("source_type")
-                .and_then(serde_json::Value::as_str)
-                != Some("project")
-            || object
-                .get("source_map_id")
-                .is_some_and(|value| !value.is_null())
-            || object
-                .get("source_node_id")
-                .is_some_and(|value| !value.is_null())
-        {
+        let source = object.get("source_type").and_then(serde_json::Value::as_str);
+        let format = object.get("content_format").and_then(serde_json::Value::as_str);
+        let matching_stage = match stage_id.as_deref() {
+            Some(stage) => object.get("stage_id").and_then(serde_json::Value::as_str) == Some(stage),
+            None => !object.get("stage_id").is_some_and(|value| !value.is_null()),
+        };
+        let project_note = source == Some("project")
+            && ["source_map_id", "source_node_id"].iter().all(|key| {
+                !object.get(*key).is_some_and(|value| !value.is_null())
+            });
+        let map_note = source == Some("mindmap")
+            && ["source_map_id", "source_node_id"].iter().all(|key| {
+                object.get(*key).and_then(serde_json::Value::as_str).is_some_and(|id| !id.is_empty())
+            });
+        // Notes outside the initial Note-v1 cohort are captured by the content
+        // and map writers after their dependencies are published.
+        if matching_stage && (project_note || map_note) && matches!(format, Some("html" | "plain")) {
+            continue;
+        }
+        if !matching_stage || !(project_note || map_note) {
             issues.push(NoteSyncPreflightIssue {
                 note_id: note_id.clone(),
                 code: NoteSyncPreflightIssueCode::DependencyNotSynced,
             });
-        } else if object
-            .get("content_format")
-            .and_then(serde_json::Value::as_str)
-            != Some("html")
-        {
+        } else {
             issues.push(NoteSyncPreflightIssue {
                 note_id: note_id.clone(),
                 code: NoteSyncPreflightIssueCode::UnsupportedContentFormat,
@@ -9571,7 +9598,11 @@ pub(crate) fn capture_initial_note_sync_intents(
     )?;
     let notes = {
         let mut statement = transaction.prepare(
-            "SELECT id,updated_at,payload_json FROM notes WHERE project_id=?1 ORDER BY id",
+            "SELECT id,updated_at,payload_json FROM notes
+             WHERE project_id=?1 AND stage_id IS NULL
+               AND json_extract(payload_json,'$.source_type')='project'
+               AND json_extract(payload_json,'$.content_format')='html'
+             ORDER BY id",
         )?;
         let rows = statement
             .query_map([&command.project_id], |row| {

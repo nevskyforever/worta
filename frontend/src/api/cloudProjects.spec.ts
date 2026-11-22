@@ -17,8 +17,20 @@ describe('cloud project bootstrap transport', () => {
     expect(url).toBe('/api/v1/cloud/projects')
     expect(options?.method ?? 'GET').toBe('GET')
     expect(new Headers(options?.headers).get('Authorization')).toBe('Bearer private-access-token')
-    expect(options?.signal).toBe(controller.signal)
     expect(options?.body).toBeUndefined()
+
+    fetchMock.mockImplementationOnce((_url, requestOptions) => new Promise((_resolve, reject) => {
+      const signal = requestOptions?.signal
+      if (!signal) {
+        reject(new Error('Fetch did not receive the cancellation signal.'))
+        return
+      }
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    }))
+    const pending = cloudProjectsApi.list('private-access-token', controller.signal)
+    const reason = new DOMException('Catalog closed', 'AbortError')
+    controller.abort(reason)
+    await expect(pending).rejects.toBe(reason)
   })
 
   it('uses authenticated metadata-only registry routes and immutable lineage bodies', async () => {

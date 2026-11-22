@@ -81,6 +81,15 @@ try {
       assert.deepEqual(ids, fixture.stages)
       await panel.locator(`[data-stage-id="${fixture.stageId ?? fixture.stages[0]}"]`).click()
     }
+    const navigation = pageToUse.locator(pageToUse.viewportSize().width < 600 ? '.mobile-navigation' : '#primary-navigation')
+    const chooseSection = async section => {
+      const link = navigation.locator(`a[href="/cloud?section=${section}"]`)
+      await link.click()
+      await pageToUse.waitForURL(`**/cloud?section=${section}`)
+      assert.equal(await link.getAttribute('aria-current'), 'page')
+    }
+    await chooseSection('notes')
+    assert.equal(await panel.getByTestId('cloud-document-list').count(), 0)
     // Plain notes render directly; HTML notes render in the sandboxed iframe.
     if (fixture.contentFormat === 'html') {
       const rendered = await pageToUse.frameLocator('[data-testid="cloud-note-html"]').locator('body').innerText()
@@ -90,13 +99,20 @@ try {
       assert.ok(text.includes(fixture.expectedContent), `note content missing: ${text}`)
     }
     if (fixture.manuscript) {
+      await chooseSection('texts')
+      assert.equal(await panel.locator('.cloud-reader__notes').count(), 0)
       await panel.locator('[data-document-id]').press('Enter')
       const editor = panel.locator('.tiptap[contenteditable="false"]')
       await editor.locator('strong').getByText(fixture.manuscript, { exact: true }).waitFor()
       assert.equal(await editor.locator('a, img, iframe').count(), 0)
+      if (fixture.reload) {
+        await panel.getByTestId('cloud-project-refresh').click()
+        await editor.locator('strong').getByText(fixture.manuscript, { exact: true }).waitFor()
+      }
       await editor.press('Tab')
       assert.equal(await editor.evaluate(element => element === document.activeElement), false)
     }
+    assert.equal(await panel.getByRole('alert').count(), 0)
     assert.equal(await pageToUse.locator('#main-content').evaluate(main => main.scrollWidth <= main.clientWidth), true)
     if (process.env.WORTA_WORKSPACE_SCREENSHOTS) {
       const width = pageToUse.viewportSize().width
@@ -117,7 +133,9 @@ try {
     await form.locator('input').fill(secondName)
     await form.locator('button').click()
     const secondTile = card.locator('[data-cloud-project-id]').getByText(secondName, { exact: true })
-    await secondTile.waitFor()
+    await secondTile.waitFor().catch(async error => {
+      throw new Error(`Second project did not appear. Form: ${await form.innerText()}; catalog: ${await card.getByTestId('server-cloud-project-catalog').innerText()}`, { cause: error })
+    })
     const secondId = await secondTile.getAttribute('data-cloud-project-id')
     const verifyEmpty = async () => {
       const panel = await open(card, id)
@@ -138,6 +156,11 @@ try {
     await verifyEmpty()
   } else {
     await verify(page)
+    if (fixture.reload) {
+      await page.reload()
+      await page.waitForURL('**/login')
+      await verify(page)
+    }
     // Read the same server history without the first browser's IndexedDB or device identity.
     await context.close()
     page = await launch(`${profile}-fresh`, { width: 390, height: 844 })

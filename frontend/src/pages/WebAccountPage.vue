@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '@/layouts/AppShell.vue'
 import BrowserCloudAccountCard from '@/components/settings/BrowserCloudAccountCard.vue'
@@ -8,6 +8,10 @@ import { webAccountSession } from '@/platform/web/webAccountSession'
 const route = useRoute()
 const router = useRouter()
 const session = webAccountSession()
+const section = computed(() => {
+  const value = route.query.section
+  return value === 'texts' || value === 'notes' ? value : 'project'
+})
 const accountCard = ref<InstanceType<typeof BrowserCloudAccountCard> | null>(null)
 
 function syncRoute(status: typeof session.status): void {
@@ -20,7 +24,7 @@ function syncRoute(status: typeof session.status): void {
   <AppShell cloud-workspace :locked="route.name !== 'web-workspace'" @projects="accountCard?.showProjects()">
     <div class="web-account" :class="{ 'web-account--workspace': route.name === 'web-workspace' }">
       <h1 v-if="route.name !== 'web-workspace'">worta</h1>
-      <BrowserCloudAccountCard ref="accountCard" :session="session" :workspace-page="route.name === 'web-workspace'" @status-change="syncRoute" />
+      <BrowserCloudAccountCard ref="accountCard" :session="session" :section="section" :workspace-page="route.name === 'web-workspace'" @status-change="syncRoute" />
     </div>
   </AppShell>
 </template>

@@ -8,7 +8,7 @@ const USER = '123e4567-e89b-42d3-a456-426614174099'
 const DEVICE = '123e4567-e89b-42d3-a456-426614174003'
 const PAGE = { committed_cursor: 1, new_events: 1, replayed_events: 0, has_more: false }
 
-async function setup(structuralEnabled = false, accountEnabled = false, contentEnabled = false, mapEnabled = false, documentEnabled = false, actionsEnabled = false) {
+async function setup(structuralEnabled = false, accountEnabled = false, contentEnabled = false, mapEnabled = false, documentEnabled = false, actionsEnabled = false, contentWriters = false) {
   const auth = new NormalUserAuthRuntime({
     login: vi.fn().mockResolvedValue({ access_token: 'token', refresh_token: 'refresh', access_expires_in: 60 }),
     refresh: vi.fn(), logout: vi.fn(), me: vi.fn().mockResolvedValue({ id: USER, username: 'u',
@@ -46,8 +46,8 @@ async function setup(structuralEnabled = false, accountEnabled = false, contentE
     uploadOnce: vi.fn(async () => { calls.push('upload_structure'); return 0 }),
     applyOnce: vi.fn(async () => { calls.push('apply_structure'); return { applied: 0, conflicts: 0, orphans: 0, blocked: [], listed: 0 } }),
   }
-  const account = { readOnce: vi.fn(async () => { calls.push('apply_account'); return { blocked: ['account_entity_codec_not_activated'], listed: 1, hasRemainingWork: false } }) }
-  const content = { readOnce: vi.fn(async () => { calls.push('apply_content'); return { blocked: ['orphan'], listed: 1, hasRemainingWork: true } }) }
+  const account = { sealCatalog: vi.fn().mockResolvedValue(0), readOnce: vi.fn(async () => { calls.push('apply_account'); return { blocked: ['account_entity_codec_not_activated'], listed: 1, hasRemainingWork: false } }) }
+  const content = { sealNotes: vi.fn().mockResolvedValue(0), readOnce: vi.fn(async () => { calls.push('apply_content'); return { blocked: ['orphan'], listed: 1, hasRemainingWork: true } }) }
   const maps = {
     declareSupport: vi.fn(async () => { calls.push('declare_maps') }),
     sealMaps: vi.fn(async () => { calls.push('seal_maps'); return 0 }),
@@ -59,8 +59,8 @@ async function setup(structuralEnabled = false, accountEnabled = false, contentE
   const progress={declareSupport:vi.fn(),beginProgress:vi.fn(),sealProgress:vi.fn().mockResolvedValue(0),uploadProgress:vi.fn().mockResolvedValue(0),readOnce:vi.fn(async()=>{calls.push('apply_progress');return {listed:2,applied:1,conflicts:0,blocked:['progress_parent_unknown'],hasRemainingWork:true}})}
   const game={gameReaderAvailable:vi.fn().mockResolvedValue(true),declareGameSupport:vi.fn(),beginGame:vi.fn(),sealGame:vi.fn().mockResolvedValue(0),uploadGame:vi.fn().mockResolvedValue(0),readGameOnce:vi.fn(async()=>{calls.push('apply_game');return {listed:2,applied:1,conflicts:0,blocked:['game_source_dependency_unknown'],hasRemainingWork:true}})}
   const cycle = new NoteSyncV3Cycle(auth, bindings as never, identity as never, keys as never,
-    device as never, intents as never, note as never, resolution as never, noteApply as never, metadata as never, structuralEnabled ? structural as never : undefined, accountEnabled ? account as never : undefined, contentEnabled ? content as never : undefined, mapEnabled ? maps as never : undefined, documentEnabled ? documents as never : undefined, actionsEnabled ? progress as never : undefined, actionsEnabled ? game as never : undefined)
-  return { progress, game, documents, account, structural, maps, cycle, calls, capabilities, intents, note, resolution, metadata,
+    device as never, intents as never, note as never, resolution as never, noteApply as never, metadata as never, structuralEnabled ? structural as never : undefined, accountEnabled ? (contentWriters ? account : { readOnce: account.readOnce }) as never : undefined, contentEnabled ? (contentWriters ? content : { readOnce: content.readOnce }) as never : undefined, mapEnabled ? maps as never : undefined, documentEnabled ? documents as never : undefined, actionsEnabled ? progress as never : undefined, actionsEnabled ? game as never : undefined)
+  return { progress, game, documents, account, content, structural, maps, cycle, calls, capabilities, intents, note, resolution, metadata,
     mode: (value: number) => { writerMode = value } }
 }
 
@@ -74,6 +74,20 @@ describe('mode-3 Note and metadata cycle', () => {
     h.capabilities.mockRejectedValueOnce(new ApiError(503, 'note_readers_not_ready', 'blocked'))
     expect((await h.cycle.runOnce('local', DEVICE)).errors).toEqual([{ stage: 'preflight', code: 'note_readers_not_ready' }])
   })
+  it('ends a timed-out upload without making more requests and can retry the cycle', async () => {
+    const h = await setup()
+    h.metadata.uploadOnce.mockRejectedValueOnce(new ApiError(0, 'request_timeout', 'timeout'))
+    const timedOut = await h.cycle.runOnce('local', DEVICE)
+    expect(timedOut.errors).toEqual([{ stage: 'upload_metadata', code: 'request_timeout' }])
+    expect(timedOut.hasRemainingWork).toBe(true)
+    expect(h.metadata.pullOnce).not.toHaveBeenCalled()
+    expect(h.metadata.ackOnce).not.toHaveBeenCalled()
+
+    const retried = await h.cycle.runOnce('local', DEVICE)
+    expect(retried.errors).toEqual([])
+    expect(h.metadata.ackOnce).toHaveBeenCalledOnce()
+  })
+
   it('continues every family through several blockers without migration consent',async()=>{
     const h=await setup(true,true,true,true,true,true)
     for(let pass=0;pass<2;pass++){
@@ -141,12 +155,14 @@ it('mode-3 production dispatch applies structural arrivals before contiguous ACK
   expect(result.errors).toEqual([{ stage: 'upload_structure', code: 'Error' }])
 })
 
-it('seals structural intents even when another bounded writer has remaining work', async () => {
-  const h = await setup(true)
+it('seals structural, catalog and content-note intents even when another writer has remaining work', async () => {
+  const h = await setup(true, true, true, false, false, false, true)
   h.metadata.sealOnce.mockResolvedValueOnce(8)
   const result = await h.cycle.runOnce('local', DEVICE)
   expect(result.hasRemainingWork).toBe(true)
   expect(h.structural.sealOnce).toHaveBeenCalledOnce()
+  expect(h.account.sealCatalog).toHaveBeenCalledOnce()
+  expect(h.content.sealNotes).toHaveBeenCalledOnce()
 })
 
 

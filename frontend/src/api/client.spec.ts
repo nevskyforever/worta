@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiResponseTooLargeError, apiErrorMessage, apiRequest } from './client'
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -46,6 +47,38 @@ describe('apiRequest', () => {
       code: 'conflict',
       message: 'Проект с таким именем уже существует.',
     })
+  })
+
+  it.each([false, true])('times out a cloud request even after headers arrive (%s)', async headersArrived => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url: string, { signal }: RequestInit) => {
+      const stalled = () => new Promise<never>((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      })
+      if (!headersArrived) return stalled()
+      const response = new Response()
+      vi.spyOn(response, 'json').mockImplementation(stalled)
+      return Promise.resolve(response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = apiRequest('/api/v3/sync/encrypted/pull')
+    const result = expect(request).rejects.toMatchObject({ status: 0, code: 'request_timeout' })
+    await vi.advanceTimersByTimeAsync(20_000)
+    await result
+    expect(fetchMock.mock.calls[0]?.[1].signal?.aborted).toBe(true)
+  })
+
+  it('preserves the caller cancellation of a cloud request', async () => {
+    const caller = new AbortController()
+    const reason = new DOMException('Cancelled', 'AbortError')
+    vi.stubGlobal('fetch', vi.fn((_url: string, { signal }: RequestInit) =>
+      new Promise<never>((_resolve, reject) => {
+        signal!.addEventListener('abort', () => reject(signal!.reason), { once: true })
+      })))
+    const request = apiRequest('/api/v1/account/me', { signal: caller.signal })
+    caller.abort(reason)
+    await expect(request).rejects.toBe(reason)
   })
 
   it('does not classify malformed or oversized JSON as a connection error', async () => {

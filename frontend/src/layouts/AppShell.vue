@@ -90,6 +90,8 @@ try {
 }
 const navigationItems = computed(() => props.cloudWorkspace ? [
   { to: '/cloud', home: '/cloud', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
+  { to: '/cloud?section=texts', home: '/cloud?section=texts', label: 'Тексты', mobileLabel: 'Тексты', icon: documentTextOutline },
+  { to: '/cloud?section=notes', home: '/cloud?section=notes', label: 'Заметки', mobileLabel: 'Заметки', icon: documentTextOutline },
 ] : [
   { to: lastProjectPath.value, home: '/projects', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
   { to: lastMapsPath.value, home: '/maps', label: 'Карты', mobileLabel: 'Карты', icon: gitBranchOutline },
@@ -176,8 +178,7 @@ watch(() => route.fullPath, (path) => {
 
 function returnToSectionHome(event: MouseEvent, home: string): void {
   if (props.cloudWorkspace) {
-    event.preventDefault()
-    emit('projects')
+    if (home === '/cloud') emit('projects')
     return
   }
   const currentPath = route.fullPath.split(/[?#]/, 1)[0] ?? ''
@@ -402,6 +403,10 @@ watchEffect(() => {
           :key="item.to"
           class="navigation-link"
           :to="item.to"
+          :active-class="cloudWorkspace ? 'cloud-navigation-link' : undefined"
+          :exact-active-class="cloudWorkspace ? 'cloud-navigation-link-current' : undefined"
+          :aria-current-value="cloudWorkspace && route.fullPath !== item.to ? 'false' : 'page'"
+          :class="{ 'router-link-active': cloudWorkspace && route.fullPath === item.to }"
           :aria-label="t(item.label)"
           :title="sidebarCollapsed ? t(item.label) : undefined"
           @click="returnToSectionHome($event, item.home)"
@@ -496,6 +501,10 @@ watchEffect(() => {
         :key="item.to"
         class="mobile-navigation-link"
         :to="item.to"
+        :active-class="cloudWorkspace ? 'cloud-navigation-link' : undefined"
+        :exact-active-class="cloudWorkspace ? 'cloud-navigation-link-current' : undefined"
+        :aria-current-value="cloudWorkspace && route.fullPath !== item.to ? 'false' : 'page'"
+        :class="{ 'router-link-active': cloudWorkspace && route.fullPath === item.to }"
         :aria-label="t(item.label)"
         @click="cloudWorkspace && returnToSectionHome($event, item.home)"
       >
