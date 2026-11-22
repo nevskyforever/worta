@@ -291,8 +291,10 @@ function assertOwnEcho(outbound: BrowserOutboxRecord, incoming: WireItem): void 
   const normalize = (event: WireItem['event']) => {
     const project = event as Partial<V3Descriptor>
     // The server can serialize the same UTC instant with different fractional precision.
-    return outbound.protocol_version === 3 && project.entity_type === 'project_metadata'
-      && project.operation === 'upsert' && project.revision === 1 && project.deleted_at === null
+    const metadataGenesis = project.entity_type === 'project_metadata'
+      && project.operation === 'upsert' && project.revision === 1
+    const progressEvent = project.entity_type === 'progress' && project.operation === 'event'
+    return outbound.protocol_version === 3 && project.deleted_at === null && (metadataGenesis || progressEvent)
       ? { ...event, updated_at: canonicalizeSyncTimestamp(project.updated_at!) }
       : event
   }

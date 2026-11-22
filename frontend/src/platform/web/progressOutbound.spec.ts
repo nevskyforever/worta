@@ -5,9 +5,9 @@ import { prepareProgressAppend } from '@/cloud/progressAuthor'
 import { transitionProgress } from '@/cloud/progressTransition'
 import { unframeProgressEvent, type ProgressEvent } from '@/cloud/progressCodec'
 import { asAccountMasterKey, decryptObjectBytes } from '@/crypto'
-import { decodeBase64Url } from '@/api/base64url'
+import { decodeBase64Url, encodeBase64Url } from '@/api/base64url'
 import { validateBrowserSealedBody, prepareBrowserUploadAcceptance } from './syncDurability'
-import { sealProgressForOutbox } from './progressOutbound'
+import { sealProgressForOutbox, sealProgressPublicationProof, verifyProgressPublicationProof } from './progressOutbound'
 
 it('seals a Progress append as an existing outbox body and checks the matching receipt', async () => {
   const parent = structuredClone(fixture.examples[0]!.event) as ProgressEvent
@@ -22,7 +22,20 @@ it('seals a Progress append as an existing outbox body and checks the matching r
   expect(await unframeProgressEvent(bytes)).toEqual(event)
   const out = { record_version: 1 as const, account_id: scope.accountId, device_id: deviceId, event_id: event.header.event_id, local_ordinal: 1, protocol_version: 3 as const, state: 'sealed' as const, raw_body: raw }
   const response = { protocol_version: 3, encrypted_sync_version: 3, results: [{ event_id: event.header.event_id, server_sequence: 4, duplicate: false }], current_cursor: 4 }
-  expect(prepareBrowserUploadAcceptance(scope, out, response).server_sequence).toBe(4)
+  const receipt = prepareBrowserUploadAcceptance(scope, out, response)
+  expect(receipt.server_sequence).toBe(4)
   expect(() => prepareBrowserUploadAcceptance(scope, out, { ...response, results: [{ ...response.results[0], event_id: crypto.randomUUID() }] })).toThrow()
   await expect(sealProgressForOutbox({ ...scope, deviceId: crypto.randomUUID() }, event, key)).rejects.toThrow('progress_scope_mismatch')
+
+  const accepted = { ...out, state: 'accepted' as const }
+  const echo = { ...item, event: { ...item.event, device_id: deviceId, server_sequence: 4,
+    updated_at: '2026-10-03T00:00:00Z' } }
+  const row = { record_version: 1, account_id: scope.accountId, device_id: deviceId, event_id: event.header.event_id,
+    protocol_version: 3, server_sequence: 4, state: 'received', wire_item: JSON.stringify(echo) }
+  const proof = await sealProgressPublicationProof(scope, accepted, receipt, row, key)
+  await expect(verifyProgressPublicationProof(scope, accepted, receipt, row, proof, key)).resolves.toBeUndefined()
+  await expect(verifyProgressPublicationProof(scope, accepted, { ...receipt, duplicate: true }, row, proof, key)).rejects.toThrow('conflicting_record')
+  await expect(sealProgressPublicationProof(scope, accepted, { ...receipt, server_sequence: 5 }, row, key)).rejects.toThrow('conflicting_record')
+  const changed = { ...echo, object: { ...echo.object, nonce: encodeBase64Url(new Uint8Array(24)) } }
+  await expect(sealProgressPublicationProof(scope, accepted, receipt, { ...row, wire_item: JSON.stringify(changed) }, key)).rejects.toThrow('conflicting_record')
 })
