@@ -91,7 +91,7 @@ export interface CloudSessionRuntime {
   rebuildGameProjection?(ownerKey:string):Promise<void>
   projectProgressAuthority?(projectId:string):Promise<ProgressAuthorityView>
   beginProgressMigration?(projectId:string):Promise<ProgressAuthorityView>
-  chooseProgressHistory?(decision:ProgressDecision):Promise<void>
+  chooseProgressHistory?(decision:ProgressDecision):Promise<string>
 
   login(username: string, password: string): Promise<{ context: { username: string } }>
   cryptoRecord(): Promise<CurrentUserCryptoRecord>
@@ -779,6 +779,27 @@ export const useCloudSessionStore = defineStore('cloud-session', () => {
   async function inspectProgress(projectId:string):Promise<void>{const epoch=lifecycleEpoch;const runtime=requireRuntime();if(!runtime.projectProgressAuthority)throw new Error('progress_runtime_unavailable');const view=await runtime.projectProgressAuthority(projectId);if(current(epoch))progressAuthority.value={...progressAuthority.value,[projectId]:view}}
   async function beginProgress(projectId:string):Promise<void>{await diagnostics.run('migrations','progress_migration',async correlation=>{const epoch=lifecycleEpoch;const runtime=requireRuntime();if(!runtime.beginProgressMigration)throw new Error('progress_runtime_unavailable');await runtime.beginProgressMigration(projectId);if(!current(epoch))return;await retry(correlation);if(current(epoch))await inspectProgress(projectId)})}
   async function chooseProgressHistory(decision:ProgressDecision):Promise<void>{const epoch=lifecycleEpoch;const runtime=requireRuntime();if(!runtime.chooseProgressHistory)throw new Error('progress_runtime_unavailable');await runtime.chooseProgressHistory(decision);if(!current(epoch))return;await retry();if(!current(epoch))return;await inspectProgress(decision.project_id);if(current(epoch))announceDataChange('projects')}
+  async function removeSyncedProgress(projectId:string,stageId:string|null,entryId:string,expectedHeads:string[]):Promise<void>{
+    const epoch=lifecycleEpoch, runtime=requireRuntime()
+    if(!runtime.projectProgressAuthority||!runtime.chooseProgressHistory)throw new Error('progress_runtime_unavailable')
+    const before=await runtime.projectProgressAuthority(projectId)
+    if(!current(epoch))throw new Error('progress_publication_pending')
+    const owner=before.owners.find(value=>value.stage_id===stageId)
+    if(!owner||owner.state!=='active'||owner.blocker||owner.tips.length!==1||expectedHeads.length!==1||owner.tips[0]!==expectedHeads[0])throw new Error('progress_expected_head_stale')
+    const version=owner.versions.find(value=>value.event_id===owner.tips[0])
+    const position=version?.chain.entries.findIndex(value=>value.entry_id===entryId)??-1
+    if(!version||position<0)throw new Error('progress_expected_head_stale')
+    const eventId=await runtime.chooseProgressHistory({project_id:projectId,stage_id:stageId,expected_tips:[...owner.tips],expected_local:owner.local,selected_event_id:version.event_id,operation:'tombstone',target_entry_id:entryId,rebased_from:version.chain.entries.slice(position+1).map(value=>value.entry_id),corrected_delta:null})
+    if(!current(epoch))throw new Error('progress_publication_pending')
+    await retry()
+    if(!current(epoch))throw new Error('progress_publication_pending')
+    const after=await runtime.projectProgressAuthority(projectId)
+    if(!current(epoch))throw new Error('progress_publication_pending')
+    progressAuthority.value={...progressAuthority.value,[projectId]:after}
+    const confirmed=after.owners.find(value=>value.stage_id===stageId)
+    if(!confirmed||confirmed.state!=='active'||confirmed.tips.length!==1||confirmed.tips[0]!==eventId||!confirmed.versions.some(value=>value.event_id===eventId&&!value.chain.entries.some(entry=>entry.entry_id===entryId)))throw new Error('progress_publication_pending')
+    announceDataChange('projects')
+  }
   const documentAuthority=ref<Record<string,DocumentAuthorityView>>({})
   async function inspectDocuments(projectId:string):Promise<void>{const epoch=lifecycleEpoch;const runtime=requireRuntime();if(!runtime.projectDocumentAuthority)throw new Error('document_runtime_unavailable');const view=await runtime.projectDocumentAuthority(projectId);if(current(epoch))documentAuthority.value={...documentAuthority.value,[projectId]:view}}
   async function beginDocuments(projectId:string):Promise<void>{await diagnostics.run('migrations','document_migration',async correlation=>{const epoch=lifecycleEpoch;const runtime=requireRuntime();if(!runtime.beginDocumentMigration)throw new Error('document_runtime_unavailable');await runtime.beginDocumentMigration(projectId);if(!current(epoch))return;await retry(correlation);if(current(epoch))await inspectDocuments(projectId)})}
@@ -994,7 +1015,7 @@ export const useCloudSessionStore = defineStore('cloud-session', () => {
     initialize, login, prepareProvisioning, submitProvisioning, reconcileProvisioning,
     cancelProvisioning, unlock, refreshProjects, prepareProjectConnection,
     bootstrapProject, importProject, resumeProject, pauseProject,
-    progressAuthority,inspectProgress,beginProgress,chooseProgressHistory,
+    progressAuthority,inspectProgress,beginProgress,chooseProgressHistory,removeSyncedProgress,
     gameAuthority,inspectGame,beginGame,chooseGameHistory,compensateGameReward,rebuildGameProjection,
     documentAuthority,inspectDocuments,beginDocuments,chooseDocumentVersion,moveDocument,deleteDocument,
     mapAuthority,inspectMaps,beginMaps,chooseMapVersion,

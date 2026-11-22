@@ -1168,8 +1168,9 @@ pub fn apply(
         let migration_event=match &capture{Some((_,tail,_))=>covered(tx,a,&h.project_id,&h.entity_id,tail,&h.event_id)?,None=>false};
         let capture_last=match &capture{Some((position,tail,snapshot))=>*tail==h.event_id&&parse(snapshot)?["chain"]["entries"].as_array().is_some_and(|v|v.len()==*position),None=>false};
         let capture_matches=match (&capture,&current){(Some((_,_,snapshot)),Ok(local))=>parse(snapshot)?["chain"]==local["chain"],_=>true};
-        let conflict=new_tips.len()>1||!own&&!unchanged||own&&migration_event&&!capture_matches;
-        if !unchanged&&!own{let evidence=match current{Ok(v)=>v,Err(code)=>json!({"blocker":code,"source":raw_evidence(tx,&h.project_id,h.stage_id.as_deref())?})};exec(tx,"INSERT OR IGNORE INTO cloud_progress_local_candidates VALUES(?1,?2,?3,?4,?5)",params![a,h.event_id,h.project_id,h.entity_id,evidence.to_string()])?}
+        let preserve_local = !unchanged && (!own || h.operation == "tombstone");
+        let conflict=new_tips.len()>1||preserve_local||own&&migration_event&&!capture_matches;
+        if preserve_local{let evidence=match current{Ok(v)=>v,Err(code)=>json!({"blocker":code,"source":raw_evidence(tx,&h.project_id,h.stage_id.as_deref())?})};exec(tx,"INSERT OR IGNORE INTO cloud_progress_local_candidates VALUES(?1,?2,?3,?4,?5)",params![a,h.event_id,h.project_id,h.entity_id,evidence.to_string()])?}
         let outcome=if conflict{"conflict_preserved"}else{"applied"}.to_string();
         let write=!conflict&&!descended&&c.migration.is_none()&&(!own||!migration_event||capture_last);let auth=if write{let(payload,entries)=projection(tx,&h.project_id,h.stage_id.as_deref(),&c)?;vec![crate::sqlite::OwnedRemoteApplyAuthorization{event_id:h.event_id.clone(),account_id:a.clone(),project_id:h.project_id.clone(),entity_id:h.entity_id.clone(),operation:"upsert".into(),payload_json:Some(json!({"entity_payload":payload,"entries":entries}).to_string()),prior_payload_json:None}]}else{vec![]};
         let lifecycle=if conflict{"conflict"}else if c.migration.is_some()||migration_event&&!capture_last{"self_echo_pending"}else{"active"}.to_string();
@@ -1408,6 +1409,9 @@ pub fn decide(
     let selected = chains
         .get(&d.selected_event_id)
         .ok_or("progress_resolution_invalid")?;
+    if d.operation == "tombstone" && d.expected_local["chain"] != json!(selected) {
+        return Err("progress_projection_rebuild_required".into());
+    }
     let all: HashMap<_, _> = chains
         .values()
         .flat_map(|c| c.entries.iter())
@@ -1732,6 +1736,37 @@ mod tests {
         f.delta = delta.into();
         e.entries = vec![f];
         e
+    }
+    #[test]
+    fn tombstone_self_echo_preserves_changed_local_progress() {
+        let (db, path) = seed();
+        drop(db);
+        let mut root = fixture();
+        root.entries.clear();
+        root.base_total = Some("100.000000".into());
+        root.migration = Some(codec::MigrationProof { entry_count: 0, final_total: "100.000000".into() });
+        assert_eq!(incoming(&path, &root, 2), "applied");
+        let added = append(&root, "120.000000", "20.000000");
+        assert_eq!(incoming(&path, &added, 3), "applied");
+        let mut db = crate::sqlite::open_database(&path).unwrap();
+        let decision = Decision { project_id: "P1".into(), stage_id: None,
+            expected_tips: tips(&db, A, "P1", None).unwrap(), expected_local: source(&db, "P1", None).unwrap(),
+            selected_event_id: added.header.event_id.clone(), operation: "tombstone".into(),
+            target_entry_id: Some(added.entries[0].entry_id.clone()), rebased_from: vec![], corrected_delta: None };
+        let id = decide(&mut db, &scope(), &decision, NOW).unwrap();
+        let deletion = event(&db, A, "P1", "project", &id).unwrap();
+        // Simulate an unexpected local mutation after the decision was queued.
+        db.execute_batch("DROP TRIGGER projects_progress_projection_guard").unwrap();
+        db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.total',999) WHERE id='P1'", []).unwrap();
+        drop(db);
+        assert_eq!(incoming(&path, &deletion, 4), "conflict_preserved");
+        let db = crate::sqlite::open_database(&path).unwrap();
+        let total: f64 = db.query_row("SELECT json_extract(payload_json,'$.total') FROM projects WHERE id='P1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(total, 999.0);
+        let retained: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM cloud_progress_local_candidates WHERE event_id=?1)", [&id], |r| r.get(0)).unwrap();
+        assert!(retained);
+        drop(db);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn progress_divergence_rebase_descendant_safety_and_projection_rebuild() {

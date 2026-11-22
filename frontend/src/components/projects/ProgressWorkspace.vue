@@ -86,7 +86,9 @@ async function record(): Promise<void> {
 }
 
 function requestRemove(entry: ProgressEntry): void {
-  if (!window.confirm(t('Удалить эту запись прогресса? Итоговое значение будет пересчитано.'))) return
+  const prompt = t('Удалить эту запись прогресса? Итоговое значение будет пересчитано.')
+    + (selectedEntity.value.progress_heads === undefined ? '' : `\n\n${t('Последующие действия будут перенесены явно. Оригинальная история останется сохранённой.')}`)
+  if (!window.confirm(prompt)) return
   emit('remove', entry.id, selectedStageId.value)
 }
 

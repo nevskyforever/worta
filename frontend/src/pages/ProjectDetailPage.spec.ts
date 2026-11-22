@@ -8,6 +8,7 @@ import { documentsApi } from '@/api/documents'
 import { settingsApi } from '@/api/settings'
 import { copyProgressImage, downloadProgressImage } from '@/platform/progressShare'
 import { useNotificationsStore } from '@/stores/notifications'
+import { useCloudSessionStore } from '@/stores/cloudSession'
 import { gameStateFixture } from '@/test/gameFixtures'
 import { projectFixture } from '@/test/fixtures'
 import type { Statistics } from '@/types/api'
@@ -84,8 +85,8 @@ function workspaceStubs() {
     IonSpinner: true,
     ProgressWorkspace: {
       props: ['textSymbols'],
-      emits: ['record'],
-      template: '<div><output class="text-symbols">{{ textSymbols }}</output><button class="progress-record" type="button" @click="$emit(\'record\', { new_total: 25100 })">record</button></div>',
+      emits: ['record', 'remove'],
+      template: '<div><output class="text-symbols">{{ textSymbols }}</output><button class="progress-record" type="button" @click="$emit(\'record\', { new_total: 25100 })">record</button><button class="progress-remove" type="button" @click="$emit(\'remove\', \'entry-id\')">remove</button></div>',
     },
     ProjectEditDialog: true,
     ProgressShareMenu: {
@@ -332,6 +333,20 @@ describe('ProjectDetailPage progress sharing', () => {
       expect.objectContaining({ message: 'Глобальный стрик продлён: 7 дней.' }),
     ]))
     expect(notificationStore.gameHistory.unread_count).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('routes a published entry through the cloud owner and refreshes after confirmation', async () => {
+    const published = projectFixture({ id:'project-id', progress_heads:['head'] })
+    vi.mocked(projectsApi.get).mockResolvedValue(published)
+    const pinia = createPinia(), cloud = useCloudSessionStore(pinia)
+    const remove = vi.spyOn(cloud, 'removeSyncedProgress').mockResolvedValue(undefined)
+    const wrapper = mountWorkspace(pinia)
+    await flushPromises()
+    await wrapper.get('.progress-remove').trigger('click')
+    await flushPromises()
+    expect(remove).toHaveBeenCalledWith('project-id', null, 'entry-id', ['head'])
+    expect(vi.mocked(projectsApi.get).mock.calls.length).toBeGreaterThan(1)
     wrapper.unmount()
   })
 

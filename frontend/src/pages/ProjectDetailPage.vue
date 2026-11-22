@@ -52,6 +52,7 @@ import { useNotificationsStore } from '@/stores/notifications'
 import { progressGameMessages } from '@/utils/gameNotifications'
 import { progressChangeNotification } from '@/utils/progressNotifications'
 import { useProjectsStore } from '@/stores/projects'
+import { useCloudSessionStore } from '@/stores/cloudSession'
 import type {
   EntityUpdate,
   ProgressCreate,
@@ -66,6 +67,7 @@ import type { ProjectDocument } from '@/types/documents'
 const route = useRoute()
 const router = useRouter()
 const store = useProjectsStore()
+const cloud = useCloudSessionStore()
 const locale = useLocaleStore()
 const notifications = useNotificationsStore()
 const t = locale.translate
@@ -115,6 +117,7 @@ const sharingProgress = ref(false)
 const syncSummaries = ref<SyncSummary[]>([])
 const syncLoading = ref(false)
 const syncRunning = ref(false)
+const progressDeleteRunning = ref(false)
 const documents = ref<ProjectDocument[]>([])
 let syncRequestSequence = 0
 
@@ -632,6 +635,24 @@ async function recordProgress(payload: ProgressCreate): Promise<void> {
 
 async function deleteProgress(entryId: string, stageId?: string): Promise<void> {
   feedbackArea.value = 'progress'
+  actionSuccess.value = null
+  const entity = stageId ? project.value.stages.find(stage => stage.id === stageId) : project.value
+  if (entity?.progress_heads !== undefined) {
+    if (progressDeleteRunning.value) return
+    progressDeleteRunning.value = true
+    store.detailActionError = null
+    try {
+      await cloud.removeSyncedProgress(project.value.id, stageId ?? null, entryId, [...entity.progress_heads])
+      if (!await store.refreshCurrent(project.value.id)) return
+      announceSuccess(t('Запись прогресса удалена, итог пересчитан.'), 'progress')
+      refreshStatistics()
+    } catch (error) {
+      store.detailActionError = apiErrorMessage(error)
+    } finally {
+      progressDeleteRunning.value = false
+    }
+    return
+  }
   const updated = await store.deleteProgress(project.value.id, entryId, stageId)
   if (!updated) return
   announceSuccess(t('Запись прогресса удалена, итог пересчитан.'), 'progress')
@@ -851,7 +872,7 @@ onBeforeUnmount(() => {
           <StageWorkspace
             v-if="!isStageDetail"
             :project="project"
-            :busy="store.detailBusy"
+            :busy="store.detailBusy || progressDeleteRunning"
             :sharing="sharingProgress"
             :streaks-enabled="streaksEnabled"
             :stage-sort="stageSort"

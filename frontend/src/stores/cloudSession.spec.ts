@@ -140,6 +140,20 @@ describe('desktop cloud session owner', () => {
     return { instance, store, repository: new SQLiteNotesRepository(), connected }
   }
 
+  it('deletes a published progress entry only after its own server echo is applied', async () => {
+    const { instance, store } = await noteSetup()
+    const before = { owners: [{ entity_id:'project', stage_id:null, state:'active', blocker:null, tips:['head'], local:{chain:'snapshot'}, versions:[{event_id:'head',chain:{base_total:'0.000000',entries:[{entry_id:'first'},{entry_id:'later'}]}}] }] }
+    const after = { owners: [{ ...before.owners[0]!, tips:['deleted'], versions:[{event_id:'deleted',chain:{base_total:'0.000000',entries:[{entry_id:'rebased'}]}}] }] }
+    instance.projectProgressAuthority = vi.fn().mockResolvedValueOnce(before).mockResolvedValueOnce(after)
+    instance.chooseProgressHistory = vi.fn().mockResolvedValue('deleted')
+    await store.removeSyncedProgress(PROJECT,null,'first',['head'])
+    expect(instance.chooseProgressHistory).toHaveBeenCalledWith(expect.objectContaining({operation:'tombstone',target_entry_id:'first',rebased_from:['later'],expected_tips:['head']}))
+    expect(instance.retry).toHaveBeenCalled()
+    vi.mocked(instance.projectProgressAuthority).mockResolvedValue(before as never)
+    await expect(store.removeSyncedProgress(PROJECT,null,'first',['head'])).rejects.toThrow('progress_publication_pending')
+    await expect(store.removeSyncedProgress(PROJECT,null,'first',['stale'])).rejects.toThrow('progress_expected_head_stale')
+  })
+
   it('preserves a saved Note and retries bounded network failures until recovery', async () => {
     const { instance, store, repository } = await noteSetup()
     vi.useFakeTimers()
