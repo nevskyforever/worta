@@ -20,7 +20,7 @@ import { BrowserReplayError, prepareReplayPage, replayAnchor, replaySame, type R
 import type { ReplaySnapshot } from './replayInventory'
 import { reauthenticateReplayNotes } from './replayNoteProof'
 import type { LocalSourceSnapshot } from './localAuthority'
-import { immutableWireIdentity, type BrowserSyncScope } from './syncDurability'
+import { immutableWireIdentity, validateBrowserRetainedHistory, type BrowserSyncScope } from './syncDurability'
 import type { AccountMasterKey } from '@/crypto'
 
 export interface ReplaySourceSeedResult {
@@ -60,7 +60,13 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
       // outcomes were freshly authenticated above, never trusted by state alone.
       if ((String(event.entity_type) !== 'account_game' && event.project_id !== projectId) || row.server_sequence <= remote.initial_max_server_sequence
         || !['received', ['project_game','account_game'].includes(event.entity_type) ? 'game_proven' : event.entity_type === 'progress' ? 'progress_proven' : event.entity_type === 'map' ? 'map_proven' : 'document_proven'].includes(row.state) || event.operation !== (String(event.entity_type) === 'account_game' ? 'upsert' : 'event') || !Number.isSafeInteger(event.revision) || event.revision < 1
-        || event.deleted_at !== null || event.device_id === scope.deviceId) fail('source_seed_unsupported_family')
+        || event.deleted_at !== null || (event.device_id === scope.deviceId && event.entity_type !== 'progress')) fail('source_seed_unsupported_family')
+      if (event.device_id === scope.deviceId) {
+        const sameEvent = (candidate: unknown) => (candidate as {event_id: string}).event_id === event.event_id
+        const proof = validateBrowserRetainedHistory(scope, event,
+          snapshot.author?.out.find(sameEvent), snapshot.author?.receipts.find(sameEvent), row)
+        if (!proof.outbox || !proof.receipt) fail('source_seed_unsupported_family')
+      }
       continue
     }
     if (!['note', 'project_metadata', 'stage', 'stage_order'].includes(event.entity_type)) fail('source_seed_unsupported_family')

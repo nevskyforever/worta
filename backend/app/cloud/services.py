@@ -777,18 +777,25 @@ class SyncService:
 
     def push_encrypted(self, session: Session, user_id: object, device_id: object,
                        items: list[EncryptedSyncPushItem] | list[V2EncryptedSyncPushItem], *,
-                       transport_version: int = 1, metadata_cover: bool = False) -> tuple[list[SyncPushResult], int]:
+                       transport_version: int = 1, metadata_cover: bool = False,
+                       web_progress: tuple[int, int, object] | None = None) -> tuple[list[SyncPushResult], int]:
         try:
             from .schemas import AccountSyncEventEnvelope
             for item in items:
                 if isinstance(item.event, AccountSyncEventEnvelope) and item.event.canonical_user_id != user_id:
                     raise SyncProtocolError('account_scope_rejected', 'Account scope does not match authenticated identity.', 403)
             self._validate_encrypted_batch(items, transport_version=transport_version)
+            if web_progress is not None and (transport_version != 3 or metadata_cover or len(items) != 1
+                                             or items[0].event.entity_type != 'progress'):
+                raise SyncProtocolError('web_progress_scope_invalid', 'Web Progress accepts one Progress event.', 422)
             session.commit()
             with session.begin():
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
-                device = self._registered_device(session, user_id, device_id)
-                device.last_seen_at = utc_now()
+                # Online Web Progress does not enroll a reader, grant pull/ACK,
+                # or change the device set that the ordinary gates protect.
+                if web_progress is None:
+                    device = self._registered_device(session, user_id, device_id)
+                    device.last_seen_at = utc_now()
                 if metadata_cover and (transport_version != 3 or any(item.event.entity_type != 'project_metadata' for item in items)
                                        or not self.cover_gate(session, user_id)[0]):
                     raise SyncProtocolError('cover_readers_not_ready', 'All registered devices must support metadata-v2 covers.', 409)
@@ -824,6 +831,20 @@ class SyncService:
                     project = self._projects.get(session, user_id, event.project_id) if event.project_id is not None else None
                     if event.project_id is not None and project is None:
                         raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not enabled.')
+                    if web_progress is not None:
+                        expected, epoch, parent_id = web_progress
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_progress_snapshot_changed', 'Web Progress snapshot changed.', 409)
+                        if project is None or project.bootstrap_state != 'active':
+                            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+                        latest = session.scalar(select(SyncEvent).where(
+                            SyncEvent.user_id == user_id,
+                            SyncEvent.project_id == event.project_id,
+                            SyncEvent.entity_type == 'progress',
+                            SyncEvent.entity_id == event.entity_id,
+                        ).order_by(SyncEvent.server_sequence.desc()).limit(1))
+                        if latest is None or latest.event_id != parent_id or latest.revision + 1 != event.revision:
+                            raise SyncProtocolError('web_progress_parent_changed', 'Web Progress parent changed.', 409)
                     if (project is not None and project.bootstrap_state == 'initializing'
                             and project.bootstrap_device_id != device_id):
                         raise SyncProtocolError(

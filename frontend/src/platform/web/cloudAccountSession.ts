@@ -240,9 +240,7 @@ export class BrowserCloudAccountSession {
 
   async progressWriteReady(signal: AbortSignal): Promise<boolean> {
     const operation = this.unlockedSync(signal)
-    if (!(await operation.request(token => encryptedSyncV3Api.progressReaderGate(token))).ready) return false
-    await operation.request(token => encryptedSyncV3Api.pullRaw(token, operation.scope.deviceId, 0, 1, operation.signal))
-    return true
+    return operation.request(token => encryptedSyncV3Api.webProgressWriteReady(token, operation.signal))
   }
 
   /** Compose the same append/tombstone event as Desktop from verified current history. */

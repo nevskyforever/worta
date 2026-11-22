@@ -7,7 +7,7 @@ import { chromium } from '@playwright/test'
 const fixture = JSON.parse(await readFile(process.argv[2], 'utf8'))
 const backend = process.argv[3], profile = process.argv[4]
 let vite, context
-const forbidden = [], recovery = []
+const forbidden = [], recovery = [], progressPushes = []
 let fault = false
 const initialCursor=fixture.items.length
 try {
@@ -22,6 +22,10 @@ try {
         return route.abort()
       }
       if (url.pathname === '/api/v3/recovery/encrypted/history') recovery.push(url.search)
+      if (url.pathname === '/api/v3/sync/encrypted/push' && request.method() === 'POST') {
+        assert.equal(url.searchParams.get('web_progress_version'), '1')
+        progressPushes.push({ query: url.search, body: request.postDataJSON() })
+      }
       if (fault && url.pathname === '/api/v3/recovery/encrypted/history') {
         const response=await route.fetch({url:backend+url.pathname+url.search}),body=await response.json()
         const item=body.items.findLast(item=>item.event.entity_type==='progress')
@@ -193,12 +197,47 @@ try {
   await read(panel,update.expected);assert.deepEqual(await snapshot(page),accepted)
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.expected)
   assert.deepEqual(await snapshot(page),accepted)
+  async function openWriter() {
+    await context.close()
+    page = await launch()
+    page.on('console', message => { if (message.text().startsWith('Progress save rejected:')) console.error(message.text()) })
+    await page.evaluate(async project => {
+      const session = harness.realSession()
+      await session.login('Arthur', 'correct horse battery staple')
+      await session.unlock('document-test-passphrase')
+      const save = session.saveProgress.bind(session)
+      session.saveProgress = (...args) => save(...args).catch(error => {
+        console.error('Progress save rejected:', error?.code ?? error?.name, error?.message, error?.stack)
+        throw error
+      })
+      harness.mountProgressWorkspace(session, project)
+    }, fixture.project)
+    if (fixture.stageId) await page.locator(`[data-stage-id="${fixture.stageId}"]`).click()
+    const view = page.getByTestId('cloud-progress-read')
+    await view.locator('form input').waitFor()
+    return view
+  }
+  let writer = await openWriter()
+  await writer.locator('form input').fill('550')
+  await writer.locator('form button').click()
+  await Promise.race([
+    page.waitForFunction(() => document.querySelector('[data-testid="cloud-progress-total"]')?.textContent === '550'),
+    page.getByRole('alert').waitFor().then(() => { throw Error('Web Progress append was refused') }),
+  ])
+  writer = await openWriter()
+  assert.equal(await writer.getByTestId('cloud-progress-total').textContent(), '550')
+  page.once('dialog', dialog => dialog.accept())
+  await writer.locator('tbody tr').first().getByRole('button').click()
+  await page.waitForFunction(() => document.querySelector('[data-testid="cloud-progress-total"]')?.textContent === '475')
+  writer = await openWriter()
+  assert.equal(await writer.getByTestId('cloud-progress-total').textContent(), '475')
+  assert.equal(progressPushes.length, 2)
   await page.evaluate(async()=>{
     const q=indexedDB.open('worta-web-replay'),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='progress_proven');row.progress_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
   })
-  await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
-  assert.equal(await panel.locator('[data-testid="cloud-progress-read"]').count(),0)
+  await page.getByTestId('cloud-project-refresh').click();await page.locator('[role="alert"]').waitFor()
+  assert.equal(await page.getByTestId('cloud-progress-read').count(),0)
   assert.deepEqual(forbidden,[]);assert.ok(recovery.length>0)
-  console.log(JSON.stringify({pass:true,progressRead:true,progressUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true}))
+  console.log(JSON.stringify({pass:true,progressRead:true,progressUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true,progressPushes}))
 } finally { await context?.close();await vite?.close() }

@@ -8,6 +8,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { BrowserCloudAccountSession } from '../src/platform/web/cloudAccountSession.ts'
 import BrowserCloudAccountCard from '../src/components/settings/BrowserCloudAccountCard.vue'
+import BrowserCloudProjectRead from '../src/components/settings/BrowserCloudProjectRead.vue'
 import { NormalUserAuthRuntime } from '../src/auth/userAuth.ts'
 import { generateAccountMasterKey, wrapAmkWithPassphrase, encryptObjectBytes } from '../src/crypto/index.ts'
 import { encodeBase64Url } from '../src/api/base64url.ts'
@@ -124,6 +125,12 @@ const harness = {
     } finally { db.close() }
   },
   realSession() { return new BrowserCloudAccountSession() },
+  mountProgressWorkspace(session, projectId) {
+    this.cardApp?.unmount()
+    this.cardApp = createApp(BrowserCloudProjectRead, { session, projectId, workspace: true, autoOpenRecovery: true })
+    this.cardApp.use(createPinia())
+    this.cardApp.mount(document.querySelector('#app'))
+  },
   mountAccountCard() {
     this.cardApp?.unmount()
     this.cardApp = createApp(BrowserCloudAccountCard)

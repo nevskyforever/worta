@@ -1,11 +1,13 @@
-"""Native Progress owner → production HTTP → authenticated Vue reader."""
+"""Native Progress owner ↔ production HTTP ↔ authenticated Vue workspace."""
 import json
 import os
 import socket
 import sqlite3
 import subprocess
 import threading
+from uuid import uuid4
 from queue import Queue
+from urllib.parse import parse_qs
 
 import uvicorn
 import pytest
@@ -122,9 +124,43 @@ def test_native_progress_http_read_update_restart(cloud_client, tmp_path, stage_
             assert json.loads(line)['phase'] == 'ready_for_update', line
             append(475)
             latest = history(); assert latest[:len(items)] == items
-            stdout, stderr = process.communicate(json.dumps({'items': latest, 'expected': expected()}) + '\n', timeout=180)
+            update_expected = expected()
+            stdout, stderr = process.communicate(json.dumps({'items': latest, 'expected': update_expected}) + '\n', timeout=180)
             assert process.returncode == 0, stdout + stderr
-            assert json.loads(stdout.strip().splitlines()[-1])['pass']
+            report = json.loads(stdout.strip().splitlines()[-1])
+            assert report['pass']
+            append_push, delete_push = report['progressPushes']
+            browser_device = append_push['body']['device_id']
+            assert browser_device != device
+            assert delete_push['body']['device_id'] == browser_device
+            assert receive_progress(client, tmp_path, token, db, identity, user, key) == ['applied', 'applied']
+            assert expected()['total'] == 475
+            assert expected()['entries'] == update_expected['entries']
+            replay = client.post('/api/v3/sync/encrypted/push' + append_push['query'], headers=headers, json=append_push['body'])
+            assert replay.status_code == 200, replay.text
+            assert replay.json()['results'][0]['duplicate'] is True
+            stale_body = json.loads(json.dumps(delete_push['body']))
+            stale_body['items'][0]['event']['event_id'] = str(uuid4())
+            stale = client.post('/api/v3/sync/encrypted/push' + delete_push['query'], headers=headers, json=stale_body)
+            assert stale.status_code == 409 and 'web_progress_snapshot_changed' in stale.text
+            params = {key: values[0] for key, values in parse_qs(delete_push['query'].lstrip('?')).items()}
+            params['expected_cursor'] = str(replay.json()['current_cursor'])
+            parent_changed = client.post('/api/v3/sync/encrypted/push', headers=headers, params=params, json=stale_body)
+            assert parent_changed.status_code == 409 and 'web_progress_parent_changed' in parent_changed.text
+            non_progress = json.loads(json.dumps(stale_body))
+            non_progress["items"][0]["event"].update(entity_type="map", entity_id="project-map")
+            refused = client.post('/api/v3/sync/encrypted/push', headers=headers, params=params, json=non_progress)
+            assert refused.status_code == 422 and 'web_progress_scope_invalid' in refused.text
+            ordinary = client.post('/api/v3/sync/encrypted/push', headers=headers, json=append_push['body'])
+            assert ordinary.status_code == 409 and 'sync_device_not_registered' in ordinary.text
+            pull = client.get('/api/v3/sync/encrypted/pull', headers=headers, params={
+                'device_id': browser_device, 'since': 0, 'protocol_version': 3, 'encrypted_sync_version': 3,
+            })
+            assert pull.status_code == 409 and 'sync_device_not_registered' in pull.text
+            ack = client.post('/api/v3/sync/encrypted/ack', headers=headers, json={
+                'device_id': browser_device, 'cursor': 0, 'protocol_version': 3, 'encrypted_sync_version': 3,
+            })
+            assert ack.status_code == 409 and 'sync_device_not_registered' in ack.text
         finally:
             if process.poll() is None: process.kill(); process.communicate()
         from backend.app.cloud.models import SyncDevice

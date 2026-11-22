@@ -17,7 +17,7 @@ from .schemas import (CompressionReaderCapability, CompressionWriterRequest,Proj
                       V3EncryptedSyncPushResponse, V3EncryptedSyncPullItem,
                       V3EncryptedSyncPullResponse, V3EncryptedSyncAckRequest,
                       DocumentReaderCapabilities,
-    GameReaderCapabilities, ProgressReaderCapabilities, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
+    GameReaderCapabilities, ProgressReaderCapabilities, WebProgressWriteGate, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
                       encode_canonical_base64url, AccountEncryptedPushRequest, AccountSyncPullEvent)
 from .services import SyncProtocolError, SyncService
 from .models import AuthSession, SyncUserState, User
@@ -97,8 +97,17 @@ def cutover(request: V3CutoverRequest,
     'requestBody': {'required': True, 'content': {'application/json': {'schema': _PUSH_SCHEMA}}},
 })
 async def encrypted_push(http_request: Request,
+                         web_progress_version: int | None = Query(default=None),
+                         expected_cursor: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
+                         expected_epoch: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
+                         progress_parent: UUID | None = Query(default=None),
                          current: AuthenticatedUser = Depends(get_current_accepted_user),
                          session: Session = Depends(get_cloud_session)) -> V3EncryptedSyncPushResponse:
+    web_progress = None
+    if any(value is not None for value in (web_progress_version, expected_cursor, expected_epoch, progress_parent)):
+        if web_progress_version != 1 or expected_cursor is None or expected_epoch is None or progress_parent is None:
+            raise _error(SyncProtocolError('web_progress_parameters_invalid', 'Invalid Web Progress parameters.', 422))
+        web_progress = (expected_cursor, expected_epoch, progress_parent)
     body = await _read_encrypted_push_body(http_request)
     try:
         request = V3EncryptedSyncPushRequest.model_validate_json(body)
@@ -107,7 +116,7 @@ async def encrypted_push(http_request: Request,
     try:
         results, cursor = await run_in_threadpool(
             SyncService().push_encrypted, session, current.user.id, request.device_id,
-            request.items, transport_version=3,
+            request.items, transport_version=3, web_progress=web_progress,
         )
     except SyncProtocolError as error:
         raise _error(error) from None
@@ -300,10 +309,15 @@ def progress_reader_capabilities(request: ProgressReaderCapabilities,
         raise _error(error) from None
 
 
-@router.get('/progress-reader-capabilities', response_model=ContentNoteCapabilityGate)
-def progress_reader_gate(current: AuthenticatedUser = Depends(get_current_accepted_user),
-                    session: Session = Depends(get_cloud_session)) -> ContentNoteCapabilityGate:
+@router.get('/progress-reader-capabilities', response_model=WebProgressWriteGate | ContentNoteCapabilityGate)
+def progress_reader_gate(web_progress_version: int | None = Query(default=None),
+                         current: AuthenticatedUser = Depends(get_current_accepted_user),
+                         session: Session = Depends(get_cloud_session)) -> ContentNoteCapabilityGate:
+    if web_progress_version not in (None, 1):
+        raise _error(SyncProtocolError('web_progress_parameters_invalid', 'Invalid Web Progress parameters.', 422))
     ready, missing = SyncService().progress_gate(session, current.user.id)
+    if web_progress_version == 1:
+        return WebProgressWriteGate(ready=ready, missing_devices=missing)
     return ContentNoteCapabilityGate(ready=ready, missing_devices=missing)
 
 
