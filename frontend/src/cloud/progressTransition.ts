@@ -2,7 +2,7 @@ import { progressMicros, validateProgressEvent, type ProgressEvent, type Progres
 import { UNIT_FACTORS } from '@/core/projects/units'
 
 /** Native progress_sync::Chain/transition, restricted to complete linear capture
- * and append. Conflict/rebase/correction and incomplete migration fail closed. */
+ * and append or linear deletion. Conflict/rebase/correction and incomplete migration fail closed. */
 export interface ProgressChain { base_total: string; entries: ProgressFact[] }
 export function progressDisplay(symbols: bigint, unit: ProgressFact['unit'], recorded?: ProgressFact['unit']): number {
   const n = Number(symbols) / 1e6 / UNIT_FACTORS[unit]
@@ -16,9 +16,23 @@ export function progressDisplay(symbols: bigint, unit: ProgressFact['unit'], rec
 export function transitionProgress(event: ProgressEvent, parent?: ProgressChain): ProgressChain {
   validateProgressEvent(event)
   const op = event.header.operation
-  if (op !== 'genesis' && op !== 'append') throw new Error('progress_operation_unsupported')
+  if (op !== 'genesis' && op !== 'append' && op !== 'tombstone') throw new Error('progress_operation_unsupported')
   if (op === 'genesis' ? !!parent : !parent || event.selected_event_id !== event.header.parents[0]) throw new Error('progress_parent_unknown')
   const chain: ProgressChain = parent ? structuredClone(parent) : { base_total: event.base_total!, entries: [] }
+  if (op === 'tombstone') {
+    const position = chain.entries.findIndex(f => f.entry_id === event.target_entry_id)
+    if (position < 0) throw new Error('progress_target_unknown')
+    const descendants = chain.entries.slice(position + 1)
+    if (event.rebased_from.length !== descendants.length || event.rebased_from.some((id, i) => id !== descendants[i]!.entry_id))
+      throw new Error('progress_descendant_rebase_required')
+    for (const [i, fact] of event.entries.entries()) {
+      const original = descendants[i]!
+      if (fact.entry_id === original.entry_id || fact.occurred_at !== original.occurred_at || fact.writing_time !== original.writing_time
+        || fact.writing_day !== original.writing_day || fact.unit !== original.unit || fact.delta !== original.delta)
+        throw new Error('progress_rebase_invalid')
+    }
+    chain.entries.length = position
+  }
   const ids = new Set(chain.entries.map(f => f.entry_id))
   let total = progressMicros(chain.entries.at(-1)?.new_total ?? chain.base_total)
   for (const fact of event.entries) {

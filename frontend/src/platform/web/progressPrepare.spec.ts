@@ -41,3 +41,18 @@ it('rejects damaged ciphertext, wrong sequence, missing Metadata and revoked ses
   await expect(prepareProgressGenesis(scope, input, missing, amk, () => true)).rejects.toThrow()
   await expect(prepareProgressGenesis(scope, input, inventory(f), amk, () => false)).rejects.toThrow()
 })
+it('authenticates a Desktop deletion after its encrypted parent', async () => {
+  const { f, event, input } = await fixture()
+  const snapshot = inventory(f)
+  snapshot.rows.push({ state: 'progress_proven', event_id: event.header.event_id, ...input } as never)
+  const deletion = structuredClone(event)
+  Object.assign(deletion.header, { operation: 'tombstone', event_id: crypto.randomUUID(), parents: [event.header.event_id], revision: 2, generation: 2 })
+  Object.assign(deletion, { migration: null, base_total: null, selected_event_id: event.header.event_id, target_entry_id: event.entries[0]!.entry_id, entries: [], rebased_from: [] })
+  const frame = await frameProgressEvent(deletion)
+  const object = await encryptObjectBytes(amk, { userId: scope.canonicalUserId, projectId: 'p', entityId: 'project', entityType: 'progress' }, frame)
+  const wire = JSON.parse(input.wire_item)
+  Object.assign(wire.event, { event_id: deletion.header.event_id, revision: 2, server_sequence: 3 })
+  wire.object = { crypto_version: 1, aad_version: 1, nonce: encodeBase64Url(object.nonce), ciphertext: encodeBase64Url(object.ciphertext) }
+  const token = await prepareProgressGenesis(scope, { server_sequence: 3, wire_item: JSON.stringify(wire) }, snapshot, amk, () => true)
+  expect(inspectPreparedProgressEvent(token, scope, snapshot).projection).toEqual({ base_total: event.base_total, entries: [] })
+})

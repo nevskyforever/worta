@@ -30,3 +30,20 @@ it('does not manufacture a completed migration or accept duplicate facts',()=>{
  e.migration!.entry_count=1;e.entries[0]!.delta='19.000000'
  expect(()=>transitionProgress(e)).toThrow('progress_base_inconsistent')
 })
+it('applies a linear Desktop deletion and verifies the rebased descendants', () => {
+ const genesis=structuredClone(golden.examples[0]!.event) as ProgressEvent
+ const parent=transitionProgress(genesis)
+ const append=structuredClone(genesis)
+ Object.assign(append.header,{operation:'append',event_id:crypto.randomUUID(),parents:[genesis.header.event_id],revision:2,generation:2})
+ Object.assign(append,{base_total:null,migration:null,selected_event_id:genesis.header.event_id,entries:[{...genesis.entries[0]!,entry_id:'next',new_total:'170.000000',delta:'50.000000'}]})
+ const before=transitionProgress(append,parent)
+ const deletion=structuredClone(append)
+ Object.assign(deletion.header,{operation:'tombstone',event_id:crypto.randomUUID(),parents:[append.header.event_id],revision:3,generation:3})
+ Object.assign(deletion,{selected_event_id:append.header.event_id,target_entry_id:genesis.entries[0]!.entry_id,rebased_from:['next'],entries:[{...append.entries[0]!,entry_id:'rebased',new_total:'150.000000'}]})
+ const after=transitionProgress(deletion,before)
+ expect(after.entries.map(e=>e.entry_id)).toEqual(['rebased'])
+ expect(presentProgress({...after,project_id:'P1',stage_id:null,event_id:deletion.header.event_id},{unit:'symbols',goal:1000,infinite:false,created_at:'2026-10-01'},'2026-10-03').total).toBe(150)
+ expect(before.entries).toHaveLength(2)
+ deletion.entries[0]!.delta='49.000000'
+ expect(()=>transitionProgress(deletion,before)).toThrow('progress_rebase_invalid')
+})

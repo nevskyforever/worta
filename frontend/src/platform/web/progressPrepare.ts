@@ -43,7 +43,7 @@ export async function prepareProgressEvent(scope: BrowserSyncScope, input: Progr
   const h = event.header
   if (h.account_id !== scope.canonicalUserId || h.device_id !== descriptor.device_id || h.project_id !== descriptor.project_id
     || h.entity_id !== descriptor.entity_id || h.event_id !== descriptor.event_id || h.revision !== descriptor.revision
-    || h.updated_at !== canonicalizeSyncTimestamp(descriptor.updated_at) || !['genesis', 'append'].includes(h.operation) || h.generation !== h.revision) reject()
+    || h.updated_at !== canonicalizeSyncTimestamp(descriptor.updated_at) || !['genesis', 'append', 'tombstone'].includes(h.operation) || h.generation !== h.revision) reject()
   const binding = inventory.bindings.map(value => validateBrowserProjectBinding(value, scope)).find(value => value.project_id === h.project_id)
   if (!binding || binding.mode !== 'import_remote' || binding.phase !== 'captured' || binding.remote_state !== 'active' || binding.bootstrap_id !== h.bootstrap_id) reject()
   const dependencies = { ...inventory, rows: inventory.rows.filter(row => ['project_metadata', 'stage', 'stage_order'].includes(JSON.parse((row as {wire_item:string}).wire_item).event.entity_type)) }
