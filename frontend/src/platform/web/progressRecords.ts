@@ -1,9 +1,10 @@
+import type { ProgressPublicationProof } from './progressOutbound'
 import { canonical } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
 import { validateBrowserInboxRecord, type BrowserReceivedInboxRecord, type BrowserSyncScope } from './syncDurability'
 import { validateLocalEnvelope, type LocalEnvelope } from './localAuthorityRecords'
 export interface ProgressLedger {
- account_id:string;device_id:string;project_id:string;entity_id:string;event_id:string;server_sequence:number;outcome:'applied';wire_item:string;previous_projection?:ProgressProjection
+ account_id:string;device_id:string;project_id:string;entity_id:string;event_id:string;server_sequence:number;outcome:'applied';wire_item:string;previous_projection?:ProgressProjection;publication_proof?:ProgressPublicationProof
 }
 export interface ProgressProjection {
  account_id:string;device_id:string;project_id:string;entity_id:string;head_event_id:string;envelope:LocalEnvelope
@@ -17,7 +18,7 @@ export function validateProgressInbox(value:unknown,s:BrowserSyncScope):Progress
  if(!r||Object.keys(r).sort().join(',')!=='account_id,device_id,event_id,progress_proof,protocol_version,record_version,server_sequence,state,wire_item'||r.record_version!==13||r.state!=='progress_proven')fail()
  const {progress_proof:p,...base}=r;validateBrowserInboxRecord({...base,record_version:1,state:'received'},s)
  const e=JSON.parse(r.wire_item).event
- if(r.protocol_version!==3||e.entity_type!=='progress'||e.operation!=='event'||!Number.isSafeInteger(e.revision)||e.revision<1||e.device_id===s.deviceId||e.deleted_at!==null
+ if(r.protocol_version!==3||e.entity_type!=='progress'||e.operation!=='event'||!Number.isSafeInteger(e.revision)||e.revision<1||e.deleted_at!==null
   ||!p||Object.keys(p).sort().join(',')!=='ledger_digest,outcome,owner_kind,projection_digest,record_version'||p.record_version!==1||p.owner_kind!=='progress'||p.outcome!=='applied'||![p.ledger_digest,p.projection_digest].every(x=>/^[a-f0-9]{64}$/.test(x)))fail()
  return structuredClone(r)
 }
@@ -25,15 +26,34 @@ export function joinProgressRecords(s:BrowserSyncScope,r:ProgressInbox,ledgers:u
  const e=JSON.parse(r.wire_item).event,l=ledgers.find(x=>(x as ProgressLedger).event_id===r.event_id) as ProgressLedger|undefined
  const archived=ledgers.flatMap(x=>(x as ProgressLedger).previous_projection?[(x as ProgressLedger).previous_projection!]:[])
  const matching=[...projections,...archived].filter(x=>(x as ProgressProjection).head_event_id===r.event_id) as ProgressProjection[]
+ const previousDelivered = ledgers.reduce<ProgressLedger | undefined>((latest, value) => {
+  const candidate = value as ProgressLedger
+  return candidate.project_id === e.project_id && candidate.entity_id === e.entity_id
+   && candidate.server_sequence < r.server_sequence && (!latest || candidate.server_sequence > latest.server_sequence)
+   ? candidate : latest
+ }, undefined)
  const p=matching[0],keys='account_id,device_id,entity_id,event_id,outcome,project_id,server_sequence,wire_item'
- if(!l||!p||matching.length!==1||Object.keys(l).sort().join(',')!==(e.revision===1?keys:'account_id,device_id,entity_id,event_id,outcome,previous_projection,project_id,server_sequence,wire_item')
+ const later = ledgers.some(value => {
+  const candidate = value as ProgressLedger
+  return candidate.project_id === e.project_id && candidate.entity_id === e.entity_id
+   && candidate.server_sequence > r.server_sequence
+ })
+ if (projections.includes(p) === later) fail()
+ const expectedKeys = keys.split(',')
+ if (previousDelivered) expectedKeys.push('previous_projection')
+ if (e.device_id === s.deviceId) expectedKeys.push('publication_proof')
+ if(!l||!p||matching.length!==1||Object.keys(l).sort().join(',')!==expectedKeys.sort().join(',')
  ||Object.keys(p).sort().join(',')!=='account_id,device_id,entity_id,envelope,head_event_id,project_id'
  ||l.account_id!==s.accountId||l.device_id!==s.deviceId||l.project_id!==e.project_id||l.entity_id!==e.entity_id||l.server_sequence!==r.server_sequence||l.outcome!=='applied'||l.wire_item!==r.wire_item
  ||p.account_id!==s.accountId||p.device_id!==s.deviceId||p.project_id!==l.project_id||p.entity_id!==l.entity_id)fail()
- if(e.revision>1){
+ if(previousDelivered){
   const previous=l.previous_projection,parent=ledgers.find(x=>(x as ProgressLedger).event_id===previous?.head_event_id) as ProgressLedger|undefined
   if(!previous||!parent||previous.account_id!==s.accountId||previous.device_id!==s.deviceId||previous.project_id!==e.project_id||previous.entity_id!==e.entity_id
-   ||parent.project_id!==e.project_id||parent.entity_id!==e.entity_id||parent.server_sequence>=r.server_sequence||JSON.parse(parent.wire_item).event.revision!==e.revision-1)fail()
+   ||parent.project_id!==e.project_id||parent.entity_id!==e.entity_id||parent.server_sequence>=r.server_sequence||parent.event_id!==previousDelivered.event_id)fail()
+ }
+ if (e.device_id === s.deviceId) {
+  if (l.publication_proof?.version !== 1) fail()
+  validateLocalEnvelope(l.publication_proof!.envelope)
  }
  validateLocalEnvelope(p.envelope);return {ledger:l,projection:p}
 }

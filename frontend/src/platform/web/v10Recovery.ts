@@ -140,7 +140,7 @@ export class BrowserV10Recovery {
       continue
      }
      if(e.entity_type==='progress'){
-      if(!this.progressOwner||own||hasResolution(v)){block('unsupported_route');break}
+      if(!this.progressOwner||hasResolution(v)){block('unsupported_route');break}
       const outcome=await step(this.progressOwner.apply(row.server_sequence))
       if(outcome!=='applied')fail('stale_source')
       result.applied.push({sequence:row.server_sequence,route:'progress',status:'applied'})

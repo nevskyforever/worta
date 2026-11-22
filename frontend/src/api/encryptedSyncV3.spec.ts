@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { encodeV3DocumentPush, encodeV3MapPush, encodeV3MetadataPush, encryptedSyncV3Api, parseV3Pull } from './encryptedSyncV3'
+import { encodeV3DocumentPush, encodeV3MapPush, encodeV3MetadataPush, encodeV3ProgressPush, encryptedSyncV3Api, parseV3Pull } from './encryptedSyncV3'
 
 const DEVICE = '123e4567-e89b-42d3-a456-426614174003'
 const EVENT = '123e4567-e89b-42d3-a456-426614174010'
@@ -10,6 +10,20 @@ const descriptor = { event_id: EVENT, device_id: DEVICE, server_sequence: 1, pro
   entity_type: 'project_metadata' as const, operation: 'upsert' as const, revision: 1, updated_at: NOW, deleted_at: null }
 
 describe('mode-3 metadata transport boundary', () => {
+  it('resends the exact sealed Progress body and verifies the receipt identity', async () => {
+    const raw = encodeV3ProgressPush(DEVICE, [{ event: { event_id: EVENT, project_id: 'project',
+      entity_id: 'project', entity_type: 'progress', operation: 'event', revision: 2, updated_at: NOW, deleted_at: null }, object }])
+    const reply = { protocol_version: 3, encrypted_sync_version: 3, current_cursor: 2,
+      results: [{ event_id: EVENT, server_sequence: 2, duplicate: true }] }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(reply)))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...reply, results: [{ ...reply.results[0], event_id: DEVICE }] })))
+    try {
+      const signal = new AbortController().signal
+      await expect(encryptedSyncV3Api.pushSealedProgress('token', EVENT, raw, signal)).resolves.toEqual(reply)
+      expect(fetch.mock.calls[0]?.[1]?.body).toBe(raw)
+      await expect(encryptedSyncV3Api.pushSealedProgress('token', EVENT, raw, signal)).rejects.toThrow('invalid_encrypted_sync_v3')
+    } finally { fetch.mockRestore() }
+  })
   it('retries a recovery rate refusal with the same pinned snapshot and remains cancellable', async () => {
     vi.useFakeTimers()
     const page = { delivery_version: 1, current_cursor: 0, cutover_epoch: 2, writer_transport_version: 3,
@@ -52,7 +66,13 @@ describe('mode-3 metadata transport boundary', () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify(page), { status: 200 }))
     const controller = new AbortController()
     expect(JSON.parse(await encryptedSyncV3Api.pullRaw('token', DEVICE, 0, 100, controller.signal))).toEqual(page)
-    expect(fetch.mock.calls[0]![1]?.signal).toBe(controller.signal)
+    const cancelled = new AbortController()
+    fetch.mockImplementationOnce(async (_url, init) => {
+      cancelled.abort()
+      expect(init?.signal?.aborted).toBe(true)
+      throw new DOMException('cancelled', 'AbortError')
+    })
+    await expect(encryptedSyncV3Api.pullRaw('token', DEVICE, 0, 100, cancelled.signal)).rejects.toMatchObject({ name: 'AbortError' })
     fetch.mockResolvedValueOnce(new Response(JSON.stringify({ ...page, plaintext: 'DO_NOT_STORE' }), { status: 200 }))
     await expect(encryptedSyncV3Api.pullRaw('token', DEVICE, 0)).rejects.toThrow('invalid_encrypted_sync_v3')
   })

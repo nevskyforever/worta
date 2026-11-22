@@ -60,3 +60,68 @@ it.each(['tombstone', 'correct'] as const)('authenticates a Desktop %s after its
   const token = await prepareProgressGenesis(scope, { server_sequence: 3, wire_item: JSON.stringify(wire) }, snapshot, amk, () => true)
   expect(inspectPreparedProgressEvent(token, scope, snapshot).projection).toEqual({ base_total: event.base_total, entries })
 })
+
+it('authenticates both Desktop branches and a rebase without choosing a branch by delivery order', async () => {
+  const { f, event: root, input } = await fixture()
+  const snapshot = inventory(f)
+  snapshot.rows.push({ ...input, state: 'progress_proven', event_id: root.header.event_id } as never)
+  async function add(event: ProgressEvent, sequence: number) {
+    const frame = await frameProgressEvent(event)
+    const object = await encryptObjectBytes(amk, { userId: scope.canonicalUserId, projectId: 'p', entityId: 'project', entityType: 'progress' }, frame)
+    const wire = JSON.parse(input.wire_item)
+    Object.assign(wire.event, { event_id: event.header.event_id, revision: event.header.revision, server_sequence: sequence })
+    wire.object = { crypto_version: 1, aad_version: 1, nonce: encodeBase64Url(object.nonce), ciphertext: encodeBase64Url(object.ciphertext) }
+    const row = { state: 'progress_proven', event_id: event.header.event_id, server_sequence: sequence, wire_item: JSON.stringify(wire) }
+    const token = await prepareProgressGenesis(scope, row, snapshot, amk, () => true)
+    const result = inspectPreparedProgressEvent(token, scope, snapshot)
+    snapshot.rows.push(row as never)
+    return result
+  }
+  function branch(delta: number, entryId: string): ProgressEvent {
+    return { ...root, migration: null, base_total: null, selected_event_id: root.header.event_id,
+      header: { ...root.header, operation: 'append', revision: 2, generation: 2,
+        parents: [root.header.event_id], event_id: crypto.randomUUID() },
+      entries: [{ ...root.entries[0]!, entry_id: entryId, new_total: (120 + delta).toFixed(6), delta: delta.toFixed(6) }] }
+  }
+  const first = branch(10, 'first'), second = branch(20, 'second')
+  expect((await add(first, 3)).tips).toEqual([first.header.event_id])
+  expect((await add(second, 4)).tips).toEqual([first.header.event_id, second.header.event_id].sort())
+  const resolution: ProgressEvent = {
+    ...first, selected_event_id: first.header.event_id, rebased_from: ['second'],
+    header: { ...first.header, operation: 'rebase', revision: 3, generation: 3,
+      parents: [first.header.event_id, second.header.event_id].sort(), event_id: crypto.randomUUID() },
+    entries: [{ ...second.entries[0]!, entry_id: 'transferred', new_total: '150.000000' }],
+  }
+  await expect(add({ ...resolution, entries: [{ ...resolution.entries[0]!, delta: '19.000000' }] }, 5))
+    .rejects.toThrow('progress_rebase_invalid')
+  const resolved = await add(resolution, 5)
+  expect(resolved.tips).toEqual([resolution.header.event_id])
+  expect(resolved.projection.entries.map(entry => entry.new_total)).toEqual(['120.000000', '130.000000', '150.000000'])
+})
+
+it('requires a matching accepted outbox and receipt for a sealed Web Progress echo', async () => {
+  const { f, event: parent, input } = await fixture()
+  const { prepareProgressAppend } = await import('@/cloud/progressAuthor')
+  const { sealProgressForOutbox } = await import('./progressOutbound')
+  const { transitionProgress } = await import('@/cloud/progressTransition')
+  const event = prepareProgressAppend({
+    parent, chain: transitionProgress(parent), deviceId: scope.deviceId, now: parent.header.updated_at,
+    eventId: crypto.randomUUID(), metadataEventId: parent.header.metadata_event_id, stageEventIds: [],
+  }, { entryId: crypto.randomUUID(), totalSymbols: '135.000000', unit: 'symbols', writingDay: '2026-10-03' })
+  const raw = await sealProgressForOutbox(scope, event, amk)
+  const item = JSON.parse(raw).items[0]
+  const row = { record_version: 1 as const, state: 'received' as const, event_id: event.header.event_id,
+    server_sequence: 3, protocol_version: 3 as const, account_id: scope.accountId, device_id: scope.deviceId,
+    wire_item: JSON.stringify({ ...item, event: { ...item.event, device_id: scope.deviceId, server_sequence: 3 } }) }
+  const base = inventory(f)
+  base.rows.push({ ...input, state: 'progress_proven', event_id: parent.header.event_id } as never, row as never)
+  await expect(prepareProgressGenesis(scope, row, base, amk, () => true)).rejects.toThrow()
+  base.out.push({ record_version: 1, state: 'accepted', account_id: scope.accountId, device_id: scope.deviceId,
+    event_id: row.event_id, raw_body: raw, local_ordinal: 1, protocol_version: 3 })
+  base.receipts.push({ record_version: 1, account_id: scope.accountId, device_id: scope.deviceId,
+    event_id: row.event_id, server_sequence: 4, duplicate: false, protocol_version: 3 })
+  await expect(prepareProgressGenesis(scope, row, base, amk, () => true)).rejects.toThrow('conflicting_record')
+  ;(base.receipts[0] as {server_sequence: number}).server_sequence = 3
+  const plan = await prepareProgressGenesis(scope, row, base, amk, () => true)
+  expect(inspectPreparedProgressEvent(plan, scope, base).projection.entries.at(-1)?.new_total).toBe('135.000000')
+})

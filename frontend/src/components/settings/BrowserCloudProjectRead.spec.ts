@@ -174,3 +174,31 @@ it('opens a verified project Map in secure read-only mode even when Stages exist
   revoke(); await flushPromises()
   expect(wrapper.find('[data-testid="cloud-map-read"]').exists()).toBe(false)
 })
+
+it('keeps the previous total until the server-confirmed Progress projection arrives', async () => {
+  const { presentProgress } = await import('@/platform/web/progressView')
+  const show = (total: number, eventId: string) => ({
+    project: { name: 'Project' }, notes: [], stages: [], documents: [],
+    progress: [presentProgress({ project_id: 'project', stage_id: null, event_id: eventId,
+      base_total: total.toFixed(6), entries: [] },
+    { unit: 'symbols', goal: 1000, infinite: false, created_at: null }, '2026-11-23')],
+  })
+  let confirm!: (value: ReturnType<typeof show>) => void
+  const save = vi.fn(() => new Promise<ReturnType<typeof show>>(resolve => { confirm = resolve }))
+  const session = { status: 'unlocked', onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
+    readRecoveryProject: vi.fn().mockResolvedValue(show(100, 'before')),
+    progressWriteReady: vi.fn().mockResolvedValue(true), saveProgress: save,
+  } as unknown as BrowserCloudAccountSession
+  const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project', autoOpenRecovery: true, workspace: true },
+    global: { plugins: [createPinia()] } })
+  await flushPromises()
+  const pane = () => wrapper.get('[data-testid="cloud-progress-read"]')
+  await pane().get('input').setValue('120')
+  await pane().get('form').trigger('submit')
+  expect(save).toHaveBeenCalledWith('project', null, 'before', { total: 120 }, expect.any(AbortSignal))
+  expect(pane().get('[data-testid="cloud-progress-total"]').text()).toBe('100')
+  confirm(show(120, 'confirmed')); await flushPromises()
+  expect(pane().get('[data-testid="cloud-progress-total"]').text()).toBe('120')
+  wrapper.unmount()
+})

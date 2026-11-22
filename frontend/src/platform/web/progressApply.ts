@@ -5,11 +5,20 @@ import { canonical } from '@/cloud/projectMetadataCodec'
 import { BrowserPersistenceError } from './persistence'
 import { prepareProgressEvent, inspectPreparedProgressEvent, type PreparedProgressEvent } from './progressPrepare'
 import type { BrowserPrefixInventory } from './provenPrefixRecords'
-import { validateBrowserInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
+import { validateBrowserInboxRecord, type BrowserOutboxRecord, type BrowserUploadReceipt, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
 
+import { sealProgressPublicationProof, verifyProgressPublicationProof } from './progressOutbound'
 import { joinProgressRecords, progressDigest, type ProgressInbox, type ProgressLedger as ProgressGenesisLedger, type ProgressProjection } from './progressRecords'
 export type { ProgressLedger as ProgressGenesisLedger, ProgressProjection } from './progressRecords'
 const fail = (): never => { throw new BrowserPersistenceError('corrupt_record') }
+
+function publicationRows(inventory: BrowserPrefixInventory, eventId: string) {
+  return {
+    out: inventory.out.find(row => (row as BrowserOutboxRecord).event_id === eventId) as BrowserOutboxRecord,
+    receipt: inventory.receipts.find(row => (row as BrowserUploadReceipt).event_id === eventId) as BrowserUploadReceipt,
+    inbox: inventory.rows.find(row => (row as ProgressInbox).event_id === eventId),
+  }
+}
 
 /** Transaction adapter; caller must supply the replay CAS transaction and its inventory reader. */
 export async function commitProgressEvent(transaction: BrowserSyncTransaction, scope: BrowserSyncScope,
@@ -26,16 +35,20 @@ export async function commitProgressEvent(transaction: BrowserSyncTransaction, s
       envelope: { crypto_version: 1, aad_version: 1, nonce: encodeBase64Url(sealed.nonce), ciphertext: encodeBase64Url(sealed.ciphertext) } } }
     finally { sealed.nonce.fill(0); sealed.ciphertext.fill(0) }
   } finally { bytes.fill(0) }
-  // Read the authenticated parent projection through the same full replay CAS.
+  // Archive the last delivered projection through the same full replay CAS.
   // It remains encrypted, byte-for-byte, inside the new append-only ledger row.
-  if (h.parents.length) {
+  if (plan.previousEventId !== null) {
     ledger.previous_projection = await transaction(scope, ['progressProjection'], 'readonly', (tx, done, abort) => {
       const read = tx.objectStore('progressProjection').get([scope.accountId, h.project_id, h.entity_id])
       read.onsuccess = () => { try { const previous = read.result as ProgressProjection | undefined
-        if (!previous || previous.head_event_id !== h.parents[0]) fail()
+        if (!previous || previous.head_event_id !== plan.previousEventId) fail()
         done(structuredClone(previous!))
       } catch (error) { abort(error) } }
     })
+  }
+  if (h.device_id === scope.deviceId) {
+    const { out, receipt, inbox } = publicationRows(expected, h.event_id)
+    ledger.publication_proof = await sealProgressPublicationProof(scope, out, receipt, inbox, amk)
   }
   const proof = { record_version: 1 as const, owner_kind: 'progress' as const, outcome: 'applied' as const, ledger_digest: await progressDigest(ledger), projection_digest: await progressDigest(projection) }
   if (!current()) throw new BrowserPersistenceError('closed')
@@ -58,10 +71,10 @@ export async function commitProgressEvent(transaction: BrowserSyncTransaction, s
             if (!current()) throw new BrowserPersistenceError('closed')
             if (old.result) fail()
             const selected = (source.result as ProgressProjection[]).filter(value => value.entity_id === h.entity_id)
-            if (h.operation === 'genesis' ? selected.length !== 0
+            if (!ledger.previous_projection ? selected.length !== 0
               : selected.length !== 1 || canonical(selected[0]) !== canonical(ledger.previous_projection)) fail()
             ledgers.add(ledger)
-            if (h.operation === 'genesis') projections.add(projection)
+            if (!ledger.previous_projection) projections.add(projection)
             else projections.put(projection)
             tx.objectStore('inbox').put({ ...sourceRow!, record_version: 13, state: 'progress_proven', progress_proof: proof } satisfies ProgressInbox)
             result('applied')
@@ -81,6 +94,11 @@ export async function authenticateProgressProjection(scope: BrowserSyncScope, to
     || ledger.entity_id !== h.entity_id || ledger.event_id !== h.event_id || ledger.server_sequence !== plan.serverSequence
     || ledger.outcome !== 'applied' || ledger.wire_item !== plan.wireItem || projection.account_id !== scope.accountId
     || projection.device_id !== scope.deviceId || projection.project_id !== h.project_id || projection.entity_id !== h.entity_id || projection.head_event_id !== h.event_id) fail()
+  if (h.device_id === scope.deviceId) {
+    const { out, receipt, inbox } = publicationRows(inventory, h.event_id)
+    if (!ledger.publication_proof) fail()
+    await verifyProgressPublicationProof(scope, out, receipt, inbox, ledger.publication_proof!, amk)
+  }
   const nonce = decodeBase64Url(projection.envelope.nonce), ciphertext = decodeBase64Url(projection.envelope.ciphertext)
   let bytes: Uint8Array | undefined
   try {
@@ -113,7 +131,10 @@ export async function authenticateReplayProgress(scope: BrowserSyncScope,
       || await progressDigest(joined.projection) !== row.progress_proof.projection_digest) fail()
     const token = await prepareProgressEvent(scope, row, inventory, amk, current, verified)
     const chain = await authenticateProgressProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
-    if (snapshot.progress?.projections.some(value => (value as ProgressProjection).head_event_id === row.event_id)) values.push({ project_id: JSON.parse(row.wire_item).event.project_id, event_id: row.event_id, stage_id: inspectPreparedProgressEvent(token, scope, inventory).event.header.stage_id, ...chain })
+    const plan = inspectPreparedProgressEvent(token, scope, inventory)
+    if (snapshot.progress?.projections.some(value => (value as ProgressProjection).head_event_id === row.event_id))
+      values.push({ project_id: plan.event.header.project_id, event_id: row.event_id,
+        stage_id: plan.event.header.stage_id, ...chain, ...(plan.tips.length > 1 ? { conflicted: true as const } : {}) })
   }
   if (!current()) throw new BrowserPersistenceError('closed')
   const ids = new Set<string>()
@@ -124,5 +145,5 @@ export async function authenticateReplayProgress(scope: BrowserSyncScope,
   return values
 }
 
-export interface BrowserProjectProgress extends ProgressChain { project_id: string; event_id: string; stage_id: string | null }
+export interface BrowserProjectProgress extends ProgressChain { project_id: string; event_id: string; stage_id: string | null; conflicted?: true }
 export const commitProgressGenesis = commitProgressEvent

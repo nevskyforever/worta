@@ -8,6 +8,7 @@ import StatePanel from '@/components/ui/StatePanel.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
+import type { BrowserProgressView } from '@/platform/web/progressView'
 import { cloudDocumentForReading, cloudNoteCard, readCloudWorkspaceProject } from '@/platform/web/cloudWorkspaceReader'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
@@ -132,6 +133,9 @@ function selectStage(id: string | null): void {
 }
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
+const progressWritable = ref(false)
+const progressSaving = ref(false)
+const progressSaveFailed = ref(false)
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
@@ -157,6 +161,7 @@ async function openRecovery(): Promise<void> {
   const priorDocument = selectedDocument.value, priorSelection = selectedStage.value, hadRecovery = recovery.value !== null
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
+  progressWritable.value = false; progressSaveFailed.value = false
   try {
     const opened = props.workspace
       ? await readCloudWorkspaceProject(props.session, props.projectId, active.signal)
@@ -173,12 +178,27 @@ async function openRecovery(): Promise<void> {
         ? remembered! : value.games?.some(game=>game.event.header.stage_id===null) || value.progress?.some(progress => progress.stage_id === null) || value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
       selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
       rememberStage()
+      if (props.workspace && value.progress?.length) {
+        const ready = await props.session.progressWriteReady(active.signal).catch(() => false)
+        if (!active.signal.aborted && props.session.status === 'unlocked') progressWritable.value = ready
+      }
     }
   } catch (cause) {
     if (active.signal.aborted) return
     if (props.session.status !== 'unlocked') { emit('invalidated'); return }
     error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError || cause instanceof BrowserReplayError ? cause.code : 'unsafe_history'
   } finally { if (controller === active) busy.value = false }
+}
+async function saveProgress(progress: BrowserProgressView, action: { total: number } | { remove: string }) {
+  if (!controller || controller.signal.aborted || progressSaving.value || !progressWritable.value) return
+  const signal = controller.signal
+  progressSaving.value = true; progressSaveFailed.value = false
+  try {
+    const updated = await props.session.saveProgress(props.projectId, progress.stage_id, progress.event_id, action, signal)
+    if (!signal.aborted) recovery.value = updated
+  } catch {
+    if (!signal.aborted) progressSaveFailed.value = true
+  } finally { progressSaving.value = false }
 }
 onMounted(() => { if (props.autoOpenRecovery) void openRecovery(); else void open() })
 watch(() => props.projectId, () => { if (props.autoOpenRecovery) void openRecovery() })
@@ -208,7 +228,7 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
       <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
-      <p v-if="workspace" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
+      <p v-if="workspace && !progressWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
       <nav v-if="recovery.stages.length" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
         <button class="nf-button nf-button--secondary" type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in recovery.stages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
@@ -216,7 +236,10 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
       <template v-if="showProject">
         <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
         <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
-        <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value" />
+        <p v-if="progressSaveFailed" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+        <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value"
+          :writable="progressWritable && (value.stage_id !== null || !recovery.stages.length)" :busy="progressSaving"
+          @save="saveProgress(value, $event)" />
       </template>
       <section v-if="showTexts && (stageDocuments.length || section === 'texts')" class="cloud-reader__panel" data-testid="cloud-document-list">
         <h4>{{ section === 'texts' ? t('Тексты') : documentLabels[locale.language] }}</h4>

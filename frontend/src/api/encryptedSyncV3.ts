@@ -206,6 +206,17 @@ export const encryptedSyncV3Api = {
   }),
   pushMaps:(token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse>=>apiRequest<unknown>('/api/v3/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV3MapPush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
   pushProgress:(token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse>=>apiRequest<unknown>('/api/v3/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV3ProgressPush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
+  pushSealedProgress(token: string, eventId: string, rawBody: string, signal: AbortSignal): Promise<V3PushResponse> {
+    const body = JSON.parse(rawBody)
+    const item = body.items?.[0]
+    if (!item || item.event?.event_id !== eventId || !item.object) fail()
+    const encoded = encodeV3ProgressPush(body.device_id, [{
+      event: item.event, object: { ...item.object, nonce: decodeBase64Url(item.object.nonce), ciphertext: decodeBase64Url(item.object.ciphertext) },
+    }])
+    if (encoded !== rawBody) fail()
+    return apiRequest<unknown>('/api/v3/sync/encrypted/push', { method: 'POST', headers: headers(token), rawBody, signal })
+      .then(value => parsePush(value, [eventId]))
+  },
   pushDocuments:(token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse>=>apiRequest<unknown>('/api/v3/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV3DocumentPush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
   noteReaderCapabilities:(token:string,deviceId:string,support:{reader_transport_version:3;frame_version:1;codec8_version:1;compression_zero:true;ordinary_reader_version:1;resolution_reader_version:2}):Promise<void>=>{
     if(!UUID.test(deviceId))fail()

@@ -10,6 +10,17 @@ import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteRes
 import type { ReplaySourceSeedResult } from './replaySourceSeed'
 import { accountCryptoApi, type AccountCryptoTransport, type AccountCryptoProvisioningTransport } from '@/api/accountCrypto'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
+import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
+import { prepareProgressAppend, prepareProgressTombstone } from '@/cloud/progressAuthor'
+import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
+import { normalizeProgressTotal } from '@/core/progress/calculations'
+import { UNIT_FACTORS } from '@/core/projects/units'
+import { decodeBase64Url } from '@/api/base64url'
+import { openBrowserCanonicalObject } from './canonicalReaders'
+import { progressPreparationInventory } from './progressApply'
+import { inspectPreparedProgressEvent, prepareProgressEvent } from './progressPrepare'
+import { openBrowserReplayStorage } from './replayStorage'
+import type { ProgressFact } from '@/cloud/progressCodec'
 import { prepareInitialWebSync } from './initialWebSync'
 import { cloudProjectsApi, type CloudProjectsResponse } from '@/api/cloudProjects'
 import { legalDocumentsApi, type LegalDocument, type LegalDocumentConfirmation,
@@ -174,7 +185,7 @@ export class BrowserCloudAccountSession {
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
       const progressChains = (await storage.authenticateProgress(this.auth, bindings, keys)).filter(value => value.project_id === projectId)
-      if (progressChains.some(chain => chain.migration)) throw new BrowserCloudReadError('unsupported_history')
+      if (progressChains.some(chain => chain.migration || chain.conflicted)) throw new BrowserCloudReadError('unsupported_history')
       const gameOwners = await storage.authenticateGames(this.auth,bindings,keys)
       const accountGame = gameOwners.find(value=>value.event.header.scope==='account')?.state as AccountGameBase | undefined
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
@@ -225,6 +236,91 @@ export class BrowserCloudAccountSession {
     }
     check()
     return { scope, lease, check, request, signal: operationSignal, storage, bindings }
+  }
+
+  async progressWriteReady(signal: AbortSignal): Promise<boolean> {
+    const operation = this.unlockedSync(signal)
+    if (!(await operation.request(token => encryptedSyncV3Api.progressReaderGate(token))).ready) return false
+    await operation.request(token => encryptedSyncV3Api.pullRaw(token, operation.scope.deviceId, 0, 1, operation.signal))
+    return true
+  }
+
+  /** Compose the same append/tombstone event as Desktop from verified current history. */
+  async saveProgress(projectId: string, stageId: string | null, parentId: string,
+    action: { total: number } | { remove: string }, signal: AbortSignal) {
+    const operation = this.unlockedSync(signal), keys = this.keys!
+    const current = () => { try { operation.check(); return true } catch { return false } }
+    action = structuredClone(action)
+    const symbolsFor = (total: number, unit: ProgressFact['unit']) => {
+      const symbols = normalizeProgressTotal(total, unit) * UNIT_FACTORS[unit]
+      if (!Number.isSafeInteger(Math.round(symbols * 1_000_000))) throw new RangeError('progress_precision_unsupported')
+      return symbols.toFixed(6)
+    }
+    const replay = await openBrowserReplayStorage(operation.scope, operation.signal, current)
+    let pending: string | null
+    try {
+      pending = await replay.retryProgress(this.auth, keys, event => {
+        const header = event.header
+        if (header.project_id !== projectId || header.stage_id !== stageId || event.selected_event_id !== parentId) return false
+        if ('remove' in action) return header.operation === 'tombstone' && event.target_entry_id === action.remove
+        const entry = event.entries[0]
+        return header.operation === 'append' && !!entry && entry.new_total === symbolsFor(action.total, entry.unit)
+      })
+    } finally { await replay.close() }
+    const eventId = pending ?? await withReceivedBrowserAccountHistory({
+      auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
+    }, async (storage, snapshot) => {
+      if (snapshot.manifest?.applied_cursor !== snapshot.manifest?.receive_cursor)
+        throw new BrowserCloudReadError('unsupported_history')
+      const row = snapshot.rows.find(value => value.event_id === parentId && value.state === 'progress_proven')
+      if (!row) throw new BrowserCloudReadError('unsupported_history')
+      const event = await operation.lease.use(async amk => {
+        const inventory = progressPreparationInventory(snapshot)
+        const prepared = await prepareProgressEvent(operation.scope, row, inventory, amk, current)
+        const { event: parent, projection: chain } = inspectPreparedProgressEvent(prepared, operation.scope, inventory)
+        if (parent.header.project_id !== projectId || parent.header.stage_id !== stageId)
+          throw new BrowserCloudReadError('unsupported_history')
+        const metadata = snapshot.owners.find(value => value.owner_kind === 'project_metadata' && value.owner_id === projectId)
+        const stage = stageId === null ? undefined : snapshot.owners.find(value =>
+          value.owner_kind === 'stage' && value.project_id === projectId && value.stage_id === stageId)
+        const metadataEventId = metadata?.tip_event_ids[0], stageEventId = stage?.tip_event_ids[0]
+        if (!metadataEventId || metadata.tip_event_ids.length !== 1 || (stageId !== null && (!stageEventId || stage?.tip_event_ids.length !== 1)))
+          throw new BrowserCloudReadError('unsupported_history')
+        const stages = await readReplayStages(operation.scope, snapshot, projectId, amk, current)
+        if (stageId === null ? stages.length > 0 : !stages.some(value => value.id === stageId))
+          throw new BrowserCloudReadError('unsupported_history')
+        const settingsId = stageEventId ?? metadataEventId
+        const settingsRow = snapshot.rows.find(value => value.event_id === settingsId)
+        if (!settingsRow) throw new BrowserCloudReadError('unsupported_history')
+        const wire = JSON.parse(settingsRow.wire_item)
+        const nonce = decodeBase64Url(wire.object.nonce), ciphertext = decodeBase64Url(wire.object.ciphertext)
+        const settings = await (async () => {
+          try {
+            const decoded = await openBrowserCanonicalObject(amk, { accountId: operation.scope.canonicalUserId,
+              projectId, entityType: wire.event.entity_type, entityId: wire.event.entity_id, eventId: settingsId },
+            { ...wire.object, nonce, ciphertext }) as { stage?: ProgressSettings & {work_method: string; status: string}; metadata?: ProgressSettings & {work_method: string; status: string} }
+            return stageId === null ? decoded.metadata : decoded.stage
+          } finally { nonce.fill(0); ciphertext.fill(0) }
+        })()
+        if (!settings || settings.work_method !== 'manual' || !['active', 'активен'].includes(settings.status)
+          || !Object.hasOwn(UNIT_FACTORS, settings.unit)) throw new BrowserCloudReadError('unsupported_history')
+        const now = new Date()
+        const context = { parent, chain, metadataEventId, stageEventIds: stageEventId ? [stageEventId] : [],
+          now: canonicalizeSyncTimestamp(now.toISOString()), eventId: crypto.randomUUID(), deviceId: operation.scope.deviceId }
+        if ('remove' in action) {
+          const index = chain.entries.findIndex(entry => entry.entry_id === action.remove)
+          if (index < 0) throw new BrowserCloudReadError('unsupported_history')
+          return prepareProgressTombstone(context, action.remove, chain.entries.slice(index + 1).map(() => crypto.randomUUID()))
+        }
+        const unit: ProgressFact['unit'] = settings.unit
+        const writingDay = now.toLocaleDateString('en-CA')
+        return prepareProgressAppend(context, { entryId: crypto.randomUUID(), unit, totalSymbols: symbolsFor(action.total, unit), writingDay })
+      })
+      return storage.publishProgress(this.auth, keys, snapshot, event)
+    })
+    const updated = await this.readRecoveryProject(projectId, operation.signal)
+    if (!updated.progress.some(value => value.event_id === eventId)) throw new BrowserCloudReadError('unsupported_history')
+    return updated
   }
 
   async cloudSyncMode(signal?: AbortSignal): Promise<1 | 2 | 3> {

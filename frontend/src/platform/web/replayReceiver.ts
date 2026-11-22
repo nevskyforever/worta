@@ -1,3 +1,4 @@
+import { validateBrowserRetainedHistory, type BrowserReceivedInboxRecord } from './syncDurability'
 import type { ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { validateBrowserMetadataHead } from './metadataApplyRecords'
 import { prepareMapEvent } from './mapPrepare'
@@ -122,7 +123,15 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           let documentHead: DocumentEvent['header'] | undefined
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
-            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId) fail('unsupported_history_family')
+            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId && event.entity_type !== 'progress') fail('unsupported_history_family')
+            if (event.device_id === scope.deviceId) {
+              const echo: BrowserReceivedInboxRecord = { record_version: 1, account_id: scope.accountId,
+                device_id: scope.deviceId, event_id: event.event_id, server_sequence: event.server_sequence,
+                protocol_version: 3, state: 'received', wire_item: JSON.stringify(item) }
+              const find = (value: unknown) => (value as {event_id: string}).event_id === event.event_id
+              const evidence = validateBrowserRetainedHistory(scope, event, previous.author?.out.find(find), previous.author?.receipts.find(find), echo)
+              if (!evidence.outbox || !evidence.receipt) fail('invalid_history')
+            }
             if (event.entity_type === 'project_metadata' && event.operation === 'upsert') {
               const rawHead=previous.owners.find(owner=>owner.owner_kind==='project_metadata'&&owner.owner_id===event.project_id)
               if(!rawHead)fail('invalid_history')

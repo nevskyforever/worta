@@ -9,7 +9,7 @@ import { inspectResolutionDag } from './resolutionDag'
 import { contentHistoryJoin } from './contentNoteProof'
 import { contentConflictHistoryJoin } from './contentNoteConflictProof'
 import { BrowserPersistenceError } from './persistence'
-import { validateBrowserSyncCursor, type BrowserSyncScope } from './syncDurability'
+import { validateBrowserRetainedHistory, validateBrowserSyncCursor, type BrowserSyncScope } from './syncDurability'
 import { validateBrowserProjectBinding, type BrowserProjectBinding } from './projectBindings'
 import type { BrowserMetadataHead, BrowserMetadataProof } from './metadataApplyRecords'
 import { validateBrowserOwnerHead, stageOwnerId, type BrowserStageHead, type BrowserStageProof } from './stageRecords'
@@ -119,7 +119,7 @@ export function assertReplayOwnerTransition(before: ReplaySnapshot, after: Repla
     const added=doc?.ledger.filter(value=>!prior?.ledger.some(old=>replaySame(old,value)))??[]
     if(!doc||!prior||doc.ledger.length!==prior.ledger.length+1||added.length!==1||next.length!==1
       ||(next[0] as {head_event_id:string}).head_event_id!==row.event_id
-      ||(event.revision===1 ? previous.length!==0||doc.projections.length!==prior.projections.length+1
+      ||(previous.length===0 ? doc.projections.length!==prior.projections.length+1
         : previous.length!==1||doc.projections.length!==prior.projections.length||!replaySame((added[0] as {previous_projection:unknown}).previous_projection,previous[0]))
       ||prior.ledger.some(value=>!doc.ledger.some(next=>replaySame(value,next)))
       ||!replaySame(prior.projections.filter(value=>!sameProgress(value)),doc.projections.filter(value=>!sameProgress(value)))
@@ -401,13 +401,29 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const authorActive=counts.some(r=>r.result.length),author={out:counts[0]!.result,receipts:counts[1]!.result,intents:counts[2]!.result}
       const authority=inspectContentAuthorityInventory(s,{...author,history:future,rows,bindings:imported,localNotes:notes,cursor:checkpoint})
       const authored=authority.candidates.sort((a,b)=>a.header.revision-b.header.revision),authorMutations=authored.length+authority.intents.filter(i=>i.record_version===2).length
-      const resolutionsOut=authority.out.filter(o=>!authored.some(c=>c.event_id===o.event_id))
+      const progressOut = authority.out.filter(row => JSON.parse(row.raw_body).items[0].event.entity_type === 'progress')
+      const progressIds = new Set(progressOut.map(row => row.event_id))
+      for (const row of rows) {
+        const descriptor = JSON.parse(row.wire_item).event
+        if (descriptor.entity_type !== 'progress' || descriptor.device_id !== s.deviceId) continue
+        const outbound = progressOut.find(value => value.event_id === row.event_id)
+        const receipt = author.receipts.find((value: {event_id: string}) => value.event_id === row.event_id)
+        const evidence = validateBrowserRetainedHistory(s, descriptor, outbound, receipt, row)
+        if (!evidence.outbox || !evidence.receipt || !evidence.inbox) fail()
+      }
+      const resolutionsOut=authority.out.filter(o=>!progressIds.has(o.event_id)&&!authored.some(c=>c.event_id===o.event_id))
+      if (progressOut.length) {
+        const allocated = [...authority.out, ...authority.intents].sort((a, b) => a.local_ordinal - b.local_ordinal)
+        if (allocated.some((row, index) => row.local_ordinal !== index + 1)
+          || checkpoint.next_local_ordinal !== allocated.length + 1) fail()
+      }
+      const noteAuthorActive = authority.out.length !== progressOut.length || author.intents.length > 0
       for(const o of resolutionsOut){const e=JSON.parse(o.raw_body).items[0].event,root=resolutions.find(r=>r.event_id===o.event_id),group=future.find(g=>g.record_kind==='group'&&g.project_id===e.project_id&&g.note_id===e.entity_id&&e.revision===g.tip_revision+1)
         if(o.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||!group||!root&&future.some(t=>t.record_kind==='group_transition'&&t.group_id===(group as any).group_id)||root&&root.source_device_id!==s.deviceId)fail()
         const row=rows.find(r=>r.event_id===o.event_id)
         if(row){const w=JSON.parse(row.wire_item),{device_id,server_sequence,...event}=w.event,receipt=author.receipts.find((r:any)=>r.event_id===o.event_id) as any;if(device_id!==s.deviceId||!receipt||receipt.record_version!==1||receipt.server_sequence!==server_sequence||!replaySame({event,object:w.object},JSON.parse(o.raw_body).items[0]))fail()}
       }
-      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length+progressOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
 
 
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
@@ -560,7 +576,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
           && contentBoundary.server_sequence === record.remote_high_water
           && genesis.server_sequence <= record.remote_high_water && seed.initial_max_server_sequence <= record.remote_high_water
           && record.remote_high_water <= (manifest.applied_cursor ?? 0) && record.remote_high_water < manifest.anchor.registry.current_cursor
-        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&!retainedImport&&(!authorActive||record.remote_high_water===null||record.remote_high_water<(resolutionsOut.length?((closed?.server_sequence??rows.find(r=>resolutionsOut.some(o=>o.event_id===r.event_id))?.server_sequence??manifest!.anchor.registry.current_cursor)-1):(closed?.server_sequence??manifest!.anchor.registry.current_cursor))||record.remote_high_water>manifest!.anchor.registry.current_cursor)
+        if (!remote || remote.bootstrap_id !== record.bootstrap_id || record.mode !== 'import_remote' || record.phase !== 'captured' || record.remote_state !== 'active' || record.remote_high_water!==manifest!.anchor.registry.current_cursor&&!retainedImport&&(!noteAuthorActive||record.remote_high_water===null||record.remote_high_water<(resolutionsOut.length?((closed?.server_sequence??rows.find(r=>resolutionsOut.some(o=>o.event_id===r.event_id))?.server_sequence??manifest!.anchor.registry.current_cursor)-1):(closed?.server_sequence??manifest!.anchor.registry.current_cursor))||record.remote_high_water>manifest!.anchor.registry.current_cursor)
           || !(heads.some(head => head.owner_kind === 'project_metadata' && head.owner_id === record.project_id)
             || manifest?.source_seeds?.some(seed => seed.project_id === record.project_id))) fail()
       }

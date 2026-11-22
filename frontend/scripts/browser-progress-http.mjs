@@ -124,6 +124,32 @@ try {
   panel=await loginAndOpen(page);await read(panel,fixture.expected)
   assert.deepEqual(await snapshot(page),first)
   assert.equal(await page.evaluate(()=>new Promise(resolve=>{const q=indexedDB.open('worta-web-replay',9);q.onerror=()=>resolve(q.error.name);q.onsuccess=()=>{q.result.close();resolve('incorrectly_opened')}})),'VersionError')
+  await context.close(); page=await launch()
+  await page.evaluate(async () => {
+    const request = q => new Promise((resolve, reject) => { q.onsuccess = () => resolve(q.result); q.onerror = () => reject(q.error) })
+    const opened = await request(indexedDB.open('worta-web-replay'))
+    const stores = []
+    for (const name of opened.objectStoreNames) {
+      const store = opened.transaction(name).objectStore(name)
+      stores.push({ name, keyPath: store.keyPath, indexes: [...store.indexNames].map(name => {
+        const index = store.index(name)
+        return { name, keyPath: index.keyPath, unique: index.unique }
+      }), rows: await request(store.getAll()) })
+    }
+    opened.close()
+    await request(indexedDB.deleteDatabase('worta-web-replay'))
+    const old = indexedDB.open('worta-web-replay', 10)
+    old.onupgradeneeded = () => {
+      for (const saved of stores) {
+        const store = old.result.createObjectStore(saved.name, { keyPath: saved.keyPath })
+        for (const index of saved.indexes) store.createIndex(index.name, index.keyPath, { unique: index.unique })
+        for (const row of saved.rows) store.add(row)
+      }
+    }
+    ;(await request(old)).close()
+  })
+  panel=await loginAndOpen(page);await read(panel,fixture.expected)
+  assert.deepEqual(await snapshot(page),first)
   }
 
   const input=createInterface({input:process.stdin}),updateLine=new Promise(ok=>input.once('line',ok))

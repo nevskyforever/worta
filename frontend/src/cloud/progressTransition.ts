@@ -16,13 +16,27 @@ export function progressDisplay(symbols: bigint, unit: ProgressFact['unit'], rec
   const scaled = n * 10, lower = Math.floor(scaled), fraction = scaled - lower
   return (fraction === 0.5 ? lower % 2 === 0 ? lower : lower + 1 : Math.round(scaled)) / 10
 }
+function sameProgressAction(a: ProgressFact, b: ProgressFact): boolean {
+  return a.unit === b.unit && a.writing_day === b.writing_day && a.writing_time === b.writing_time
+    && a.occurred_at === b.occurred_at
+}
+
 export function transitionProgress(event: ProgressEvent, parent?: ProgressChain): ProgressChain {
+  const id = event.header.parents[0]
+  if (event.header.parents.length > 1 || (parent !== undefined) !== (id !== undefined))
+    throw new Error('progress_parent_unknown')
+  return transitionProgressBranches(event, parent && id ? new Map([[id, parent]]) : new Map())
+}
+
+export function transitionProgressBranches(event: ProgressEvent, parents: ReadonlyMap<string, ProgressChain>): ProgressChain {
   validateProgressEvent(event)
   const op = event.header.operation
-  if (event.header.parents.length > 1 || op === 'rebase') throw new Error('progress_operation_unsupported')
-  const capture = op === 'genesis' || op === 'adopt_local'
-  if (op === 'genesis' ? !!parent : !parent || (!capture && event.selected_event_id !== event.header.parents[0]))
+  if (parents.size !== event.header.parents.length || event.header.parents.some(id => !parents.has(id)))
     throw new Error('progress_parent_unknown')
+  if ([...parents.values()].reduce((count, branch) => count + branch.entries.length, 0) > 131072)
+    throw new Error('progress_resource_limit')
+  const capture = op === 'genesis' || op === 'adopt_local'
+  const parent = event.selected_event_id === null ? undefined : parents.get(event.selected_event_id)
   const chain: ProgressChain = capture
     ? { base_total: event.base_total!, entries: [], migration: structuredClone(event.migration!) }
     : structuredClone(parent!)
@@ -42,6 +56,28 @@ export function transitionProgress(event: ProgressEvent, parent?: ProgressChain)
         throw new Error('progress_rebase_invalid')
     }
     chain.entries.length = position
+  } else if (op === 'rebase') {
+    const other = [...parents].filter(([id]) => id !== event.selected_event_id).map(([, branch]) => branch)
+    const selectedIds = new Set(chain.entries.map(fact => fact.entry_id))
+    const requested = new Map(event.rebased_from.map((id, offset) => [id, offset]))
+    const sources = new Map<string, ProgressFact>()
+    for (const branch of other) {
+      const ordered = branch.entries.filter(fact => requested.has(fact.entry_id))
+      if (ordered.some((fact, i) => i > 0 && requested.get(ordered[i - 1]!.entry_id)! >= requested.get(fact.entry_id)!))
+        throw new Error('progress_rebase_order_invalid')
+      for (const fact of ordered) {
+        const previous = sources.get(fact.entry_id)
+        if (previous && (previous.delta !== fact.delta || !sameProgressAction(previous, fact)))
+          throw new Error('progress_rebase_invalid')
+        sources.set(fact.entry_id, fact)
+      }
+    }
+    for (const [i, source] of event.rebased_from.entries()) {
+      const original = sources.get(source), next = event.entries[i]!
+      if (!original || selectedIds.has(source) || next.entry_id === source
+        || original.delta !== next.delta || !sameProgressAction(original, next))
+        throw new Error('progress_rebase_invalid')
+    }
   }
   const ids = new Set(chain.entries.map(f => f.entry_id))
   let total = progressMicros(chain.entries.at(-1)?.new_total ?? chain.base_total)
