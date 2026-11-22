@@ -17,7 +17,7 @@ from .schemas import (CompressionReaderCapability, CompressionWriterRequest,Proj
                       V3EncryptedSyncPushResponse, V3EncryptedSyncPullItem,
                       V3EncryptedSyncPullResponse, V3EncryptedSyncAckRequest,
                       DocumentReaderCapabilities,
-    GameReaderCapabilities, ProgressReaderCapabilities, WebProgressWriteGate, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
+    GameReaderCapabilities, ProgressReaderCapabilities, WebDocumentWriteGate, WebProgressWriteGate, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
                       encode_canonical_base64url, AccountEncryptedPushRequest, AccountSyncPullEvent)
 from .services import SyncProtocolError, SyncService
 from .models import AuthSession, SyncUserState, User
@@ -98,13 +98,21 @@ def cutover(request: V3CutoverRequest,
 })
 async def encrypted_push(http_request: Request,
                          web_progress_version: int | None = Query(default=None),
+                         web_document_version: int | None = Query(default=None),
+                         document_parent: UUID | None = Query(default=None),
                          expected_cursor: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
                          expected_epoch: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
                          progress_parent: UUID | None = Query(default=None),
                          current: AuthenticatedUser = Depends(get_current_accepted_user),
                          session: Session = Depends(get_cloud_session)) -> V3EncryptedSyncPushResponse:
     web_progress = None
-    if any(value is not None for value in (web_progress_version, expected_cursor, expected_epoch, progress_parent)):
+    web_document = None
+    if web_document_version is not None or document_parent is not None:
+        if (web_document_version != 1 or expected_cursor is None or expected_epoch is None
+                or web_progress_version is not None or progress_parent is not None):
+            raise _error(SyncProtocolError('web_document_parameters_invalid', 'Invalid Web text parameters.', 422))
+        web_document = (expected_cursor, expected_epoch, document_parent)
+    elif any(value is not None for value in (web_progress_version, expected_cursor, expected_epoch, progress_parent)):
         if web_progress_version != 1 or expected_cursor is None or expected_epoch is None or progress_parent is None:
             raise _error(SyncProtocolError('web_progress_parameters_invalid', 'Invalid Web Progress parameters.', 422))
         web_progress = (expected_cursor, expected_epoch, progress_parent)
@@ -116,7 +124,7 @@ async def encrypted_push(http_request: Request,
     try:
         results, cursor = await run_in_threadpool(
             SyncService().push_encrypted, session, current.user.id, request.device_id,
-            request.items, transport_version=3, web_progress=web_progress,
+            request.items, transport_version=3, web_progress=web_progress, web_document=web_document,
         )
     except SyncProtocolError as error:
         raise _error(error) from None
@@ -293,10 +301,15 @@ def document_reader_capabilities(request: DocumentReaderCapabilities,
         raise _error(error) from None
 
 
-@router.get('/document-reader-capabilities', response_model=ContentNoteCapabilityGate)
-def document_reader_gate(current: AuthenticatedUser = Depends(get_current_accepted_user),
-                    session: Session = Depends(get_cloud_session)) -> ContentNoteCapabilityGate:
+@router.get('/document-reader-capabilities', response_model=WebDocumentWriteGate | ContentNoteCapabilityGate)
+def document_reader_gate(web_document_version: int | None = Query(default=None),
+                         current: AuthenticatedUser = Depends(get_current_accepted_user),
+                         session: Session = Depends(get_cloud_session)) -> ContentNoteCapabilityGate:
+    if web_document_version not in (None, 1):
+        raise _error(SyncProtocolError('web_document_parameters_invalid', 'Invalid Web text parameters.', 422))
     ready, missing = SyncService().document_gate(session, current.user.id)
+    if web_document_version == 1:
+        return WebDocumentWriteGate(ready=ready, missing_devices=missing)
     return ContentNoteCapabilityGate(ready=ready, missing_devices=missing)
 
 @router.put('/progress-reader-capabilities', status_code=status.HTTP_204_NO_CONTENT)

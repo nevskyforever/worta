@@ -1,3 +1,8 @@
+import type { TiptapDocument } from '@/types/documents'
+import { canonical } from '@/cloud/projectMetadataCodec'
+import { authenticateDocumentTips, documentPreparationInventory, documentsFromTips } from './documentApply'
+import { verifyDocumentDependencies } from './documentPrepare'
+import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { BrowserProjectGame } from './gameApply'
 import type { AccountGameBase, ProjectGameEvent } from '@/cloud/gameCodec'
 import type { ProjectGameState } from '@/cloud/gameProjectTransition'
@@ -156,7 +161,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; documentHeads?: Record<string, string>; documentConflicts?: DocumentEvent[][]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -165,7 +170,15 @@ export class BrowserCloudAccountSession {
     return withReceivedBrowserAccountHistory({ auth: this.auth, lease, scope, delivery: 'recovery',
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context),
-    }, async storage => {
+    }, async (storage, received) => {
+      const documentProjects = new Set(received.rows.flatMap(row => {
+        const event = JSON.parse(row.wire_item).event
+        return event.entity_type === 'document' ? [event.project_id as string] : []
+      }))
+      for (const id of documentProjects) {
+        if (id !== projectId && !received.bindings.some(binding => binding.project_id === id))
+          await storage.importRecoveryProject(id, this.auth, bindings, keys, 'recovery')
+      }
       await storage.importRecoveryProject(projectId, this.auth, bindings, keys, 'recovery')
       for (let i = 0; i <= 200; i++) {
         const result = await storage.recoverV10(this.auth, bindings, keys, 'recovery')
@@ -190,7 +203,11 @@ export class BrowserCloudAccountSession {
       const accountGame = gameOwners.find(value=>value.event.header.scope==='account')?.state as AccountGameBase | undefined
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
-      const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
+      const documentOwners = await lease.use(amk => authenticateDocumentTips(scope, snapshot, amk, current))
+      const documents = documentsFromTips(documentOwners).filter(document => document.project_id === projectId)
+      const documentHeads = Object.fromEntries(documentOwners.flatMap(tips => tips.length === 1 && tips[0]!.header.project_id === projectId
+        ? [[tips[0]!.header.entity_id, tips[0]!.header.event_id]] : []))
+      const documentConflicts = documentOwners.filter(tips => tips.length > 1 && tips[0]!.header.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
         progress: progressChains.filter(chain => chain.stage_id !== null || !stages.length || stages.every(stage => progressChains.some(progress => progress.stage_id === stage.id))).map(chain => {
           const settings = chain.stage_id === null ? value.project : stages.find(stage => stage.id === chain.stage_id)?.settings
@@ -204,7 +221,7 @@ export class BrowserCloudAccountSession {
           }, 0) : undefined
           return presentProgress(chain, settings as unknown as ProgressSettings, day, total)
         }),
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps, games, accountGame: accountGame ? structuredClone(accountGame) : null,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, documentHeads, documentConflicts, maps, games, accountGame: accountGame ? structuredClone(accountGame) : null,
       }))
       if (games.some(value => value.event.header.stage_id !== null && !stages.some(stage=>stage.id===value.event.header.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')
@@ -236,6 +253,85 @@ export class BrowserCloudAccountSession {
     }
     check()
     return { scope, lease, check, request, signal: operationSignal, storage, bindings }
+  }
+
+  async documentWriteReady(signal: AbortSignal): Promise<boolean> {
+    const operation = this.unlockedSync(signal)
+    return operation.request(token => encryptedSyncV3Api.webDocumentWriteReady(token, operation.signal))
+  }
+
+  async saveDocument(projectId: string, stageId: string | null, parentId: string | null,
+    content: TiptapDocument, signal: AbortSignal, resolution?: { entityId: string; eventId: string; tips: string[] }) {
+    const operation = this.unlockedSync(signal), keys = this.keys!, bindings = operation.bindings
+    const current = () => { try { operation.check(); return true } catch { return false } }
+    const parents = resolution ? [...resolution.tips].sort() : parentId ? [parentId] : []
+    const contentJson = JSON.parse(JSON.stringify(content))
+    const replay = await openBrowserReplayStorage(operation.scope, operation.signal, current)
+    let pending: string | null
+    try {
+      pending = await replay.retryDocument(this.auth, keys, event =>
+        event.header.project_id === projectId && event.header.stage_id === stageId
+        && (!resolution || event.header.entity_id === resolution.entityId) && (replaySame(event.header.parents, parents) || (!resolution && parentId === null && event.header.parents.length === 1))
+        && !!event.document && canonical(event.document.content_json) === canonical(contentJson))
+    } finally { await replay.close() }
+    if (!pending) await this.readRecoveryProject(projectId, operation.signal)
+    const eventId = pending ?? await withReceivedBrowserAccountHistory({
+      auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
+    }, async storage => {
+      const snapshot = await storage.read()
+      const manifest = snapshot.manifest
+      if (!manifest || manifest.applied_cursor !== manifest.receive_cursor)
+        throw new BrowserCloudReadError('unsupported_history')
+      if (!(await this.documentWriteReady(operation.signal))) throw new BrowserCloudReadError('document_reader_required')
+      const event = await operation.lease.use(async amk => {
+        const inventory = documentPreparationInventory(snapshot)
+        const owners = await authenticateDocumentTips(operation.scope, snapshot, amk, current)
+        const matches = owners.filter(tips => tips.some(value => value.header.project_id === projectId && value.header.stage_id === stageId))
+        const tips = (resolution ? matches.find(values => values[0]?.header.entity_id === resolution.entityId) : matches[0]) ?? []
+        const selected = resolution ? tips.find(value => value.header.event_id === resolution.eventId) : tips[0]
+        const existing = selected?.document
+        const recordedParents = tips.map(value => value.header.event_id).sort()
+        const recreate = !resolution && parentId === null && tips.length === 1 && !existing
+        if (matches.length > 1 || (!resolution && tips.length > 1)
+          || (!recreate && !replaySame(recordedParents, parents))
+          || (resolution && (tips.length < 2 || !existing || selected?.header.stage_id !== stageId)))
+          throw new BrowserCloudReadError('document_changed')
+        const eventParents = recreate ? recordedParents : parents
+        const metadata = snapshot.owners.find(value => value.owner_kind === 'project_metadata' && value.owner_id === projectId)
+        const stage = stageId === null ? undefined : snapshot.owners.find(value =>
+          value.owner_kind === 'stage' && value.project_id === projectId && value.stage_id === stageId)
+        const metadataEventId = metadata?.tip_event_ids[0], stageEventId = stage?.tip_event_ids[0]
+        if (!metadataEventId || metadata.tip_event_ids.length !== 1 || (stageId !== null && (!stageEventId || stage?.tip_event_ids.length !== 1)))
+          throw new BrowserCloudReadError('unsupported_history')
+        const stages = await readReplayStages(operation.scope, snapshot, projectId, amk, current)
+        const target = stages.find(value => value.id === stageId)
+        if (stageId !== null && !target) throw new BrowserCloudReadError('unsupported_history')
+        const local = storage.contentAuthorOwner(this.auth, bindings, keys).local
+        const source = await local.readSnapshot(operation.scope, projectId)
+        const project = await local.withDecryptedSnapshot(operation.scope, source.token, async value => value.project)
+        const now = canonicalizeSyncTimestamp(new Date().toISOString())
+        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${projectId}:${stageId ?? 'project'}`))
+        const id = tips[0]?.header.entity_id ?? 'document-' + Array.from(new Uint8Array(digest).slice(0, 20), byte => byte.toString(16).padStart(2, '0')).join('')
+        const revision = Math.max(0, ...tips.map(value => value.header.revision)) + 1
+        const document: PortableDocument = existing ? { ...existing, content_json: contentJson } : {
+          id, project_id: projectId, stage_id: stageId, title: target?.name ?? project.name,
+          content_json: contentJson, content_format: 'tiptap-json/v1', created_at: now, extensions: {},
+        }
+        const event: DocumentEvent = { version: 1, mutation: 'upsert', deleted_at: null, document, header: {
+          account_id: operation.scope.canonicalUserId, device_id: operation.scope.deviceId, project_id: projectId,
+          stage_id: stageId, entity_id: id, event_id: crypto.randomUUID(), bootstrap_id: metadata.bootstrap_id,
+          metadata_event_id: metadataEventId, stage_event_ids: stageEventId ? [stageEventId] : [], parents: eventParents,
+          revision, generation: revision, operation: resolution ? 'resolution' : eventParents.length ? 'update' : 'create', updated_at: now,
+        } }
+        await verifyDocumentDependencies(operation.scope, { server_sequence: manifest.receive_cursor + 1, wire_item: '' },
+          event, inventory, amk, current)
+        return event
+      })
+      return storage.publishDocument(this.auth, keys, snapshot, event)
+    })
+    const updated = await this.readRecoveryProject(projectId, operation.signal)
+    if (!Object.values(updated.documentHeads ?? {}).includes(eventId)) throw new BrowserCloudReadError('document_changed')
+    return updated
   }
 
   async progressWriteReady(signal: AbortSignal): Promise<boolean> {

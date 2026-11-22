@@ -17,10 +17,11 @@ const InsertTab = Extension.create({
   },
 })
 
-export function createDocumentEditorExtensions(readOnly = false) {
+export function createDocumentEditorExtensions(readOnly = false, inertLinks = false) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
+      ...(inertLinks ? { link: { openOnClick: false } } : {}),
     }),
     TextStyle,
     FontFamily,

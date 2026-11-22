@@ -293,8 +293,8 @@ function assertOwnEcho(outbound: BrowserOutboxRecord, incoming: WireItem): void 
     // The server can serialize the same UTC instant with different fractional precision.
     const metadataGenesis = project.entity_type === 'project_metadata'
       && project.operation === 'upsert' && project.revision === 1
-    const progressEvent = project.entity_type === 'progress' && project.operation === 'event'
-    return outbound.protocol_version === 3 && project.deleted_at === null && (metadataGenesis || progressEvent)
+    const onlineEvent = ['progress', 'document'].includes(project.entity_type ?? '') && project.operation === 'event'
+    return outbound.protocol_version === 3 && project.deleted_at === null && (metadataGenesis || onlineEvent)
       ? { ...event, updated_at: canonicalizeSyncTimestamp(project.updated_at!) }
       : event
   }

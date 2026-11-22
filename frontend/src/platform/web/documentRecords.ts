@@ -17,7 +17,7 @@ export function validateDocumentInbox(value:unknown,s:BrowserSyncScope):Document
  if(!r||Object.keys(r).sort().join(',')!=='account_id,device_id,document_proof,event_id,protocol_version,record_version,server_sequence,state,wire_item'||r.record_version!==11||r.state!=='document_proven')fail()
  const {document_proof:p,...base}=r;validateBrowserInboxRecord({...base,record_version:1,state:'received'},s)
  const e=JSON.parse(r.wire_item).event
- if(r.protocol_version!==3||e.entity_type!=='document'||e.operation!=='event'||!Number.isSafeInteger(e.revision)||e.revision<1||e.device_id===s.deviceId||e.deleted_at!==null
+ if(r.protocol_version!==3||e.entity_type!=='document'||e.operation!=='event'||!Number.isSafeInteger(e.revision)||e.revision<1||e.deleted_at!==null
   ||!p||Object.keys(p).sort().join(',')!=='ledger_digest,outcome,owner_kind,projection_digest,record_version'||p.record_version!==1||p.owner_kind!=='document'||p.outcome!=='applied'||![p.ledger_digest,p.projection_digest].every(x=>/^[a-f0-9]{64}$/.test(x)))fail()
  return structuredClone(r)
 }
@@ -33,7 +33,7 @@ export function joinDocumentRecords(s:BrowserSyncScope,r:DocumentInbox,ledgers:u
  if(e.revision>1){
   const previous=l.previous_projection,parent=ledgers.find(x=>(x as DocumentLedger).event_id===previous?.head_event_id) as DocumentLedger|undefined
   if(!previous||!parent||previous.account_id!==s.accountId||previous.device_id!==s.deviceId||previous.project_id!==e.project_id||previous.entity_id!==e.entity_id
-   ||parent.project_id!==e.project_id||parent.entity_id!==e.entity_id||parent.server_sequence>=r.server_sequence||JSON.parse(parent.wire_item).event.revision!==e.revision-1)fail()
+   ||parent.project_id!==e.project_id||parent.entity_id!==e.entity_id||parent.server_sequence>=r.server_sequence)fail()
  }
  validateLocalEnvelope(p.envelope);return {ledger:l,projection:p}
 }

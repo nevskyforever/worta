@@ -202,3 +202,40 @@ it('keeps the previous total until the server-confirmed Progress projection arri
   expect(pane().get('[data-testid="cloud-progress-total"]').text()).toBe('120')
   wrapper.unmount()
 })
+
+it('keeps an edit after a failed save and shows the confirmed version after retry', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const original = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Desktop text' }] }] }
+  const edited = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Web text', marks: [{ type: 'bold' }] }] }] }
+  const current = { project: { name: 'Project' }, stages: [{ id: 'stage', name: 'Stage' }], notes: [],
+    documents: [{ id: 'doc', stage_id: 'stage', title: 'Stage text', content_json: original }], documentHeads: { doc: 'native-head' } }
+  const saveDocument = vi.fn().mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({
+    ...current, documents: [{ ...current.documents[0], content_json: edited }], documentHeads: { doc: 'web-head' },
+  })
+  const session = { status: 'unlocked', onRevoked: () => () => {}, readCloudProject: vi.fn().mockResolvedValue(null),
+    readRecoveryProject: vi.fn().mockResolvedValue(current), documentWriteReady: vi.fn().mockResolvedValue(true),
+    saveDocument,
+  } as unknown as BrowserCloudAccountSession
+  const editor = defineComponent({ props: ['initialContent', 'readOnly'], emits: ['update'], template:
+    '<button v-if="!readOnly" data-testid="change-document" @click="$emit(\'update\', next)">Change</button>',
+    data: () => ({ next: edited }),
+  })
+  const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project', workspace: true,
+    autoOpenRecovery: true, section: 'texts' }, global: { plugins: [pinia], stubs: { NFDocumentEditor: editor } } })
+  await flushPromises()
+  await wrapper.get('[data-stage-id="stage"]').trigger('click')
+  await wrapper.get('[data-document-id="doc"]').trigger('click')
+  await wrapper.get('[data-testid="cloud-document-edit-action"]').trigger('click')
+  await flushPromises()
+  await wrapper.get('[data-testid="change-document"]').trigger('click')
+  await wrapper.get('[data-testid="cloud-document-save"]').trigger('click')
+  await flushPromises()
+  expect(wrapper.get('[data-testid="cloud-document-edit"]').find('[role="alert"]').exists()).toBe(true)
+  await wrapper.get('[data-testid="cloud-document-save"]').trigger('click')
+  await flushPromises()
+  expect(saveDocument).toHaveBeenCalledTimes(2)
+  expect(saveDocument.mock.calls.map(call => call.slice(0, 4))).toEqual(Array(2).fill(['project', 'stage', 'native-head', edited]))
+  expect(wrapper.find('[data-testid="cloud-document-edit"]').exists()).toBe(false)
+  expect(wrapper.find('[role="status"]').exists()).toBe(true)
+  wrapper.unmount()
+})

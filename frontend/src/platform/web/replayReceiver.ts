@@ -3,8 +3,6 @@ import type { ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { validateBrowserMetadataHead } from './metadataApplyRecords'
 import { prepareMapEvent } from './mapPrepare'
 import { authenticateReplayMaps, mapPreparationInventory } from './mapApply'
-import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
-import { prepareDocumentEvent, inspectPreparedDocumentGenesis } from './documentPrepare'
 import { readReplayStages } from './replayStageView'
 import { validateStageHead } from './stageRecords'
 import { validateStageOrderHead } from './stageOrderRecords'
@@ -22,7 +20,6 @@ import { openBrowserReplayStorage, type ReplaySnapshot, type ReplayStorage } fro
 import { openBrowserCanonicalObject } from './canonicalReaders'
 import { decodeBase64Url } from '@/api/base64url'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
-import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { ContentNoteEvent } from '@/cloud/contentNoteCodec'
 
 export interface BrowserAccountReceiveResult {
@@ -120,10 +117,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
             const event = JSON.parse(row.wire_item).event
             if (event.entity_type === 'note' && row.state === 'content_note_proven') heads.set(JSON.stringify([event.project_id, event.entity_id]), event)
           }
-          let documentHead: DocumentEvent['header'] | undefined
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
-            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId && event.entity_type !== 'progress') fail('unsupported_history_family')
+            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId && !['progress', 'document'].includes(event.entity_type)) fail('unsupported_history_family')
             if (event.device_id === scope.deviceId) {
               const echo: BrowserReceivedInboxRecord = { record_version: 1, account_id: scope.accountId,
                 device_id: scope.deviceId, event_id: event.event_id, server_sequence: event.server_sequence,
@@ -160,32 +156,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
               continue
             }
             if (event.entity_type === 'document' && event.operation === 'event') {
-              const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
-              const inventory = documentPreparationInventory(previous)
-              if (!documentHead) {
-                await authenticateReplayDocuments(scope, previous, amk, current)
-                if (event.revision < 2) fail('unsupported_history_family')
-                const token = await prepareDocumentEvent(scope, {server_sequence:event.server_sequence!,wire_item:JSON.stringify(item)}, inventory, amk, current)
-                documentHead = inspectPreparedDocumentGenesis(token, scope, inventory).event.header
-              } else {
-                const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
-                const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
-                try {
-                  const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
-                    entityId: event.entity_id, entityType: 'document', eventId: event.event_id }, { ...object, nonce, ciphertext }) as DocumentEvent
-                  const h = decoded.header
-                  if (h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.entity_id !== event.entity_id
-                    || h.event_id !== event.event_id || h.device_id !== event.device_id || h.revision !== event.revision
-                    || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at) || h.operation !== 'update'
-                    || h.project_id !== documentHead.project_id || h.entity_id !== documentHead.entity_id || h.stage_id !== documentHead.stage_id
-                    || h.bootstrap_id !== documentHead.bootstrap_id || h.parents.length !== 1 || h.parents[0] !== documentHead.event_id
-                    || h.revision !== documentHead.revision + 1 || h.generation !== documentHead.generation + 1) fail('invalid_history')
-                  documentHead = h
-                } finally { nonce.fill(0); ciphertext.fill(0) }
-              }
+              await authenticateCanonicalWires([item])
               continue
             }
-            if (documentHead) fail('unsupported_history_family')
             if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 2 && item === page.items[0]) {
               await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
               const rawOrder = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)

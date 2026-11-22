@@ -131,3 +131,47 @@ def test_document_gate_three_registered_devices_exact_replay_and_downgrade(cloud
     with engine.connect() as connection:
         assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
         assert connection.execute(text('SELECT count(*) FROM sync_events')).scalar_one() == 1
+
+
+def test_online_document_push_pins_snapshot_and_preserves_desktop_read_gate(cloud_client):
+    client, engine = cloud_client
+    user = create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    desktop, web, boot = (str(uuid4()) for _ in range(3))
+    sync = '/api/v3/sync/encrypted'
+    project = '/api/v1/cloud/projects/project-1/bootstrap'
+    assert client.put(f'/api/v1/sync/devices/{desktop}', headers=headers).status_code == 200
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post(sync + '/reader-ready', headers=headers,
+                       json={'device_id': desktop, 'reader_transport_version': 3}).status_code == 204
+    assert client.post(sync + '/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    assert client.put(sync + '/note-reader-capabilities', headers=headers, json=capabilities(desktop)).status_code == 204
+    assert client.post(project, headers=headers, json={'device_id': desktop, 'bootstrap_id': boot}).status_code == 200
+    assert client.post(project + '/complete', headers=headers, json={
+        'device_id': desktop, 'bootstrap_id': boot, 'initial_event_count': 0, 'initial_max_server_sequence': 0,
+    }).status_code == 200
+    create = _event(entity_id='document-1', entity_type='document', operation='event')
+    pin = {'web_document_version': 1, 'expected_epoch': 2, 'expected_cursor': 0}
+    request = _request(web, create)
+    assert client.post(sync + '/push', headers=headers, json=request).status_code == 409
+    assert client.post(sync + '/push', headers=headers, params=pin, json=request).json()['detail']['code'] == 'document_readers_not_ready'
+    assert client.put(sync + '/document-reader-capabilities', headers=headers,
+                      json=document_capabilities(desktop)).status_code == 204
+    first = client.post(sync + '/push', headers=headers, params=pin, json=request)
+    assert first.status_code == 200, first.text
+    assert first.json()['results'][0]['server_sequence'] == 1
+    assert client.post(sync + '/push', headers=headers, params=pin, json=request).json()['results'][0]['duplicate']
+    update = {**create, 'event_id': str(uuid4()), 'revision': 2}
+    edit = {**pin, 'document_parent': create['event_id']}
+    stale = client.post(sync + '/push', headers=headers, params=edit, json=_request(web, update))
+    assert stale.status_code == 409 and 'web_document_snapshot_changed' in stale.text
+    edit['expected_cursor'] = 1
+    accepted = client.post(sync + '/push', headers=headers, params=edit, json=_request(web, update))
+    assert accepted.status_code == 200, accepted.text
+    pulled = client.get(sync + '/pull', headers=headers, params={
+        'device_id': desktop, 'since': 0, 'protocol_version': 3, 'encrypted_sync_version': 3,
+    })
+    assert pulled.status_code == 200, pulled.text
+    assert [item['event']['event_id'] for item in pulled.json()['items']] == [create['event_id'], update['event_id']]
+    with Session(engine) as session:
+        assert [str(device.device_id) for device in session.query(SyncDevice).filter_by(user_id=user)] == [desktop]

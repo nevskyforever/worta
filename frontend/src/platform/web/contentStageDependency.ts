@@ -16,7 +16,7 @@ export async function requireContentStageDependency(scope:BrowserSyncScope,row:P
  const isMap='header' in content&&('map' in content||'entries' in content||'action' in content)
  const document='header' in content
  if(!document&&content.event.version!==1)throw new BrowserPersistenceError('unsupported_local_source')
- const note=isMap?content.header:document?content.document:content.event.version===1?content.event.note:null,refs=document?content.header.stage_event_ids:content.dependencies.stage_event_ids
+ const note=isMap?content.header:document?content.document??content.header:content.event.version===1?content.event.note:null,refs=document?content.header.stage_event_ids:content.dependencies.stage_event_ids
  if(!note)throw new BrowserPersistenceError('stage_dependency_missing')
  if(note.stage_id===null){if(refs.length)throw new BrowserPersistenceError('stage_dependency_missing');return}
  const raw=v.owners.find(r=>(r as {owner_kind:string;project_id:string;stage_id:string}).owner_kind==='stage'&&(r as {project_id:string}).project_id===note.project_id&&(r as {stage_id:string}).stage_id===note.stage_id)

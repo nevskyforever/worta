@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Leer documentos de la nube en Web</h2>\n<p>Inicia sesión en tu cuenta y desbloquea la clave. Abre Textos o Notas, elige un proyecto y selecciona Proyecto o una etapa.</p>\n<p>Los textos se abren con formato. Pulsa Actualizar para recibir los cambios de Desktop. Para leer hace falta una conexión con el servidor. Si bloqueas la clave, se oculta el contenido.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Leer documentos de la nube en Web</h2>\n<p>Inicia sesión en tu cuenta y desbloquea la clave. Abre Textos o Notas, elige un proyecto y selecciona Proyecto o una etapa.</p>\n<p>Los textos se abren con formato. Pulsa Actualizar para recibir los cambios de Desktop. Para leer hace falta una conexión con el servidor. Si bloqueas la clave, se oculta el contenido.</p>\n<p>Si tus dispositivos admiten la escritura, elige Crear o Editar y pulsa Guardar texto. El estado Guardado aparece tras verificar la respuesta del servidor. Si falla el guardado, el texto permanece en el editor abierto. Si hay versiones distintas, ábrelas y elige el resultado.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Leer documentos de la nube en Web"
   },

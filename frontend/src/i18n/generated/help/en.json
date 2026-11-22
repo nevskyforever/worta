@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account and unlock the key. Open Texts or Notes, choose a project, then select Project or a stage.</p>\n<p>Texts open with formatting. Click Refresh to load changes from Desktop. Reading requires a server connection. Locking the key hides the content.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account and unlock the key. Open Texts or Notes, choose a project, then select Project or a stage.</p>\n<p>Texts open with formatting. Click Refresh to load changes from Desktop. Reading requires a server connection. Locking the key hides the content.</p>\n<p>When your devices support writing, choose Create or Edit, then Save text. Saved appears after the server response has been verified. If saving fails, the text stays in the open editor. If versions differ, open them and choose the result.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Reading cloud documents on Web"
   },

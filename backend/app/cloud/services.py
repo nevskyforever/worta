@@ -778,7 +778,8 @@ class SyncService:
     def push_encrypted(self, session: Session, user_id: object, device_id: object,
                        items: list[EncryptedSyncPushItem] | list[V2EncryptedSyncPushItem], *,
                        transport_version: int = 1, metadata_cover: bool = False,
-                       web_progress: tuple[int, int, object] | None = None) -> tuple[list[SyncPushResult], int]:
+                       web_progress: tuple[int, int, object] | None = None,
+                       web_document: tuple[int, int, object | None] | None = None) -> tuple[list[SyncPushResult], int]:
         try:
             from .schemas import AccountSyncEventEnvelope
             for item in items:
@@ -788,12 +789,15 @@ class SyncService:
             if web_progress is not None and (transport_version != 3 or metadata_cover or len(items) != 1
                                              or items[0].event.entity_type != 'progress'):
                 raise SyncProtocolError('web_progress_scope_invalid', 'Web Progress accepts one Progress event.', 422)
+            if web_document is not None and (transport_version != 3 or metadata_cover or web_progress is not None
+                                             or len(items) != 1 or items[0].event.entity_type != 'document'):
+                raise SyncProtocolError('web_document_scope_invalid', 'Web texts accept one Document event.', 422)
             session.commit()
             with session.begin():
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
                 # Online Web Progress does not enroll a reader, grant pull/ACK,
                 # or change the device set that the ordinary gates protect.
-                if web_progress is None:
+                if web_progress is None and web_document is None:
                     device = self._registered_device(session, user_id, device_id)
                     device.last_seen_at = utc_now()
                 if metadata_cover and (transport_version != 3 or any(item.event.entity_type != 'project_metadata' for item in items)
@@ -845,6 +849,23 @@ class SyncService:
                         ).order_by(SyncEvent.server_sequence.desc()).limit(1))
                         if latest is None or latest.event_id != parent_id or latest.revision + 1 != event.revision:
                             raise SyncProtocolError('web_progress_parent_changed', 'Web Progress parent changed.', 409)
+                    if web_document is not None:
+                        expected, epoch, parent_id = web_document
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_document_snapshot_changed', 'Web text snapshot changed.', 409)
+                        if project is None or project.bootstrap_state != 'active':
+                            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+                        history = select(SyncEvent).where(
+                            SyncEvent.user_id == user_id,
+                            SyncEvent.project_id == event.project_id,
+                            SyncEvent.entity_type == 'document',
+                            SyncEvent.entity_id == event.entity_id,
+                        )
+                        latest = session.scalar(history.order_by(SyncEvent.server_sequence.desc()).limit(1))
+                        max_revision = session.scalar(history.with_only_columns(func.max(SyncEvent.revision))) or 0
+                        if (event.revision != max_revision + 1
+                                or (latest.event_id if latest is not None else None) != parent_id):
+                            raise SyncProtocolError('web_document_parent_changed', 'Web text parent changed.', 409)
                     if (project is not None and project.bootstrap_state == 'initializing'
                             and project.bootstrap_device_id != device_id):
                         raise SyncProtocolError(

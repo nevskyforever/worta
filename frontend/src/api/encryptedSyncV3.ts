@@ -174,6 +174,14 @@ export const encryptedSyncV3Api = {
     return result
   }),
   pushGame:(token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse>=>apiRequest<unknown>('/api/v3/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV3GamePush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
+  async webDocumentWriteReady(token: string, signal: AbortSignal): Promise<boolean> {
+    const value = await apiRequest<unknown>('/api/v3/sync/encrypted/document-reader-capabilities?web_document_version=1', {
+      headers: headers(token), signal,
+    })
+    if (!exact(value, ['ready', 'missing_devices', 'web_document_version'])) return false
+    const gate = value as {ready: unknown; missing_devices: unknown; web_document_version: unknown}
+    return gate.ready === true && gate.missing_devices === 0 && gate.web_document_version === 1
+  },
   async webProgressWriteReady(token: string, signal: AbortSignal): Promise<boolean> {
     const value = await apiRequest<unknown>('/api/v3/sync/encrypted/progress-reader-capabilities?web_progress_version=1', {
       headers: headers(token), signal,
@@ -196,7 +204,7 @@ export const encryptedSyncV3Api = {
     if(!UUID.test(deviceId))fail()
     return apiRequest('/api/v3/sync/encrypted/document-reader-capabilities',{method:'PUT',headers:headers(token),body:{device_id:deviceId,...support}})
   },
-  documentReaderGate:(token:string):Promise<{ready:boolean;missing_devices:number}>=>apiRequest<unknown>('/api/v3/sync/encrypted/document-reader-capabilities',{headers:headers(token)}).then(value=>{
+  documentReaderGate:(token:string,signal?:AbortSignal):Promise<{ready:boolean;missing_devices:number}>=>apiRequest<unknown>('/api/v3/sync/encrypted/document-reader-capabilities',{headers:headers(token),signal}).then(value=>{
     if(!exact(value,['ready','missing_devices']))fail()
     const result=value as {ready:boolean;missing_devices:number}
     if(typeof result.ready!=='boolean'||!safe(result.missing_devices,0))fail()
@@ -226,6 +234,21 @@ export const encryptedSyncV3Api = {
     if (pin && (!safe(pin.cursor, 0) || !safe(pin.epoch, 0) || !UUID.test(pin.parentId))) fail()
     const query = pin ? '?' + new URLSearchParams({ web_progress_version: '1', expected_cursor: String(pin.cursor),
       expected_epoch: String(pin.epoch), progress_parent: pin.parentId }) : ''
+    return apiRequest<unknown>('/api/v3/sync/encrypted/push' + query, { method: 'POST', headers: headers(token), rawBody, signal })
+      .then(value => parsePush(value, [eventId]))
+  },
+  pushSealedDocument(token: string, eventId: string, rawBody: string, signal: AbortSignal,
+    pin: { cursor: number; epoch: number; parentId: string | null }): Promise<V3PushResponse> {
+    const body = JSON.parse(rawBody)
+    const item = body.items?.[0]
+    if (!item || item.event?.event_id !== eventId || !item.object) fail()
+    const encoded = encodeV3DocumentPush(body.device_id, [{
+      event: item.event, object: { ...item.object, nonce: decodeBase64Url(item.object.nonce), ciphertext: decodeBase64Url(item.object.ciphertext) },
+    }])
+    if (encoded !== rawBody) fail()
+    if (!safe(pin.cursor, 0) || !safe(pin.epoch, 0) || (pin.parentId !== null && !UUID.test(pin.parentId))) fail()
+    const query = '?' + new URLSearchParams({ web_document_version: '1', expected_cursor: String(pin.cursor),
+      expected_epoch: String(pin.epoch), ...(pin.parentId ? { document_parent: pin.parentId } : {}) })
     return apiRequest<unknown>('/api/v3/sync/encrypted/push' + query, { method: 'POST', headers: headers(token), rawBody, signal })
       .then(value => parsePush(value, [eventId]))
   },

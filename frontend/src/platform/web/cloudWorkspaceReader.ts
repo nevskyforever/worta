@@ -37,17 +37,18 @@ const formatting: Record<string, RegExp> = {
   textAlign: /^(?:left|right|center|justify)$/,
 }
 
-export function cloudDocumentForReading(document: PortableDocument): TiptapDocument {
+export function cloudDocumentForReading(document: PortableDocument, editable = false): TiptapDocument {
   // The recovery owner has already checked the portable document schema.
   // Construct a display copy without link actions or arbitrary DOM attributes.
   function nodeForReading(node: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = { type: node.type }
     if (typeof node.text === 'string') result.text = node.text
     if (Array.isArray(node.content)) result.content = node.content.map(nodeForReading)
-    if (Array.isArray(node.marks)) result.marks = node.marks.filter(mark => mark.type !== 'link').map(nodeForReading)
+    if (Array.isArray(node.marks)) result.marks = node.marks.filter(mark => editable || mark.type !== 'link').map(nodeForReading)
     if (node.attrs && typeof node.attrs === 'object') {
       result.attrs = Object.fromEntries(Object.entries(node.attrs).filter(([key, value]) =>
         (key === 'level' || key === 'start') && Number.isSafeInteger(value)
+        || editable && key === 'href' && typeof value === 'string' && /^(https?:\/\/|mailto:|#)/.test(value)
         || typeof value === 'string' && Object.hasOwn(formatting, key) && formatting[key]!.test(value)))
     }
     return result

@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich beim Cloudkonto an und entsperre den Schlüssel. Öffne Texte oder Notizen, wähle ein Projekt und dann Projekt oder eine Etappe.</p>\n<p>Texte werden formatiert angezeigt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen. Zum Lesen ist eine Serververbindung nötig. Das Sperren des Schlüssels blendet die Inhalte aus.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich beim Cloudkonto an und entsperre den Schlüssel. Öffne Texte oder Notizen, wähle ein Projekt und dann Projekt oder eine Etappe.</p>\n<p>Texte werden formatiert angezeigt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen. Zum Lesen ist eine Serververbindung nötig. Das Sperren des Schlüssels blendet die Inhalte aus.</p>\n<p>Wenn deine Geräte Schreibzugriff unterstützen, wähle Erstellen oder Bearbeiten und dann Text speichern. Gespeichert erscheint nach Prüfung der Serverantwort. Bei einem Fehler bleibt der Text im geöffneten Editor. Wenn sich Versionen unterscheiden, öffne sie und wähle das Ergebnis.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Clouddokumente im Web lesen"
   },

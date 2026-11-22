@@ -154,7 +154,7 @@ export class BrowserV10Recovery {
       continue
      }
      if(e.entity_type==='document'){
-      if(!this.documentOwner||own||hasResolution(v)){block('unsupported_route');break}
+      if(!this.documentOwner||hasResolution(v)){block('unsupported_route');break}
       const outcome=await step(this.documentOwner.apply(row.server_sequence))
       if(outcome!=='applied')fail('stale_source')
       result.applied.push({sequence:row.server_sequence,route:'document',status:'applied'})

@@ -12,6 +12,7 @@ const props = defineProps<{
   translate?: (source: string) => string
   zoom?: number
   typewriterMode?: boolean
+  inertLinks?: boolean
   readOnly?: boolean
 }>()
 const emit = defineEmits<{
@@ -52,7 +53,7 @@ const contentLayerStyle = computed(() => ({
 const editor = useEditor({
   content: props.initialContent,
   editable: !props.readOnly,
-  extensions: createDocumentEditorExtensions(props.readOnly),
+  extensions: createDocumentEditorExtensions(props.readOnly, props.inertLinks),
   editorProps: {
     attributes: {
       class: 'nf-editor-content',

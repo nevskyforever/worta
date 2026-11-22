@@ -1,8 +1,10 @@
-import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
 import type { TiptapDocument } from '@/types/documents'
 import NFDocumentEditor from './NFDocumentEditor.vue'
+
+enableAutoUnmount(afterEach)
 
 const formattedDocument: TiptapDocument = {
   type: 'doc',
