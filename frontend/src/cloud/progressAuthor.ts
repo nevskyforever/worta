@@ -22,6 +22,7 @@ function decimal(value: bigint): string {
 }
 
 function event(context: ProgressAuthorContext, operation: 'append' | 'tombstone'): ProgressEvent {
+  if (context.chain.migration) throw new Error('progress_migration_incomplete')
   const previous = context.parent.header
   return {
     version: 1, migration: null, base_total: null, entries: [],

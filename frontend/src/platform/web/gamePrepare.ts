@@ -57,7 +57,7 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
    const source=snapshot.rows.find(r=>r.event_id===a.progress_event_id&&r.state==='progress_proven'&&r.server_sequence<input.server_sequence)
    if(!source)reject()
    const plan=inspectPreparedProgressEvent(await prepareProgressEvent(scope,source,inventory,amk,current),scope,inventory)
-   if(plan.event.header.project_id!==h.project_id||plan.event.header.stage_id!==h.stage_id||plan.event.header.entity_id!==a.progress_entity_id)reject()
+   if(plan.projection.migration||plan.event.header.project_id!==h.project_id||plan.event.header.stage_id!==h.stage_id||plan.event.header.entity_id!==a.progress_entity_id)reject()
    if(a.kind==='writing'){
     if(plan.event.header.operation!=='append'||canonical(plan.event.entries)!==canonical([a.fact])||!plan.projection.entries.some(f=>canonical(f)===canonical(a.fact))
       ||h.event_id!==await gameActionId(h.account_id,'writing',[h.project_id,h.stage_id,a.progress_event_id,a.fact.entry_id]))reject()

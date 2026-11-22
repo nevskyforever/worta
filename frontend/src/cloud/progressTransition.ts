@@ -1,9 +1,12 @@
 import { progressMicros, validateProgressEvent, type ProgressEvent, type ProgressFact } from './progressCodec'
 import { UNIT_FACTORS } from '@/core/projects/units'
 
-/** Native progress_sync::Chain/transition, restricted to complete linear capture
- * and append or linear deletion. Conflict/rebase/correction and incomplete migration fail closed. */
-export interface ProgressChain { base_total: string; entries: ProgressFact[] }
+/** The optional migration evidence is present only until the final authenticated chunk. */
+export interface ProgressChain {
+  base_total: string
+  entries: ProgressFact[]
+  migration?: NonNullable<ProgressEvent['migration']>
+}
 export function progressDisplay(symbols: bigint, unit: ProgressFact['unit'], recorded?: ProgressFact['unit']): number {
   const n = Number(symbols) / 1e6 / UNIT_FACTORS[unit]
   if (recorded === unit || unit === 'symbols') return n
@@ -16,19 +19,26 @@ export function progressDisplay(symbols: bigint, unit: ProgressFact['unit'], rec
 export function transitionProgress(event: ProgressEvent, parent?: ProgressChain): ProgressChain {
   validateProgressEvent(event)
   const op = event.header.operation
-  if (op !== 'genesis' && op !== 'append' && op !== 'tombstone') throw new Error('progress_operation_unsupported')
-  if (op === 'genesis' ? !!parent : !parent || event.selected_event_id !== event.header.parents[0]) throw new Error('progress_parent_unknown')
-  const chain: ProgressChain = parent ? structuredClone(parent) : { base_total: event.base_total!, entries: [] }
-  if (op === 'tombstone') {
+  if (event.header.parents.length > 1 || op === 'rebase') throw new Error('progress_operation_unsupported')
+  const capture = op === 'genesis' || op === 'adopt_local'
+  if (op === 'genesis' ? !!parent : !parent || (!capture && event.selected_event_id !== event.header.parents[0]))
+    throw new Error('progress_parent_unknown')
+  const chain: ProgressChain = capture
+    ? { base_total: event.base_total!, entries: [], migration: structuredClone(event.migration!) }
+    : structuredClone(parent!)
+  if (chain.migration && !capture && op !== 'migrate') throw new Error('progress_migration_incomplete')
+  if (op === 'migrate' && !chain.migration) throw new Error('progress_migration_already_complete')
+  if (op === 'tombstone' || op === 'correct') {
     const position = chain.entries.findIndex(f => f.entry_id === event.target_entry_id)
     if (position < 0) throw new Error('progress_target_unknown')
-    const descendants = chain.entries.slice(position + 1)
+    const descendants = chain.entries.slice(position + (op === 'tombstone' ? 1 : 0))
     if (event.rebased_from.length !== descendants.length || event.rebased_from.some((id, i) => id !== descendants[i]!.entry_id))
       throw new Error('progress_descendant_rebase_required')
     for (const [i, fact] of event.entries.entries()) {
       const original = descendants[i]!
       if (fact.entry_id === original.entry_id || fact.occurred_at !== original.occurred_at || fact.writing_time !== original.writing_time
-        || fact.writing_day !== original.writing_day || fact.unit !== original.unit || fact.delta !== original.delta)
+        || fact.writing_day !== original.writing_day || fact.unit !== original.unit
+        || ((op === 'tombstone' || i > 0) && fact.delta !== original.delta))
         throw new Error('progress_rebase_invalid')
     }
     chain.entries.length = position
@@ -45,9 +55,16 @@ export function transitionProgress(event: ProgressEvent, parent?: ProgressChain)
       if (total > 1000000000000000000n) throw new Error('progress_resource_limit')
     }
     const next = progressMicros(fact.new_total), difference = total + progressMicros(fact.delta) - next
-    if (difference > (op === 'genesis' ? 1n : 0n) || difference < (op === 'genesis' ? -1n : 0n)) throw new Error('progress_base_inconsistent')
+    const tolerance = capture || op === 'migrate' ? 1n : 0n
+    if (difference > tolerance || difference < -tolerance) throw new Error('progress_base_inconsistent')
     chain.entries.push(structuredClone(fact)); ids.add(fact.entry_id); total = next
   }
-  if (op === 'genesis' && (event.migration!.entry_count !== chain.entries.length || progressMicros(event.migration!.final_total) !== total)) throw new Error('progress_migration_incomplete')
+  if (chain.migration) {
+    if (chain.entries.length > chain.migration.entry_count) throw new Error('progress_migration_count_invalid')
+    if (chain.entries.length === chain.migration.entry_count) {
+      if (progressMicros(chain.migration.final_total) !== total) throw new Error('progress_migration_total_invalid')
+      delete chain.migration
+    }
+  }
   return chain
 }

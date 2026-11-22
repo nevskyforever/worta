@@ -174,6 +174,7 @@ export class BrowserCloudAccountSession {
       const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) && lease.isCurrent()
       const stages = await lease.use(amk => readReplayStages(scope, snapshot, projectId, amk, current))
       const progressChains = (await storage.authenticateProgress(this.auth, bindings, keys)).filter(value => value.project_id === projectId)
+      if (progressChains.some(chain => chain.migration)) throw new BrowserCloudReadError('unsupported_history')
       const gameOwners = await storage.authenticateGames(this.auth,bindings,keys)
       const accountGame = gameOwners.find(value=>value.event.header.scope==='account')?.state as AccountGameBase | undefined
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]

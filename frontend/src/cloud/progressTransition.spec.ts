@@ -25,10 +25,29 @@ it('preserves Native same-unit fractions and rounds only conversions',()=>{
 })
 it('does not manufacture a completed migration or accept duplicate facts',()=>{
  const e=structuredClone(golden.examples[0]!.event) as ProgressEvent
- e.migration!.entry_count++
- expect(()=>transitionProgress(e)).toThrow('progress_migration_incomplete')
- e.migration!.entry_count=1;e.entries[0]!.delta='19.000000'
+ e.migration!.final_total='121.000000'
+ expect(()=>transitionProgress(e)).toThrow('progress_migration_total_invalid')
+ e.migration!.final_total='120.000000';e.entries[0]!.delta='19.000000'
  expect(()=>transitionProgress(e)).toThrow('progress_base_inconsistent')
+})
+
+it('completes a Desktop capture only after its authenticated continuation', () => {
+  const genesis = structuredClone(golden.examples[0]!.event) as ProgressEvent
+  genesis.migration = { entry_count: 2, final_total: '170.000000' }
+  const partial = transitionProgress(genesis)
+  expect(partial.migration).toEqual(genesis.migration)
+  const next: ProgressEvent = {
+    ...genesis, base_total: null, migration: null, selected_event_id: genesis.header.event_id,
+    header: { ...genesis.header, operation: 'migrate', revision: 2, generation: 2,
+      parents: [genesis.header.event_id], event_id: crypto.randomUUID() },
+    entries: [{ ...genesis.entries[0]!, entry_id: 'second', new_total: '170.000000', delta: '50.000000' }],
+  }
+  expect(() => transitionProgress({ ...next, header: { ...next.header, operation: 'append' } }, partial))
+    .toThrow('progress_migration_incomplete')
+  const complete = transitionProgress(next, partial)
+  expect(complete.entries).toHaveLength(2)
+  expect(complete.migration).toBeUndefined()
+  expect(partial.migration).toEqual(genesis.migration)
 })
 it('applies a linear Desktop deletion and verifies the rebased descendants', () => {
  const genesis=structuredClone(golden.examples[0]!.event) as ProgressEvent
