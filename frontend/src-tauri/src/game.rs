@@ -2124,7 +2124,20 @@ fn notification_json(value: &Value, status: &str, index: usize) -> Value {
         .as_object()
         .and_then(|object| object.get("fields"))
         .and_then(Value::as_object);
-    json!({"id": text_value(fields.and_then(|fields| fields.get("notification_id")).or_else(|| fields.and_then(|fields| fields.get("id"))), &format!("legacy-{status}-{index}")), "text": text_value(fields.and_then(|fields| fields.get("text")), ""), "tag": fields.and_then(|fields| fields.get("tag")).and_then(Value::as_str), "created_at": fields.and_then(|fields| fields.get("date_create")).map(|value| value.to_string().trim_matches('"').to_string()), "status": status})
+    let created_at = fields
+        .and_then(|fields| fields.get("date_create"))
+        .and_then(|value| {
+            value.as_str().or_else(|| {
+                let object = value.as_object()?;
+                matches!(
+                    object.get("__type__").and_then(Value::as_str),
+                    Some("date" | "datetime")
+                )
+                .then(|| object.get("value").and_then(Value::as_str))
+                .flatten()
+            })
+        });
+    json!({"id": text_value(fields.and_then(|fields| fields.get("notification_id")).or_else(|| fields.and_then(|fields| fields.get("id"))), &format!("legacy-{status}-{index}")), "text": text_value(fields.and_then(|fields| fields.get("text")), ""), "tag": fields.and_then(|fields| fields.get("tag")).and_then(Value::as_str), "created_at": created_at, "status": status})
 }
 
 fn notifications_state(root: &Map<String, Value>) -> Value {
@@ -4888,6 +4901,35 @@ pub struct GameCommandResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notification_projection_formats_legacy_datetime_without_exposing_json() {
+        let notification = json!({
+            "__type__": "Notification",
+            "fields": {
+                "notification_id": "notice-1",
+                "text": "Стрик проекта сохранён.",
+                "date_create": {"__type__": "datetime", "value": "2026-09-07T00:50:00"}
+            }
+        });
+
+        let projected = notification_json(&notification, "new", 0);
+
+        assert_eq!(projected["created_at"], "2026-09-07T00:50:00");
+        assert!(!projected.to_string().contains("__type__"));
+    }
+
+    #[test]
+    fn notification_projection_hides_unknown_date_structures() {
+        let notification = json!({"fields": {
+            "text": "Событие",
+            "date_create": {"internal": "value"}
+        }});
+
+        let projected = notification_json(&notification, "new", 0);
+
+        assert!(projected["created_at"].is_null());
+    }
 
     struct FixedRng {
         values: Vec<u32>,

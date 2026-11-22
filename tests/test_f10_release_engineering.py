@@ -148,8 +148,35 @@ def test_release_requires_existing_tag_and_cleans_temporary_actions_artifact():
     assert "--verify-tag" in workflow
     assert "--target \"${{ steps.release_provenance.outputs.tag_sha }}\"" not in workflow
     assert "retention-days: 1" in workflow
-    assert "Remove temporary Actions artifact after publication attempt" in workflow
+    cleanup = workflow.split("\n  cleanup_artifacts:\n", 1)[1]
+    assert "if: ${{ needs.publish_release.result == 'success' }}" in cleanup
     assert "actions: write" in workflow
+
+
+def test_release_requires_hosting_and_telegram_confirmation_without_repeated_asset_downloads():
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load((ROOT / ".github/workflows/build.yml").read_text())
+    steps = workflow["jobs"]["publish_release"]["steps"]
+    positions = {step["name"]: index for index, step in enumerate(steps)}
+    hosting = positions["Verify published release and hosting"]
+    telegram = positions["Confirm Telegram publication"]
+    assert hosting < positions["Update existing Telegram post without resending"] < telegram
+    assert hosting < positions["Notify Telegram channel"] < telegram
+    for step in (steps[hosting], steps[telegram]):
+        assert "if" not in step
+        assert not step.get("continue-on-error", False)
+        subprocess.run(["bash", "-n"], input=step["run"], text=True, check=True)
+
+    assert '.digest == $digest' in steps[hosting]["run"]
+    assert "gh release download" not in steps[hosting]["run"]
+    assert "--head" in steps[hosting]["run"]
+    assert 'download_hosted "https://worta.ru/app/$name" "$verified/$name"' not in (
+        steps[hosting]["run"].split("for name in latest.json", 1)[0]
+    )
+    assert '.status == "sent"' in steps[telegram]["run"]
+    assert ".message_id" in steps[telegram]["run"]
 
 
 def test_desktop_release_notes_and_telegram_use_versioned_user_facing_format():
