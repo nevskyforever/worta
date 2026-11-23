@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Arquivos locais em cada dispositivo</h2><p>Word e Scrivener são vinculados separadamente em cada dispositivo. Caminhos, fontes selecionadas e verificações locais não são sincronizados.</p><p>Exporte uma cópia Word ou reconecte um arquivo existente. A seleção compara o conteúdo sem sobrescrevê-lo. Se houver diferença, importe Word ou grave a versão WORTA explicitamente; uma cópia separada pode ser exportada. Compare novamente após alterações.</p><p>Um arquivo local ausente não exclui o texto ou progresso na nuvem. Escolha outro caminho explicitamente. O progresso Word/Scrivener requer confirmar a comparação. Os vínculos locais não estão disponíveis na Web; o texto WORTA permanece disponível.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Arquivos locais em cada dispositivo"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Projetos na nuvem na Web</h2>\n<p>Em Projetos, você pode criar projetos até o limite da conta. Abra um projeto e selecione Editar projeto para mudar o nome, a meta ou o prazo. As alterações aparecem nos outros dispositivos após a sincronização. O Desktop importa o nome do histórico verificado da nuvem. Somente projetos antigos sem configurações na nuvem pedem um nome.</p>\n<p>Excluir projeto remove o projeto da lista da Web e libera uma vaga após a confirmação do servidor. O histórico criptografado e os dados locais do Desktop são preservados.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Projetos na nuvem na Web"
   }
 ]

@@ -20,6 +20,8 @@ export interface BrowserCloudProjectRead {
   readonly metadata: ProjectMetadata
   readonly cursor: number
   readonly empty?: true
+  readonly metadataHead?: ProjectMetadataEvent['header']
+  readonly cutoverEpoch?: number
   readonly ready: false
   readonly declarationAllowed: false
   readonly writerAuthorized: false
@@ -33,6 +35,7 @@ export async function readBrowserCloudProject(input: {
   auth: NormalUserAuthRuntime; lease: AuthoritativeKeyContextLease; deviceId: string
   projectId: string; signal: AbortSignal; current: () => boolean
   delivery?: 'recovery'
+  metadataOnly?: boolean
 }): Promise<BrowserCloudProjectRead> {
   const { auth, lease, deviceId, projectId, signal, current } = input
   const context = auth.requireContext()
@@ -69,8 +72,9 @@ export async function readBrowserCloudProject(input: {
     // Bound memory and full-account history work before fetching ciphertext.
     if (registry.current_cursor > 200) fail('history_limit')
     const histories = new Map<string, ProjectMetadataEvent[]>()
+    const firstSequences = new Map<string, number>()
     const ids = new Set<string>()
-    let cursor = 0, bytes = 0, selectedSequence = 0
+    let cursor = 0, bytes = 0
     await lease.use(async amk => {
       let more = true
       while (more) {
@@ -84,7 +88,12 @@ export async function readBrowserCloudProject(input: {
             if (item.event.server_sequence > registry.current_cursor) fail('server_changed')
             bytes += item.object.ciphertext.length
             if (bytes > 32 * 1024 * 1024) fail('history_limit')
-            // Fail the account read before selecting any project's projection.
+            if (input.metadataOnly && (isAccountItem(item) || item.event.entity_type !== 'project_metadata'
+              || item.event.project_id !== projectId)) {
+              ids.add(item.event.event_id)
+              cursor = item.event.server_sequence
+              continue
+            }
             if (isAccountItem(item)) fail('unsupported_history_family')
             const e = item.event
             if (e.entity_type !== 'project_metadata') fail('unsupported_history_family')
@@ -102,7 +111,7 @@ export async function readBrowserCloudProject(input: {
             // Encrypted cover blob material/authentication remains a separate concern.
             const history = histories.get(e.project_id) ?? []
             history.push(event); histories.set(e.project_id, history)
-            if (e.project_id === projectId) selectedSequence = e.server_sequence
+            if (!firstSequences.has(e.project_id)) firstSequences.set(e.project_id, e.server_sequence)
             ids.add(e.event_id); cursor = e.server_sequence
           }
           if (page.next_cursor !== cursor || page.has_more && cursor >= registry.current_cursor) fail('server_changed')
@@ -118,7 +127,11 @@ export async function readBrowserCloudProject(input: {
     for (const [id, history] of histories) {
       const bootstrap = registry.projects.find(project => project.project_id === id)!
       try { snapshots.set(id, metadataImportSnapshot(history, bootstrap.bootstrap_id!, id)) }
-      catch { fail('metadata_dependency_or_deleted') }
+      catch (error) {
+        if (input.delivery === 'recovery' && id !== projectId && error instanceof TypeError
+          && error.message === 'metadata_import_deleted') continue
+        fail('metadata_dependency_or_deleted')
+      }
       if (!snapshots.get(id)?.head) fail('metadata_conflict')
     }
     const snapshot = snapshots.get(projectId)
@@ -132,12 +145,14 @@ export async function readBrowserCloudProject(input: {
     // consists of a single Metadata Create and contains no project content.
     const history = histories.get(projectId)!
     const header = history[0]?.header
-    const empty = input.delivery === 'recovery' && history.length === 1 && header?.operation === 'create'
+    const empty = input.delivery === 'recovery' && !input.metadataOnly && header?.operation === 'create'
       && header.device_id === selected.origin_device_id && header.revision === 1 && header.generation === 1
       && header.parent_event_ids.length === 0 && selected.initial_event_count === 1
-      && selected.initial_max_server_sequence === selectedSequence
+      && selected.initial_max_server_sequence === firstSequences.get(projectId)
     return { kind: 'metadata_only', projectId, metadata: structuredClone(snapshot.metadata), cursor,
       ...(empty ? { empty: true as const } : {}),
+      ...(input.metadataOnly ? { metadataHead: structuredClone(history.find(event => event.header.event_id === snapshot.head)!.header),
+        cutoverEpoch: afterMode.cutover_epoch } : {}),
       ready: false, declarationAllowed: false, writerAuthorized: false }
   } catch (error) {
     check()

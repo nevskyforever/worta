@@ -119,12 +119,12 @@ class CloudProjectRepository:
 
     def list_ids(self, session: Session, user_id: object) -> list[str]:
         return session.scalars(select(CloudProject.project_id).where(
-            CloudProject.user_id == user_id,
+            CloudProject.user_id == user_id, CloudProject.retired_at.is_(None),
         ).order_by(CloudProject.created_at, CloudProject.project_id)).all()
 
     def count(self, session: Session, user_id: object) -> int:
         return int(session.scalar(select(func.count()).select_from(CloudProject).where(
-            CloudProject.user_id == user_id,
+            CloudProject.user_id == user_id, CloudProject.retired_at.is_(None),
         )) or 0)
 
     def get(self, session: Session, user_id: object, project_id: str, *, lock: bool = False) -> CloudProject | None:

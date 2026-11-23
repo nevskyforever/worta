@@ -37,7 +37,7 @@ import type { LocalProjectRecord } from './localAuthorityRecords'
 import { BrowserPersistenceError, persistenceError, runBrowserTransaction } from './persistence'
 import { BrowserSyncDurability, snapshotBrowserSyncScope,
   type BrowserOutboxRecord, type BrowserReceivedInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
-import { REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame, replayUuid,
+import { REPLAY_LIMITS, prepareReplayPage, recoveryRegistryExtends, replayAnchor, replaySame, replayUuid,
   type ReplayAnchor, type ReplayManifest } from './replayRecords'
 import type { ReplaySourceSeedReference } from './replayRecords'
 
@@ -872,7 +872,7 @@ class BrowserReplayStorage {
     const expected = structuredClone(input), prior = expected.manifest, anchor = replayAnchor(nextAnchor.registry, nextAnchor.transport)
     if (!prior || prior.contract_version !== 6 || anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
       || prior.receive_cursor > prior.anchor.registry.current_cursor
-      || !replaySame(prior.anchor.transport, anchor.transport) || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)
+      || !recoveryRegistryExtends(prior.anchor, anchor)
       || prior.revision === Number.MAX_SAFE_INTEGER) throw new BrowserPersistenceError('stale_authority')
     const { page, bytes } = prepareReplayPage(raw, prior.receive_cursor, this.scope, anchor)
     if (page.next_cursor > anchor.registry.current_cursor || !page.items.length

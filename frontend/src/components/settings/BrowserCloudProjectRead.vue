@@ -275,6 +275,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
       <h3>{{ result.metadata.name }}</h3>
       <button v-if="workspace && result.empty" :disabled="!!draft" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
       <StatePanel v-if="result.empty" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
+      <button v-if="result.empty && showTexts && mayEditDocument && !draft" class="nf-button nf-button--secondary" type="button" @click="editDocument">{{ t('Создать') }}</button>
       <p v-if="!result.empty">{{ words.partial }}</p>
       <dl v-if="!result.empty">
         <dt>{{ t('Цель') }}</dt><dd>{{ result.metadata.goal ?? t('Без лимита') }}</dd>

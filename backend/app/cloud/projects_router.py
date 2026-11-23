@@ -139,6 +139,8 @@ async def enable_cloud_project(project_id: str, request: Request,
     await _reject_request_body(request)
     try:
         return _response(CloudProjectService().enable(session, current.user.id, project_id))
+    except CloudProjectBootstrapError as error:
+        raise HTTPException(status_code=error.status_code, detail={'code': error.code, 'message': error.message}) from None
     except CloudProjectLimitError:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail={
             'code': 'cloud_project_limit_reached',

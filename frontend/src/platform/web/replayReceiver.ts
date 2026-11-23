@@ -15,7 +15,7 @@ import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { AuthoritativeKeyContextLease } from '@/auth/keyContext'
 import { BrowserPersistenceError } from './persistence'
 import { snapshotBrowserSyncScope, type BrowserSyncScope } from './syncDurability'
-import { BrowserReplayError, REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame } from './replayRecords'
+import { BrowserReplayError, REPLAY_LIMITS, prepareReplayPage, recoveryRegistryExtends, replayAnchor, replaySame } from './replayRecords'
 import { openBrowserReplayStorage, type ReplaySnapshot, type ReplayStorage } from './replayStorage'
 import { openBrowserCanonicalObject } from './canonicalReaders'
 import { decodeBase64Url } from '@/api/base64url'
@@ -82,8 +82,7 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
       const prior = previous.manifest
       if (prior && !replaySame(prior.anchor, anchor)) {
         if (anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
-          || !replaySame(prior.anchor.transport, anchor.transport)
-          || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)) fail('server_changed')
+          || !recoveryRegistryExtends(prior.anchor, anchor)) fail('server_changed')
         let offset = 0
         while (offset < prior.receive_cursor) {
           const limit = Math.min(REPLAY_LIMITS.page, prior.receive_cursor - offset)
@@ -106,6 +105,30 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           anchor.registry.current_cursor, anchor.transport.cutover_epoch, signal))
         const { page } = prepareReplayPage(raw, prior.receive_cursor, scope, anchor)
         if (!page.items.length) fail('history_incomplete')
+        const added = anchor.registry.projects.filter(project =>
+          !prior.anchor.registry.projects.some(value => value.project_id === project.project_id))
+        if (added.length) await lease.use(async amk => {
+          for (const project of added) {
+            const item = page.items.find(value => value.event.server_sequence === project.initial_max_server_sequence)
+            if (!item) return fail('invalid_history')
+            const wire = item
+            const event = wire.event as V3Descriptor & { scope?: string }
+            if (event.entity_type !== 'project_metadata' || 'scope' in event || event.project_id !== project.project_id
+              || event.device_id !== project.origin_device_id || event.operation !== 'upsert'
+              || event.revision !== 1 || event.deleted_at !== null) fail('invalid_history')
+            const object = wire.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
+            const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
+            try {
+              const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId,
+                projectId: project.project_id, entityId: project.project_id, entityType: 'project_metadata', eventId: event.event_id },
+              { ...object, nonce, ciphertext }) as ProjectMetadataEvent
+              const h = decoded.header
+              if (h.bootstrap_id !== project.bootstrap_id || h.device_id !== event.device_id || h.operation !== 'create'
+                || h.revision !== 1 || h.generation !== 1 || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at)
+                || h.parent_event_ids.length || !decoded.metadata) fail('invalid_history')
+            } finally { nonce.fill(0); ciphertext.fill(0) }
+          }
+        })
         if (prior.phase === 'receiving' || prior.applied_cursor !== prior.receive_cursor) {
           // Re-pin an interrupted receive/apply only after comparing ALL retained
           // wire above. Keep the prior proofs/import and replay the unproven rows;
@@ -128,7 +151,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
               const evidence = validateBrowserRetainedHistory(scope, event, previous.author?.out.find(find), previous.author?.receipts.find(find), echo)
               if (!evidence.outbox || !evidence.receipt) fail('invalid_history')
             }
-            if (event.entity_type === 'project_metadata' && event.operation === 'upsert') {
+            if (event.entity_type === 'project_metadata' && ['upsert', 'delete'].includes(event.operation)) {
+              if (added.some(project => project.project_id === event.project_id
+                && project.initial_max_server_sequence === event.server_sequence)) continue
               const rawHead=previous.owners.find(owner=>owner.owner_kind==='project_metadata'&&owner.owner_id===event.project_id)
               if(!rawHead)fail('invalid_history')
               const head=validateBrowserMetadataHead(rawHead,scope),tip=head.history.find(proof=>proof.event_id===head.tip_event_ids[0]) ?? fail('invalid_history')
@@ -137,8 +162,9 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
               try {
                 const decoded=await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:event.project_id,entityId:event.entity_id,entityType:'project_metadata',eventId:event.event_id},{...object,nonce,ciphertext}) as ProjectMetadataEvent
                 const h=decoded.header
-                if(h.device_id!==event.device_id||h.bootstrap_id!==head.bootstrap_id||h.operation!=='update'||h.parent_event_ids.length!==1||h.parent_event_ids[0]!==tip.event_id
-                  ||h.revision!==tip.revision+1||h.generation<=tip.generation||h.revision!==event.revision||h.updated_at!==canonicalizeSyncTimestamp(event.updated_at))fail('invalid_history')
+                if(h.device_id!==event.device_id||h.bootstrap_id!==head.bootstrap_id||h.operation!==(event.operation==='delete'?'delete':'update')||h.parent_event_ids.length!==1||h.parent_event_ids[0]!==tip.event_id
+                  ||h.revision!==tip.revision+1||h.generation<=tip.generation||h.revision!==event.revision||h.updated_at!==canonicalizeSyncTimestamp(event.updated_at)
+                  ||decoded.deleted_at!==(event.deleted_at===null?null:canonicalizeSyncTimestamp(event.deleted_at)))fail('invalid_history')
               }finally{nonce.fill(0);ciphertext.fill(0)}
               continue // Receipt only. The Metadata owner still authenticates/commits its outcome.
             }

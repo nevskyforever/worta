@@ -48,6 +48,10 @@ interface PendingCloudProject {
 
 const pendingKey = (accountId: string) => `worta:pending-cloud-project-create:${accountId}`
 
+export function legacyPendingCloudProjectId(accountId: string): string | null {
+  return readPending(accountId)?.projectId ?? null
+}
+
 function readPending(accountId: string): PendingCloudProject | null {
   try {
     const raw = window.localStorage.getItem(pendingKey(accountId))

@@ -94,7 +94,7 @@ def test_cover_forward_upgrade_preserves_devices(cloud_client):
     device = str(uuid4())
     assert client.put(f'/api/v1/sync/devices/{device}', headers=headers).status_code == 200
     config = Config(str(ROOT / 'alembic.ini'))
-    assert ScriptDirectory.from_config(config).get_heads() == ['game_loss_v2']
+    assert ScriptDirectory.from_config(config).get_heads() == ['cloud_project_retirement']
     command.downgrade(config, 'c18_game_readers')
     with engine.connect() as db:
         before = db.execute(text('SELECT user_id,device_id,last_ack_sequence FROM sync_devices')).all()
@@ -104,4 +104,4 @@ def test_cover_forward_upgrade_preserves_devices(cloud_client):
     with engine.connect() as db:
         assert db.execute(text('SELECT user_id,device_id,last_ack_sequence FROM sync_devices')).all() == before
         assert db.execute(text('SELECT metadata_cover_reader_version FROM sync_devices')).scalar_one() == 0
-        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
+        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'cloud_project_retirement'

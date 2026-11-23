@@ -155,7 +155,7 @@ def test_disposable_postgresql_and_encrypted_blob_backup_restore(tmp_path, monke
                 assert connection.scalar(text('SELECT id FROM users')) == user_id
                 assert connection.scalar(text('SELECT count(*) FROM encrypted_blobs')) == 1
                 assert connection.scalar(text('SELECT count(*) FROM encrypted_objects')) == 1
-                assert connection.scalar(text('SELECT version_num FROM alembic_version')) == 'game_loss_v2'
+                assert connection.scalar(text('SELECT version_num FROM alembic_version')) == 'cloud_project_retirement'
                 restored_encrypted = connection.execute(text(
                     'SELECT user_id,event_id,crypto_version,aad_version,nonce,ciphertext,stored_at '
                     'FROM encrypted_objects WHERE user_id=:user_id'), {'user_id': user_id}).one()
@@ -198,8 +198,13 @@ def test_disposable_postgresql_and_encrypted_blob_backup_restore(tmp_path, monke
         restored_app = create_app(_config(target_url, tmp_path / 'restored-data', restored_blobs))
         with TestClient(restored_app) as client:
             assert client.get('/ready').status_code == 200
-            assert client.get('/api/settings').status_code == 404
-            assert '/api/settings' not in client.get('/openapi.json').json()['paths']
+            # Cloud-only settings are a static compatibility response. They
+            # accept no edits and must not expose the plaintext workspace APIs.
+            settings = client.get('/api/settings').json()
+            assert settings['editable_keys'] == []
+            assert client.patch('/api/settings', json={'language': 'en'}).json() == settings
+            paths = client.get('/openapi.json').json()['paths']
+            assert all(not path.startswith(('/api/projects', '/api/documents', '/api/notes')) for path in paths)
             assert client.get('/api/v1/auth/registration').json()['mode'] == 'closed'
             assert client.post('/api/v1/auth/register', json={
                 'username': 'Blocked', 'email': 'blocked@example.com',

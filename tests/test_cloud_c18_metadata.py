@@ -5,11 +5,14 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.app.cloud.models import EncryptedObject, SyncEvent
 from backend.app.cloud.schemas import V3EncryptedSyncPushRequest
-from test_cloud_auth import cloud_client, create_user, login, migrated_database
+from test_cloud_auth import ROOT, cloud_client, create_user, login, migrated_database
 
 
 def _headers(token: str) -> dict[str, str]:
@@ -184,3 +187,70 @@ def test_initial_web_setup_rejects_account_with_project(cloud_client):
     assert result.status_code == 409
     assert result.json()['detail']['code'] == 'initial_web_sync_requires_empty_account'
     assert client.get('/api/v2/sync/encrypted/capabilities', headers=headers).json()['writer_transport_version'] == 1
+
+
+def test_web_project_edit_and_delete_preserve_history_and_release_the_slot(cloud_client):
+    client, engine = cloud_client
+    user = create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    desktop, browser, boot = (str(uuid4()) for _ in range(3))
+    sync = '/api/v3/sync/encrypted'
+    projects = '/api/v1/cloud/projects'
+    bootstrap = projects + '/project-1/bootstrap'
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE global_limits SET max_cloud_projects=1'))
+    assert client.put(f'/api/v1/sync/devices/{desktop}', headers=headers).status_code == 200
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post(sync + '/reader-ready', headers=headers, json={
+        'device_id': desktop, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post(sync + '/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    assert client.post(bootstrap, headers=headers, json={'bootstrap_id': boot, 'device_id': desktop}).status_code == 200
+    assert client.post(bootstrap + '/complete', headers=headers, json={
+        'bootstrap_id': boot, 'device_id': desktop, 'initial_event_count': 0, 'initial_max_server_sequence': 0,
+    }).status_code == 200
+    config = Config(str(ROOT / 'alembic.ini'))
+    command.downgrade(config, 'game_loss_v2')
+    command.upgrade(config, 'head')
+    command.upgrade(config, 'head')
+    assert client.get(projects, headers=headers).json()['cloud_project_ids'] == ['project-1']
+    initial = _event()
+    assert client.post(sync + '/push', headers=headers, json=_request(desktop, initial)).status_code == 200
+    replacement_boot = str(uuid4())
+    replacement_name = 'replacement'
+    create_pin = {'web_metadata_version': 1, 'expected_epoch': 2, 'expected_cursor': 1, 'metadata_bootstrap': replacement_boot}
+    new_project = _event(project_id=replacement_name, entity_id=replacement_name)
+    request = _request(browser, new_project)
+    denied = client.post(sync + '/push', headers=headers, params=create_pin, json=request)
+    assert denied.status_code == 409 and 'cloud_project_limit_reached' in denied.text
+    changed = _event(revision=2)
+    pin = {'web_metadata_version': 1, 'expected_epoch': 2, 'expected_cursor': 1, 'metadata_parent': initial['event_id']}
+    assert client.post(sync + '/push', headers=headers, json=_request(browser, changed)).status_code == 409
+    assert client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, changed)).status_code == 200
+    tombstone = _event(revision=3, operation='delete', deleted_at=changed['updated_at'])
+    stale = client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, tombstone))
+    assert stale.status_code == 409 and 'web_metadata_snapshot_changed' in stale.text
+    assert client.get(projects, headers=headers).json()['cloud_project_count'] == 1
+    pin.update(expected_cursor=2, metadata_parent=changed['event_id'])
+    accepted = client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, tombstone))
+    assert accepted.status_code == 200, accepted.text
+    assert client.post(sync + '/push', headers=headers, params=pin,
+                       json=_request(browser, tombstone)).json()['results'][0]['duplicate']
+    assert client.get(projects, headers=headers).json()['cloud_project_count'] == 0
+    create_pin['expected_cursor'] = 3
+    assert client.post(sync + '/push', headers=headers, params=create_pin, json=request).status_code == 200
+    assert client.post(sync + '/push', headers=headers, params=create_pin, json=request).json()['results'][0]['duplicate']
+    assert client.get(projects, headers=headers).json()['cloud_project_ids'] == [replacement_name]
+    assert client.post(bootstrap, headers=headers, json={'bootstrap_id': boot, 'device_id': desktop}).status_code == 409
+    assert client.post(sync + '/push', headers=headers, json=_request(desktop, _event(revision=4))).status_code == 409
+    pulled = client.get(sync + '/pull', headers=headers, params={
+        'device_id': desktop, 'since': 0, 'protocol_version': 3, 'encrypted_sync_version': 3,
+    })
+    assert pulled.status_code == 200, pulled.text
+    assert [row['event']['event_id'] for row in pulled.json()['items']] == [
+        initial['event_id'], changed['event_id'], tombstone['event_id'], new_project['event_id'],
+    ]
+    with pytest.raises(RuntimeError, match='retired cloud projects exist'):
+        command.downgrade(config, 'game_loss_v2')
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT count(*) FROM sync_devices WHERE user_id=:user'), {'user': user}).scalar_one() == 1

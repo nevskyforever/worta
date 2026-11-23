@@ -153,6 +153,8 @@ class CloudProjectService:
                 if owner is None:
                     raise RuntimeError('Authenticated user disappeared.')
                 existing = self._projects.get(session, user_id, project_id)
+                if existing is not None and existing.retired_at is not None:
+                    raise CloudProjectBootstrapError('cloud_project_deleted', 'Cloud project has been deleted.')
                 if existing is None:
                     limits = self._limits.effective_for_user(session, user_id)
                     if self._projects.count(session, user_id) >= limits.max_cloud_projects:
@@ -197,6 +199,8 @@ class CloudProjectService:
                     )
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
                 project = self._projects.get(session, user_id, project_id, lock=True)
+                if project is not None and project.retired_at is not None:
+                    raise CloudProjectBootstrapError('cloud_project_deleted', 'Cloud project has been deleted.')
                 if project is None:
                     history_count, _ = self._sync.project_event_stats(session, user_id, project_id)
                     if history_count != 0:
@@ -707,6 +711,8 @@ class SyncService:
                     project = self._projects.get(session, user_id, event.project_id)
                     if project is None:
                         raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not enabled.')
+                    if project.retired_at is not None:
+                        raise SyncProtocolError('cloud_project_deleted', 'Cloud project has been deleted.', 409)
                     if (project.bootstrap_state == 'initializing'
                             and project.bootstrap_device_id != device_id):
                         raise SyncProtocolError(
@@ -779,7 +785,8 @@ class SyncService:
                        items: list[EncryptedSyncPushItem] | list[V2EncryptedSyncPushItem], *,
                        transport_version: int = 1, metadata_cover: bool = False,
                        web_progress: tuple[int, int, object] | None = None,
-                       web_document: tuple[int, int, object | None] | None = None) -> tuple[list[SyncPushResult], int]:
+                       web_document: tuple[int, int, object | None] | None = None,
+                       web_metadata: tuple[int, int, object | None, object | None] | None = None) -> tuple[list[SyncPushResult], int]:
         try:
             from .schemas import AccountSyncEventEnvelope
             for item in items:
@@ -792,12 +799,19 @@ class SyncService:
             if web_document is not None and (transport_version != 3 or metadata_cover or web_progress is not None
                                              or len(items) != 1 or items[0].event.entity_type != 'document'):
                 raise SyncProtocolError('web_document_scope_invalid', 'Web texts accept one Document event.', 422)
+            if web_metadata is not None and (transport_version != 3 or metadata_cover or web_document is not None
+                                             or web_progress is not None or len(items) != 1
+                                             or items[0].event.entity_type != 'project_metadata'
+                                             or items[0].event.operation not in ('upsert', 'delete')):
+                raise SyncProtocolError('web_metadata_scope_invalid', 'Web projects accept one Metadata edit or deletion.', 422)
             session.commit()
             with session.begin():
+                if web_metadata is not None and web_metadata[3] is not None:
+                    session.scalar(select(User.id).where(User.id == user_id).with_for_update())
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
                 # Online Web Progress does not enroll a reader, grant pull/ACK,
                 # or change the device set that the ordinary gates protect.
-                if web_progress is None and web_document is None:
+                if web_progress is None and web_document is None and web_metadata is None:
                     device = self._registered_device(session, user_id, device_id)
                     device.last_seen_at = utc_now()
                 if metadata_cover and (transport_version != 3 or any(item.event.entity_type != 'project_metadata' for item in items)
@@ -833,8 +847,48 @@ class SyncService:
                         results.append(SyncPushResult(event.event_id, existing.server_sequence, True))
                         continue
                     project = self._projects.get(session, user_id, event.project_id) if event.project_id is not None else None
+                    if web_metadata is not None and web_metadata[3] is not None:
+                        expected, epoch, _, bootstrap_id = web_metadata
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_metadata_snapshot_changed', 'Web project snapshot changed.', 409)
+                        if project is not None or event.operation != 'upsert' or event.revision != 1:
+                            raise SyncProtocolError('web_metadata_scope_invalid', 'Invalid project creation.', 409)
+                        try:
+                            limit = LimitsService().effective_for_user(session, user_id).max_cloud_projects
+                        except LimitsUnavailableError:
+                            raise SyncProtocolError('limits_unavailable', 'Limits are temporarily unavailable.', 503) from None
+                        if self._projects.count(session, user_id) >= limit:
+                            raise SyncProtocolError('cloud_project_limit_reached', 'Cloud project limit reached.', 409)
+                        if session.scalar(select(CloudProject).where(
+                            CloudProject.user_id == user_id, CloudProject.bootstrap_id == bootstrap_id,
+                        )) is not None:
+                            raise SyncProtocolError('web_metadata_scope_invalid', 'Bootstrap ID already exists.', 409)
+                        project = self._projects.add(session, user_id, event.project_id)
+                        project.bootstrap_id = bootstrap_id
+                        project.bootstrap_device_id = device_id
+                        project.bootstrap_state = 'active'
+                        project.bootstrap_completed_at = utc_now()
+                        project.initial_event_count = 1
+                        project.initial_max_server_sequence = state.current_sequence + 1
+                        session.flush()
                     if event.project_id is not None and project is None:
                         raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not enabled.')
+                    if project is not None and project.retired_at is not None:
+                        raise SyncProtocolError('cloud_project_deleted', 'Cloud project has been deleted.', 409)
+                    if web_metadata is not None and web_metadata[3] is None:
+                        expected, epoch, parent_id, _ = web_metadata
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_metadata_snapshot_changed', 'Web project snapshot changed.', 409)
+                        if project is None or project.bootstrap_state != 'active':
+                            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+                        latest = session.scalar(select(SyncEvent).where(
+                            SyncEvent.user_id == user_id, SyncEvent.project_id == event.project_id,
+                            SyncEvent.entity_type == 'project_metadata',
+                        ).order_by(SyncEvent.server_sequence.desc()).limit(1))
+                        if latest is None or latest.event_id != parent_id or latest.revision + 1 != event.revision:
+                            raise SyncProtocolError('web_metadata_parent_changed', 'Web project parent changed.', 409)
+                        if event.operation == 'delete':
+                            project.retired_at = utc_now()
                     if web_progress is not None:
                         expected, epoch, parent_id = web_progress
                         if state.current_sequence != expected or state.cutover_epoch != epoch:

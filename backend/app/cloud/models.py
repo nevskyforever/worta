@@ -136,6 +136,7 @@ class CloudProject(Base):
     # Legacy, SQLite and Tauri project IDs are string contracts.  Keep their
     # established 32-hex IDs and any compatible historical values losslessly.
     project_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     bootstrap_id: Mapped[uuid.UUID | None] = mapped_column()
     bootstrap_device_id: Mapped[uuid.UUID | None] = mapped_column()
     bootstrap_state: Mapped[str] = mapped_column(

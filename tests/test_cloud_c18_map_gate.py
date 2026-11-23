@@ -61,7 +61,7 @@ def test_map_reader_upgrade_preserves_populated_note_reader_baseline(cloud_clien
         assert after == before
         assert connection.execute(text('SELECT map_frame_version,map_codec_version,map_reader_version,'
             'map_compression_zero FROM sync_devices')).one() == (0, 0, 0, False)
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'cloud_project_retirement'
     with Session(engine) as session:
         from backend.app.cloud.services import SyncService
         assert not SyncService.map_reader_ready(session.query(SyncDevice).filter_by(user_id=user).one())
@@ -130,5 +130,5 @@ def test_map_gate_three_registered_devices_exact_replay_and_downgrade(cloud_clie
     with pytest.raises(RuntimeError, match='map history exists'):
         command.downgrade(Config(str(ROOT / 'alembic.ini')), 'c18_note_readers')
     with engine.connect() as connection:
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'cloud_project_retirement'
         assert connection.execute(text('SELECT count(*) FROM sync_events')).scalar_one() == 1

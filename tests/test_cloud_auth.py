@@ -326,7 +326,7 @@ def test_c2_schema_and_repeated_head_upgrade(migrated_database, monkeypatch):
     monkeypatch.setenv('NFPROGRESS_DATABASE_URL', _database_url())
     command.upgrade(AlembicConfig(str(ROOT / 'alembic.ini')), 'head')
     with migrated_database.connect() as connection:
-        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'cloud_project_retirement'
     command.downgrade(AlembicConfig(str(ROOT / 'alembic.ini')), 'c2_account_auth_core')
     assert 'email_verification_tokens' not in inspect(migrated_database).get_table_names()
     assert 'password_reset_tokens' not in inspect(migrated_database).get_table_names()

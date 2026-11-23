@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Fichiers locaux sur chaque appareil</h2><p>Word et Scrivener sont connectés séparément sur chaque appareil. Les chemins, sources choisies et vérifications locales ne sont pas synchronisés.</p><p>Exportez une copie Word ou reconnectez un fichier existant. Sa sélection compare le contenu sans l’écraser. En cas de différence, importez explicitement Word ou écrivez la version WORTA ; une copie séparée peut être exportée. Comparez à nouveau après une modification.</p><p>Un fichier local manquant ne supprime ni le texte ni la progression cloud. Choisissez explicitement un autre chemin. La progression Word/Scrivener nécessite de confirmer la comparaison. Les liens locaux sont indisponibles sur Web ; le texte WORTA reste accessible.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Fichiers locaux sur chaque appareil"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Projets cloud sur le Web</h2>\n<p>Dans Projets, vous pouvez créer des projets dans la limite de votre compte. Ouvrez un projet et choisissez Modifier le projet pour changer le nom, l’objectif ou l’échéance. Les modifications apparaissent sur les autres appareils après synchronisation. Desktop importe le nom depuis l’historique cloud vérifié. Seuls les anciens projets dépourvus de paramètres cloud demandent un nom.</p>\n<p>Supprimer le projet le retire de la liste Web et libère une place après confirmation du serveur. L’historique chiffré et les données locales de Desktop sont conservés.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Projets cloud sur le Web"
   }
 ]

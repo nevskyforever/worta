@@ -93,7 +93,7 @@ def test_game_forward_upgrade_preserves_registered_devices(cloud_client):
     device = str(uuid4())
     assert client.put(f'/api/v1/sync/devices/{device}', headers=headers).status_code == 200
     config = Config(str(ROOT / 'alembic.ini'))
-    assert ScriptDirectory.from_config(config).get_heads() == ['game_loss_v2']
+    assert ScriptDirectory.from_config(config).get_heads() == ['cloud_project_retirement']
     command.downgrade(config, 'c18_progress_readers')
     with engine.connect() as db:
         before = db.execute(text('SELECT user_id,device_id,last_ack_sequence,progress_reader_version FROM sync_devices')).all()
@@ -102,7 +102,7 @@ def test_game_forward_upgrade_preserves_registered_devices(cloud_client):
     with engine.connect() as db:
         assert db.execute(text('SELECT user_id,device_id,last_ack_sequence,progress_reader_version FROM sync_devices')).all() == before
         assert db.execute(text('SELECT project_game_frame_version,project_game_codec_version,project_game_reader_version,project_game_compression_zero,account_game_frame_version,account_game_codec_version,account_game_reader_version,account_game_compression_zero FROM sync_devices')).one() == (0, 0, 0, False, 0, 0, 0, False)
-        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'game_loss_v2'
+        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == 'cloud_project_retirement'
     accept_current_legal_documents(client,headers)
     assert client.get(PATH, headers=headers).json() == dict(ready=False, missing_devices=1)
 

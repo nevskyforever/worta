@@ -1,5 +1,6 @@
+import { ApiError } from '@/api/client'
 import type { TiptapDocument } from '@/types/documents'
-import { canonical } from '@/cloud/projectMetadataCodec'
+import { canonical, sealProjectMetadataEvent, type ProjectMetadata, type ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { authenticateDocumentTips, documentPreparationInventory, documentsFromTips } from './documentApply'
 import { verifyDocumentDependencies } from './documentPrepare'
 import type { DocumentEvent } from '@/cloud/documentCodec'
@@ -15,7 +16,7 @@ import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteRes
 import type { ReplaySourceSeedResult } from './replaySourceSeed'
 import { accountCryptoApi, type AccountCryptoTransport, type AccountCryptoProvisioningTransport } from '@/api/accountCrypto'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
-import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
+import { encodeV3MetadataPush, encryptedSyncV3Api, isAccountItem, parseV3Pull } from '@/api/encryptedSyncV3'
 import { prepareProgressAppend, prepareProgressTombstone } from '@/cloud/progressAuthor'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
 import { normalizeProgressTotal } from '@/core/progress/calculations'
@@ -45,7 +46,8 @@ import { readBrowserCloudProject, BrowserCloudReadError, type BrowserCloudProjec
 import { generateAccountMasterKey, generateRecoveryKey } from '@/crypto/keys'
 import { wrapAmkWithPassphrase, wrapAmkWithRecoveryKey } from '@/crypto/wrapping'
 import { encodeBase64Url } from '@/api/base64url'
-import { stageCloudProjectMetadata, type CloudProjectCreateScope } from './cloudProjectCreate'
+import { createCloudProjectMetadata } from './cloudProjectMetadataCreate'
+import { legacyPendingCloudProjectId, stageCloudProjectMetadata } from './cloudProjectCreate'
 import { withReceivedBrowserAccountHistory, receiveBrowserAccountHistory, type BrowserAccountReceiveResult } from './replayReceiver'
 
 type BrowserStorage = Awaited<ReturnType<typeof openBrowserPersistence>>
@@ -85,6 +87,8 @@ export class BrowserCloudAccountSession {
   private disposed = false
   private legalStatus: LegalDocumentStatus | null = null
   private readonly revocations = new EventTarget()
+  private pendingProjectCreate: Awaited<ReturnType<typeof createCloudProjectMetadata>> | null = null
+  private projectCreateInFlight = false
   private readonly onPageHide = () => { void this.logout().catch(() => undefined) }
 
   constructor(options: BrowserAccountSessionOptions = {}) {
@@ -128,7 +132,7 @@ export class BrowserCloudAccountSession {
     if (!this.auth.isCurrent(context)) throw new StaleAuthContextError()
     if (!value || !Array.isArray(value.cloud_project_ids) || !Number.isSafeInteger(value.cloud_project_count)
       || !Number.isSafeInteger(value.max_cloud_projects) || value.cloud_project_count !== value.cloud_project_ids.length
-      || value.cloud_project_count < 0 || value.max_cloud_projects < value.cloud_project_count
+      || value.cloud_project_count < 0 || value.max_cloud_projects < 0
       || value.cloud_project_ids.some(id => typeof id !== 'string' || !id.trim() || new TextEncoder().encode(id).length > 512)
       || new Set(value.cloud_project_ids).size !== value.cloud_project_ids.length) {
       throw new Error('cloud_project_catalog_response_invalid')
@@ -138,14 +142,71 @@ export class BrowserCloudAccountSession {
   }
 
   /** Server read only. The result belongs to this active key/auth session. */
-  async readCloudProject(projectId: string, signal: AbortSignal, delivery?: 'recovery'): Promise<BrowserCloudProjectRead> {
+  async readCloudProject(projectId: string, signal: AbortSignal, delivery?: 'recovery', metadataOnly = false): Promise<BrowserCloudProjectRead> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !this.controller) throw new BrowserCloudReadError('key_locked')
-    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId, delivery,
+    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId, delivery, metadataOnly,
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) })
+  }
+
+  async changeCloudProject(projectId: string, expectedHead: string,
+    patch: Pick<ProjectMetadata, 'name' | 'goal' | 'infinite' | 'deadline'> | null, signal: AbortSignal) {
+    const operation = this.unlockedSync(signal)
+    const snapshot = await this.readCloudProject(projectId, operation.signal, 'recovery', true)
+    const parent = snapshot.metadataHead, epoch = snapshot.cutoverEpoch
+    if (!parent || parent.event_id !== expectedHead || epoch === undefined)
+      throw new BrowserCloudReadError('project_changed')
+    // The scoped online sender has no ordinary device or reader permissions.
+    const deviceId = crypto.randomUUID()
+    const now = canonicalizeSyncTimestamp(new Date().toISOString())
+    const metadata = patch ? { ...snapshot.metadata, ...patch, name: patch.name.trim() } : null
+    const event: ProjectMetadataEvent = {
+      version: metadata && Object.hasOwn(metadata, 'cover_reference') ? 2 : 1, metadata, deleted_at: metadata ? null : now,
+      header: { ...parent, device_id: deviceId, event_id: crypto.randomUUID(), operation: metadata ? 'update' : 'delete',
+        parent_event_ids: [parent.event_id], revision: parent.revision + 1, generation: parent.generation + 1, updated_at: now },
+    }
+    const envelope = await operation.lease.use(amk => sealProjectMetadataEvent(amk, event))
+    try {
+      await this.submitWebMetadata(operation, event, envelope, { cursor: snapshot.cursor, epoch, parent: expectedHead })
+      return metadata
+    } finally { envelope.nonce.fill(0); envelope.ciphertext.fill(0) }
+  }
+
+  private async submitWebMetadata(operation: ReturnType<BrowserCloudAccountSession['unlockedSync']>,
+    event: ProjectMetadataEvent, envelope: Awaited<ReturnType<typeof sealProjectMetadataEvent>>,
+    pin: { cursor: number; epoch: number } & ({ parent: string } | { bootstrap: string })) {
+    const h = event.header
+    const item = {
+      event: { event_id: h.event_id, project_id: h.project_id, entity_id: h.project_id, entity_type: 'project_metadata' as const,
+        operation: event.metadata ? 'upsert' as const : 'delete' as const, revision: h.revision, updated_at: h.updated_at, deleted_at: event.deleted_at },
+      object: envelope,
+    }
+    const receipt = await operation.request(token => encryptedSyncV3Api.pushWebMetadata(token, h.device_id, item, pin, operation.signal))
+    const seq = receipt.results[0]!.server_sequence
+    if ((!receipt.results[0]!.duplicate && seq !== pin.cursor + 1) || seq > receipt.current_cursor)
+      throw new BrowserCloudReadError('project_changed')
+    const registry = await operation.request(token => cloudProjectsApi.listBootstraps(token, operation.signal))
+    const lineage = registry.projects.find(project => project.project_id === h.project_id)
+    if (!lineage || lineage.bootstrap_id !== h.bootstrap_id || lineage.state !== 'active' || registry.current_cursor < seq
+      || ('bootstrap' in pin && (lineage.origin_device_id !== h.device_id || lineage.initial_max_server_sequence !== seq
+          || lineage.initial_event_count !== 1))) throw new BrowserCloudReadError('project_changed')
+    const raw = await operation.request(token => encryptedSyncV3Api.recoveryRaw(token, seq - 1, 1, registry.current_cursor, pin.epoch, operation.signal))
+    const page = parseV3Pull(JSON.parse(raw), seq - 1, 1)
+    try {
+      const echoed = page.items[0]
+      if (!echoed || isAccountItem(echoed) || echoed.event.entity_type !== 'project_metadata') throw new BrowserCloudReadError('project_changed')
+      const { device_id, server_sequence, ...descriptor } = echoed.event
+      if (device_id !== h.device_id || server_sequence !== seq || encodeV3MetadataPush(h.device_id, [item]) !==
+        encodeV3MetadataPush(h.device_id, [{ event: { ...descriptor, updated_at: canonicalizeSyncTimestamp(descriptor.updated_at),
+          deleted_at: descriptor.deleted_at && canonicalizeSyncTimestamp(descriptor.deleted_at) }, object: echoed.object }]))
+        throw new BrowserCloudReadError('project_changed')
+      return seq
+    } finally {
+      for (const value of page.items) { value.object.nonce.fill(0); value.object.ciphertext.fill(0) }
+    }
   }
 
   /** Explicit ciphertext receipt only; no owner apply, project opening or background work. */
@@ -435,25 +496,54 @@ export class BrowserCloudAccountSession {
     operation.check()
   }
 
-  /** Create a new encrypted cloud project through the production sync v3 writer. */
+  /** Atomically allocate a cloud slot and publish its encrypted Metadata genesis. */
   async createCloudProject(name: string, signal?: AbortSignal): Promise<{ projectId: string; serverSequence: number }> {
-    this.assertWebRuntime()
-    const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
-    const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
-    if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.storage || !this.controller) {
-      throw new BrowserCloudReadError('key_locked')
-    }
-    const scope: CloudProjectCreateScope = {
-      accountId: identity.local_account_id,
-      canonicalUserId: context.userId,
-      deviceId: identity.device_id,
-    }
-    const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context)
-    if (!current()) throw new BrowserCloudReadError('key_locked')
-    return stageCloudProjectMetadata(scope, name, {
-      auth: this.auth, bindings, keys,
-      storage: this.storage,
-    }, signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal)
+    const operation = this.unlockedSync(signal)
+    if (this.projectCreateInFlight) throw new BrowserPersistenceError('writer_busy')
+    this.projectCreateInFlight = true
+    try {
+      const legacyId = legacyPendingCloudProjectId(operation.scope.accountId)
+      if (legacyId) {
+        const old = await operation.storage.projects.read(operation.scope, legacyId)
+        operation.check()
+        if (!old || old.remote_state !== 'active') {
+          return await stageCloudProjectMetadata(operation.scope, name, {
+            auth: this.auth, bindings: operation.bindings, keys: this.keys!, storage: operation.storage,
+          }, operation.signal)
+        }
+      }
+      if (this.pendingProjectCreate && this.pendingProjectCreate.event.metadata?.name !== name.trim())
+        throw new BrowserCloudReadError('retry_pending_project_create')
+      const mode = await operation.request(token => encryptedSyncV2Api.capabilities(token, operation.signal))
+      const registry = await operation.request(token => cloudProjectsApi.listBootstraps(token, operation.signal))
+      if (mode.writer_transport_version !== 3) throw new BrowserCloudReadError('transport_v3_required')
+      const canonicalUserId = operation.scope.canonicalUserId
+      const pending = this.pendingProjectCreate ?? await operation.lease.use(amk =>
+        createCloudProjectMetadata({ accountId: canonicalUserId, canonicalUserId, deviceId: crypto.randomUUID() }, name, amk))
+      try { operation.check() } catch (error) {
+        pending.object.nonce.fill(0); pending.object.ciphertext.fill(0)
+        throw error
+      }
+      this.pendingProjectCreate = pending
+      try {
+        const h = pending.event.header
+        const serverSequence = await this.submitWebMetadata(operation, pending.event, pending.object,
+          { cursor: registry.current_cursor, epoch: mode.cutover_epoch, bootstrap: h.bootstrap_id })
+        this.clearPendingProjectCreate()
+        return { projectId: h.project_id, serverSequence }
+      } catch (error) {
+        if (error instanceof ApiError && ['cloud_project_limit_reached', 'web_metadata_snapshot_changed',
+          'web_metadata_scope_invalid', 'sync_transport_mode_incompatible', 'limits_unavailable'].includes(error.code))
+          this.clearPendingProjectCreate()
+        throw error
+      }
+    } finally { this.projectCreateInFlight = false }
+  }
+
+  private clearPendingProjectCreate() {
+    this.pendingProjectCreate?.object.nonce.fill(0)
+    this.pendingProjectCreate?.object.ciphertext.fill(0)
+    this.pendingProjectCreate = null
   }
 
   /** Bounded peer Metadata only. Fresh server reconciliation is mandatory on every call. */
@@ -550,6 +640,7 @@ export class BrowserCloudAccountSession {
   }
 
   private async revoke(clearIdentity: boolean): Promise<void> {
+    this.clearPendingProjectCreate()
     this.generation += 1
     this.controller?.abort()
     this.controller = null

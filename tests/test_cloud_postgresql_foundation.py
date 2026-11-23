@@ -181,7 +181,7 @@ def test_alembic_upgrade_empty_postgresql_database_to_head_twice(monkeypatch):
                 'sync_user_state', 'sync_devices', 'sync_events', 'user_crypto', 'encrypted_objects', 'encrypted_blobs',
             }
             assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == (
-                'game_loss_v2'
+                'cloud_project_retirement'
             )
     finally:
         with migration_engine.begin() as connection:

@@ -286,6 +286,15 @@ export const encryptedSyncV3Api = {
   }),
   pushCoverMetadata: (token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse> =>
     apiRequest<unknown>('/api/v3/sync/encrypted/cover-metadata/push',{method:'POST',headers:headers(token),rawBody:encodeV3MetadataPush(deviceId,items)}).then(value=>parsePush(value,items.map(item=>item.event.event_id))),
+  pushWebMetadata(token: string, deviceId: string, item: V3MetadataPushItem,
+    pin: { cursor: number; epoch: number } & ({ parent: string } | { bootstrap: string }), signal: AbortSignal): Promise<V3PushResponse> {
+    if (!safe(pin.cursor, 0) || !safe(pin.epoch, 0) || !UUID.test('parent' in pin ? pin.parent : pin.bootstrap)) fail()
+    const query = new URLSearchParams({ web_metadata_version: '1', expected_cursor: String(pin.cursor),
+      expected_epoch: String(pin.epoch), ...('parent' in pin ? { metadata_parent: pin.parent } : { metadata_bootstrap: pin.bootstrap }) })
+    return apiRequest<unknown>('/api/v3/sync/encrypted/push?' + query, {
+      method: 'POST', headers: headers(token), rawBody: encodeV3MetadataPush(deviceId, [item]), signal,
+    }).then(value => parsePush(value, [item.event.event_id]))
+  },
   pushMetadata: (token: string, deviceId: string, items: readonly V3MetadataPushItem[], signal?: AbortSignal): Promise<V3PushResponse> =>
     apiRequest<unknown>('/api/v3/sync/encrypted/push', { method: 'POST', headers: headers(token), rawBody: encodeV3MetadataPush(deviceId, items), signal })
       .then(value => parsePush(value, items.map(item => item.event.event_id))),

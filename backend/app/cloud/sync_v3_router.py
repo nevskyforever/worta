@@ -99,6 +99,9 @@ def cutover(request: V3CutoverRequest,
 async def encrypted_push(http_request: Request,
                          web_progress_version: int | None = Query(default=None),
                          web_document_version: int | None = Query(default=None),
+                         web_metadata_version: int | None = Query(default=None),
+                         metadata_parent: UUID | None = Query(default=None),
+                         metadata_bootstrap: UUID | None = Query(default=None),
                          document_parent: UUID | None = Query(default=None),
                          expected_cursor: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
                          expected_epoch: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
@@ -107,7 +110,13 @@ async def encrypted_push(http_request: Request,
                          session: Session = Depends(get_cloud_session)) -> V3EncryptedSyncPushResponse:
     web_progress = None
     web_document = None
-    if web_document_version is not None or document_parent is not None:
+    web_metadata = None
+    if web_metadata_version is not None or metadata_parent is not None or metadata_bootstrap is not None:
+        if (web_metadata_version != 1 or expected_cursor is None or expected_epoch is None or (metadata_parent is None) == (metadata_bootstrap is None)
+                or any(value is not None for value in (web_progress_version, progress_parent, web_document_version, document_parent))):
+            raise _error(SyncProtocolError('web_metadata_parameters_invalid', 'Invalid Web project parameters.', 422))
+        web_metadata = (expected_cursor, expected_epoch, metadata_parent, metadata_bootstrap)
+    elif web_document_version is not None or document_parent is not None:
         if (web_document_version != 1 or expected_cursor is None or expected_epoch is None
                 or web_progress_version is not None or progress_parent is not None):
             raise _error(SyncProtocolError('web_document_parameters_invalid', 'Invalid Web text parameters.', 422))
@@ -124,7 +133,7 @@ async def encrypted_push(http_request: Request,
     try:
         results, cursor = await run_in_threadpool(
             SyncService().push_encrypted, session, current.user.id, request.device_id,
-            request.items, transport_version=3, web_progress=web_progress, web_document=web_document,
+            request.items, transport_version=3, web_progress=web_progress, web_document=web_document, web_metadata=web_metadata,
         )
     except SyncProtocolError as error:
         raise _error(error) from None

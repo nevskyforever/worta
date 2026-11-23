@@ -227,7 +227,8 @@ export class NoteSyncRuntime {
     this.assertUnlocked(context, identity)
     const snapshot = await this.metadata.importSnapshot(identity.local_account_id, identity.device_id, projectId)
     this.assertUnlocked(context, identity)
-    const name = snapshot?.metadata?.name ?? (snapshot ? projectId : displayName)
+    if (snapshot && (!snapshot.head || !snapshot.metadata)) throw new TypeError('metadata_import_conflict')
+    const name = snapshot?.metadata?.name ?? displayName
     if (!name.trim()) throw new TypeError('legacy_import_name_required')
     const result = await this.bootstrap.importRemoteProject(this.bootstrapIdentity(identity), projectId, name, report, snapshot)
     this.assertUnlocked(context, identity)

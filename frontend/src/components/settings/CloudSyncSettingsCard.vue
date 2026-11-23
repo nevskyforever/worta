@@ -36,6 +36,7 @@ const localError = ref<string | null>(null)
 const pendingProjectId = ref<string | null>(null)
 const pendingImportProjectId = ref<string | null>(null)
 const importProjectName = ref('')
+const needsLegacyImportName = ref(false)
 
 const recoveryKeyText = computed(() => recoveryKey.value === null ? '' : encodeBase64Url(recoveryKey.value))
 const hasPendingOnboarding = computed(() => recoveryKey.value !== null)
@@ -55,6 +56,7 @@ function clearProjectConfirmations(): void {
   pendingProjectId.value = null
   pendingImportProjectId.value = null
   importProjectName.value = ''
+  needsLegacyImportName.value = false
 }
 
 async function signIn(): Promise<void> {
@@ -178,6 +180,7 @@ async function confirmConnection(projectId: string): Promise<void> {
 function requestImport(projectId: string): void {
   pendingImportProjectId.value = projectId
   importProjectName.value = ''
+  needsLegacyImportName.value = false
   localError.value = null
 }
 
@@ -187,8 +190,12 @@ async function confirmImport(projectId: string): Promise<void> {
   try {
     await cloud.importProject(projectId, importProjectName.value)
     importProjectName.value = ''
+    needsLegacyImportName.value = false
   } catch (error) {
-    if (error instanceof MetadataImportContinuationError) localError.value = t('Проверенные страницы сохранены. Повторите импорт, чтобы продолжить чтение истории.')
+    if (error instanceof Error && error.message === 'legacy_import_name_required') {
+      pendingImportProjectId.value = projectId
+      needsLegacyImportName.value = true
+    } else if (error instanceof MetadataImportContinuationError) localError.value = t('Проверенные страницы сохранены. Повторите импорт, чтобы продолжить чтение истории.')
     else if (error instanceof Error && error.message === 'metadata_import_resource_limit') localError.value = t('Не удалось обработать всю историю проекта. Проверенная часть сохранена. Экспортируйте журнал для проверки.')
     else localError.value = t('Не удалось завершить согласование. Проверьте состояние и безопасно повторите действие.')
   }
@@ -349,12 +356,11 @@ onBeforeUnmount(() => {
           <div v-else-if="project.status === 'import_available'" class="cloud-sync-card__actions">
             <button v-if="pendingImportProjectId !== project.projectId" class="nf-button" type="button" :disabled="cloud.busy" @click="requestImport(project.projectId)">{{ t('Импортировать на это устройство') }}</button>
             <form v-else class="cloud-sync-card__inline-form" @submit.prevent="confirmImport(project.projectId)">
-              <label>
+              <label v-if="needsLegacyImportName">
                 <span>{{ t('Название для проекта без облачных настроек') }}</span>
-                <input v-model="importProjectName" />
+                <input v-model="importProjectName" required />
               </label>
-              <p>{{ t('Проверенные настройки из облака зададут название и параметры проекта. Введите название только при отсутствии этих настроек.') }}</p>
-              <p>{{ t('Это название используется только на этом устройстве. Будет создан новый минимальный локальный проект; совпадающий ID или локальное имя блокирует импорт, объединение и перезапись запрещены.') }}</p>
+              <p v-if="needsLegacyImportName">{{ t('Это название используется только на этом устройстве. Будет создан новый минимальный локальный проект; совпадающий ID или локальное имя блокирует импорт, объединение и перезапись запрещены.') }}</p>
               <div class="cloud-sync-card__actions">
                 <button class="nf-button" type="submit" :disabled="cloud.busy">{{ t('Подтвердить импорт') }}</button>
                 <button class="nf-button nf-button--secondary" type="button" :disabled="cloud.busy" @click="clearProjectConfirmations">{{ t('Отмена') }}</button>

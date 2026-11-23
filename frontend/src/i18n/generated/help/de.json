@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Lokale Dateien auf jedem Gerät</h2><p>Word und Scrivener werden auf jedem Gerät separat verknüpft. Pfade, ausgewählte Quellen und lokale Prüfungen werden nicht synchronisiert.</p><p>Exportieren Sie eine Word-Kopie oder verknüpfen Sie eine vorhandene Datei erneut. Die Auswahl vergleicht Inhalte ohne Überschreiben. Bei Unterschieden importieren Sie ausdrücklich Word oder schreiben die WORTA-Version; eine separate Kopie kann exportiert werden. Vergleichen Sie nach Änderungen erneut.</p><p>Eine fehlende lokale Datei löscht weder Cloud-Text noch Fortschritt. Wählen Sie ausdrücklich einen anderen Pfad. Word/Scrivener-Fortschrittsänderungen erfordern eine Bestätigung des Vergleichs. Lokale Verknüpfungen sind im Web nicht verfügbar; WORTA-Text bleibt verfügbar.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Lokale Dateien auf jedem Gerät"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Cloudprojekte im Web</h2>\n<p>Unter Projekte kannst du Projekte bis zum Kontolimit erstellen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.</p>\n<p>Projekt löschen entfernt das Projekt aus der Webliste und gibt nach der Serverbestätigung einen Platz frei. Der verschlüsselte Verlauf und vorhandene lokale Desktop-Daten bleiben erhalten.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Cloudprojekte im Web"
   }
 ]

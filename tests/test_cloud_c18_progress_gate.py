@@ -28,7 +28,7 @@ def test_progress_upgrade_registered_gate_and_normalized_defaults(cloud_client):
     with engine.connect() as db:
         assert db.execute(text('SELECT user_id,device_id,last_ack_sequence,note_codec_version,document_codec_version FROM sync_devices')).all()==before
         assert db.execute(text('SELECT progress_frame_version,progress_codec_version,progress_reader_version,progress_compression_zero FROM sync_devices')).one()==(0,0,0,False)
-        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one()=='game_loss_v2'
+        assert db.execute(text('SELECT version_num FROM alembic_version')).scalar_one()=='cloud_project_retirement'
     accept_current_legal_documents(client,headers)
     assert client.get('/api/v3/sync/encrypted/progress-reader-capabilities',headers=headers).json()==dict(ready=False,missing_devices=1)
     support(client,headers,device)

@@ -37,6 +37,15 @@ export function replayAnchor(registry: unknown, transport: unknown): ReplayAncho
   return anchor
 }
 
+export function recoveryRegistryExtends(previous: ReplayAnchor, next: ReplayAnchor): boolean {
+  if (!replaySame(previous.transport, next.transport)) return false
+  const old = previous.registry.projects
+  return old.every(project => next.registry.projects.some(value => replaySame(value, project)))
+    && next.registry.projects.every(project => old.some(value => value.project_id === project.project_id)
+      || project.state === 'active' && project.initial_event_count === 1
+      && project.initial_max_server_sequence! > previous.registry.current_cursor)
+}
+
 export function validateReplayManifest(value: unknown, scope: BrowserSyncScope, version: 1 | 2 | 3 | 4 | 5 | 6 = 6): ReplayManifest {
   try {
     if (!replayExact(value, ['record_version', 'contract_version', 'account_id', 'canonical_user_id', 'device_id', 'generation', 'anchor', 'receive_cursor', 'ciphertext_bytes', 'phase', 'revision', ...(version >= 2 ? ['metadata_cursor'] : []), ...(version >= 3 ? ['applied_cursor'] : []), ...(version >= 4 ? ['source_seeds'] : [])])

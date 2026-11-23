@@ -6597,3 +6597,26 @@ for _language, _article in {'en': '<html><body>\n'
           'Desktop.</p>\n'
           '</body></html>'}.items():
     TRANSLATION_OVERRIDES[_language][_cloud_progress_help] = _article
+
+_web_cloud_projects = next(section for section in HELP_SECTIONS if section['key'] == 'web_cloud_projects')
+for _language, (_heading, _edit, _delete) in {
+    'en': ('Cloud projects on the Web',
+           'In Projects, you can create projects within your account limit. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.',
+           'Delete project removes the project from the Web list and frees a slot after server confirmation. Encrypted history and existing local Desktop data are retained.'),
+    'es': ('Proyectos en la nube en Web',
+           'En Proyectos puedes crear proyectos hasta el límite de tu cuenta. Abre un proyecto y selecciona Editar proyecto para cambiar el nombre, el objetivo o el plazo. Los cambios aparecen en otros dispositivos al sincronizar. Desktop importa el nombre del historial verificado. Solo los proyectos antiguos sin ajustes en la nube piden un nombre.',
+           'Eliminar proyecto lo quita de la lista Web y libera un espacio cuando el servidor lo confirma. Se conservan el historial cifrado y los datos locales de Desktop.'),
+    'de': ('Cloudprojekte im Web',
+           'Unter Projekte kannst du Projekte bis zum Kontolimit erstellen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.',
+           'Projekt löschen entfernt das Projekt aus der Webliste und gibt nach der Serverbestätigung einen Platz frei. Der verschlüsselte Verlauf und vorhandene lokale Desktop-Daten bleiben erhalten.'),
+    'fr': ('Projets cloud sur le Web',
+           'Dans Projets, vous pouvez créer des projets dans la limite de votre compte. Ouvrez un projet et choisissez Modifier le projet pour changer le nom, l’objectif ou l’échéance. Les modifications apparaissent sur les autres appareils après synchronisation. Desktop importe le nom depuis l’historique cloud vérifié. Seuls les anciens projets dépourvus de paramètres cloud demandent un nom.',
+           'Supprimer le projet le retire de la liste Web et libère une place après confirmation du serveur. L’historique chiffré et les données locales de Desktop sont conservés.'),
+    'pt_BR': ('Projetos na nuvem na Web',
+              'Em Projetos, você pode criar projetos até o limite da conta. Abra um projeto e selecione Editar projeto para mudar o nome, a meta ou o prazo. As alterações aparecem nos outros dispositivos após a sincronização. O Desktop importa o nome do histórico verificado da nuvem. Somente projetos antigos sem configurações na nuvem pedem um nome.',
+              'Excluir projeto remove o projeto da lista da Web e libera uma vaga após a confirmação do servidor. O histórico criptografado e os dados locais do Desktop são preservados.'),
+}.items():
+    TRANSLATION_OVERRIDES[_language][_web_cloud_projects['title']] = _heading
+    TRANSLATION_OVERRIDES[_language][_web_cloud_projects['content']] = (
+        f'<html><body>\n<h2>{_heading}</h2>\n<p>{_edit}</p>\n<p>{_delete}</p>\n</body></html>'
+    )
