@@ -11,6 +11,7 @@ import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSess
 import type { TiptapDocument } from '@/types/documents'
 import type { BrowserProgressView } from '@/platform/web/progressView'
 import { cloudDocumentForReading, cloudNoteCard, readCloudWorkspaceProject } from '@/platform/web/cloudWorkspaceReader'
+import { ApiError } from '@/api/client'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
@@ -107,7 +108,8 @@ const projectMap = computed<MindMapResponse | null>(() => {
     combined: false, read_only: true, has_empty_completed_stage_map: false } : null
 })
 const refuseMapWrite = async (): Promise<never> => { throw new Error('read_only') }
-const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value))
+const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value)
+  ?? (props.section === 'texts' ? stageDocuments.value[0] : undefined))
 const documentForReading = computed(() => activeDocument.value && cloudDocumentForReading(activeDocument.value))
 const stageNotes = computed(() => recovery.value?.notes.filter(note => note.stage_id === selectedStage.value) ?? [])
 const selectedStage = ref<string | null>(null)
@@ -129,8 +131,11 @@ function rememberStage(): void {
   catch { /* Reading remains available when optional browser preferences are blocked. */ }
 }
 function selectStage(id: string | null): void {
-  if (id !== selectedStage.value) selectedDocument.value = null
-  selectedStage.value = id; rememberStage()
+  if (id === selectedStage.value) return
+  selectedStage.value = id
+  selectedDocument.value = props.section === 'texts' ? stageDocuments.value[0]?.id ?? null : null
+  documentSaved.value = false
+  rememberStage()
 }
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
@@ -141,11 +146,18 @@ const documentWritable = ref(false)
 const documentSaving = ref(false)
 const documentSaved = ref(false)
 const documentSaveFailed = ref(false)
+const documentRetryRequired = ref(false)
+const documentChanged = ref(false)
+const comparisonLoaded = ref(false)
 const draft = ref<{ stageId: string | null; parentId: string | null; initial: TiptapDocument; content: TiptapDocument; resolution?: { entityId: string; eventId: string; tips: string[] } } | null>(null)
 const documentConflict = computed(() => recovery.value?.documentConflicts?.find(tips =>
   tips.some(value => value.header.stage_id === selectedStage.value)))
 const mayEditDocument = computed(() => documentWritable.value && props.workspace && !documentConflict.value &&
   (activeDocument.value ? !!recovery.value?.documentHeads?.[activeDocument.value.id] : !stageDocuments.value.length))
+const comparisonDocument = computed(() => comparisonLoaded.value ? stageDocuments.value[0] : undefined)
+function clearDocumentStatus() {
+  documentSaveFailed.value = documentRetryRequired.value = documentChanged.value = comparisonLoaded.value = false
+}
 function editDocument() {
   if (!mayEditDocument.value || draft.value) return
   const initial: TiptapDocument = activeDocument.value ? cloudDocumentForReading(activeDocument.value, true) :
@@ -153,27 +165,57 @@ function editDocument() {
   draft.value = { stageId: selectedStage.value,
     parentId: activeDocument.value ? recovery.value!.documentHeads![activeDocument.value.id]! : null,
     initial, content: initial }
-  documentSaved.value = documentSaveFailed.value = false
+  documentSaved.value = false
+  clearDocumentStatus()
 }
 function resolveDocument(event: NonNullable<typeof documentConflict.value>[number]) {
   if (!documentWritable.value || !documentConflict.value || !event.document || event.header.stage_id !== selectedStage.value || draft.value) return
   const initial = cloudDocumentForReading(event.document, true)
   draft.value = { stageId: selectedStage.value, parentId: null, initial, content: initial,
     resolution: { entityId: event.header.entity_id, eventId: event.header.event_id, tips: documentConflict.value.map(value => value.header.event_id) } }
-  documentSaved.value = documentSaveFailed.value = false
+  documentSaved.value = false
+  clearDocumentStatus()
 }
 function protectDocumentDraft(event: BeforeUnloadEvent) {
   if (!draft.value) return
   event.preventDefault()
   event.returnValue = true
 }
+function canLeave(): boolean {
+  return !documentSaving.value && (!draft.value || window.confirm(t('Есть несохранённые изменения.')))
+}
+defineExpose({ canLeave })
 function cancelDocument() {
   draft.value = null
-  documentSaveFailed.value = false
+  clearDocumentStatus()
+}
+async function compareDocument() {
+  const signal = controller?.signal
+  if (!signal || signal.aborted || !draft.value || documentSaving.value) return
+  documentSaving.value = true
+  try {
+    const updated = await props.session.readRecoveryProject(props.projectId, signal)
+    if (signal.aborted) return
+    recovery.value = updated
+    result.value = null
+    comparisonLoaded.value = true
+    documentSaveFailed.value = false
+  } catch {
+    if (!signal.aborted) documentSaveFailed.value = true
+  } finally { documentSaving.value = false }
+}
+function keepDocumentDraft() {
+  if (!draft.value || !comparisonLoaded.value || documentConflict.value) return
+  const latest = comparisonDocument.value
+  const head = latest && recovery.value?.documentHeads?.[latest.id]
+  if (latest && !head) return
+  draft.value.parentId = head ?? null
+  draft.value.resolution = undefined
+  clearDocumentStatus()
 }
 async function saveDocument() {
   const value = draft.value, signal = controller?.signal
-  if (!value || !signal || signal.aborted || documentSaving.value) return
+  if (!value || !signal || signal.aborted || documentSaving.value || documentChanged.value) return
   documentSaving.value = true
   documentSaveFailed.value = false
   try {
@@ -183,15 +225,22 @@ async function saveDocument() {
     result.value = null
     selectedDocument.value = updated.documents.find(document => document.stage_id === value.stageId)?.id ?? null
     draft.value = null
+    clearDocumentStatus()
     documentSaved.value = true
-  } catch {
-    if (!signal.aborted) documentSaveFailed.value = true
+  } catch (cause) {
+    if (!signal.aborted) {
+      documentSaveFailed.value = true
+      documentChanged.value = cause instanceof BrowserCloudReadError && cause.code === 'document_changed'
+        || cause instanceof ApiError && ['web_document_snapshot_changed', 'web_document_parent_changed'].includes(cause.code)
+      documentRetryRequired.value = cause instanceof ApiError && (cause.status === 0 || cause.status >= 500)
+        || (cause instanceof BrowserCloudReadError || cause instanceof BrowserReplayError) && cause.code === 'connection_failed'
+    }
   } finally { documentSaving.value = false }
 }
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
-  draft.value = null; controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false
+  draft.value = null; clearDocumentStatus(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false
   emit('invalidated')
 })
 async function open(): Promise<void> {
@@ -233,7 +282,8 @@ async function openRecovery(): Promise<void> {
       const remembered = hadRecovery ? priorSelection : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
         ? remembered! : value.games?.some(game=>game.event.header.stage_id===null) || value.progress?.some(progress => progress.stage_id === null) || value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
-      selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
+      selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value)
+        ? priorDocument : props.section === 'texts' ? stageDocuments.value[0]?.id ?? null : null
       rememberStage()
       if (props.workspace && value.progress?.length) {
         const ready = await props.session.progressWriteReady(active.signal).catch(() => false)
@@ -306,7 +356,7 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
           <StatePanel v-else-if="!draft && !documentConflict" :title="t('Нет данных')" />
         </template>
         <div v-else class="cloud-reader__stages">
-          <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :disabled="!!draft" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+          <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :disabled="!!draft" :aria-pressed="activeDocument?.id === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
         </div>
       </section>
       <section v-if="showTexts && documentConflict && !draft" class="cloud-reader__panel">
@@ -353,11 +403,20 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
       </template>
     </article>
     <section v-if="showTexts && draft" class="cloud-reader__panel" data-testid="cloud-document-edit">
-      <NFDocumentEditor :initial-content="draft.initial" :translate="t" inert-links :inert="documentSaving"
-        @update="draft && (draft.content = $event)" />
-      <button class="nf-button" type="button" :disabled="documentSaving" data-testid="cloud-document-save" @click="saveDocument">{{ t(draft.resolution ? 'Сохранить выбранный результат' : 'Сохранить текст') }}</button>
-      <button class="nf-button nf-button--secondary" type="button" :disabled="documentSaving" @click="cancelDocument">{{ t('Отмена') }}</button>
+      <NFDocumentEditor :initial-content="draft.initial" :translate="t" inert-links :inert="documentSaving || documentRetryRequired"
+        @update="draft && !documentRetryRequired && (draft.content = $event)" />
+      <button v-if="!documentChanged" class="nf-button" type="button" :disabled="documentSaving" data-testid="cloud-document-save" @click="saveDocument">{{ t(documentRetryRequired ? 'Повторить' : draft.resolution ? 'Сохранить выбранный результат' : 'Сохранить текст') }}</button>
+      <button v-if="documentChanged && !comparisonLoaded" class="nf-button" type="button" :disabled="documentSaving" @click="compareDocument">{{ t('Обновить') }}</button>
+      <button class="nf-button nf-button--secondary" type="button" :disabled="documentSaving || documentRetryRequired" @click="cancelDocument">{{ t('Отмена') }}</button>
       <p v-if="documentSaveFailed" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+      <template v-if="comparisonLoaded">
+        <p>{{ t('Версии различаются') }}</p>
+        <template v-if="!documentConflict">
+          <NFDocumentEditor v-if="comparisonDocument" :initial-content="cloudDocumentForReading(comparisonDocument)" :translate="t" read-only />
+          <p v-else>{{ t('Нет данных') }}</p>
+          <button class="nf-button nf-button--secondary" type="button" data-testid="cloud-document-keep-draft" @click="keepDocumentDraft">{{ t('Сохранить локальную версию как новое облачное изменение') }}</button>
+        </template>
+      </template>
     </section>
     <p v-if="showTexts && documentSaved" role="status">{{ t('Сохранено') }}</p>
   </section>

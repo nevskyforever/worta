@@ -48,7 +48,12 @@ export function cloudDocumentForReading(document: PortableDocument, editable = f
     if (node.attrs && typeof node.attrs === 'object') {
       result.attrs = Object.fromEntries(Object.entries(node.attrs).filter(([key, value]) =>
         (key === 'level' || key === 'start') && Number.isSafeInteger(value)
-        || editable && key === 'href' && typeof value === 'string' && /^(https?:\/\/|mailto:|#)/.test(value)
+        || key === 'language' && node.type === 'codeBlock' && typeof value === 'string' && /^[\w+-]{1,32}$/.test(value)
+        || key === 'type' && node.type === 'orderedList' && typeof value === 'string' && /^[1aAiI]$/.test(value)
+        || editable && node.type === 'link' && typeof value === 'string'
+          && (key === 'href' && /^(https?:\/\/|mailto:|#)/.test(value)
+            || key === 'target' && /^_(?:blank|self|parent|top)$/.test(value)
+            || (key === 'rel' || key === 'class') && /^[\w -]{0,128}$/.test(value))
         || typeof value === 'string' && Object.hasOwn(formatting, key) && formatting[key]!.test(value)))
     }
     return result

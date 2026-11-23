@@ -3,6 +3,7 @@ import type { TiptapDocument } from '@/types/documents'
 import { canonical, sealProjectMetadataEvent, type ProjectMetadata, type ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { authenticateDocumentTips, documentPreparationInventory, documentsFromTips } from './documentApply'
 import { verifyDocumentDependencies } from './documentPrepare'
+import { newCloudDocumentId } from './documentOutbound'
 import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { BrowserProjectGame } from './gameApply'
 import type { AccountGameBase, ProjectGameEvent } from '@/cloud/gameCodec'
@@ -222,7 +223,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; documentHeads?: Record<string, string>; documentConflicts?: DocumentEvent[][]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal, requiredDocumentEventId?: string): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; documentHeads?: Record<string, string>; documentConflicts?: DocumentEvent[][]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -265,6 +266,9 @@ export class BrowserCloudAccountSession {
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
       const documentOwners = await lease.use(amk => authenticateDocumentTips(scope, snapshot, amk, current))
+      if (requiredDocumentEventId && !snapshot.rows.some(row => row.event_id === requiredDocumentEventId &&
+        row.state === 'document_proven' && JSON.parse(row.wire_item).event.project_id === projectId))
+        throw new BrowserCloudReadError('document_changed')
       const documents = documentsFromTips(documentOwners).filter(document => document.project_id === projectId)
       const documentHeads = Object.fromEntries(documentOwners.flatMap(tips => tips.length === 1 && tips[0]!.header.project_id === projectId
         ? [[tips[0]!.header.entity_id, tips[0]!.header.event_id]] : []))
@@ -371,8 +375,8 @@ export class BrowserCloudAccountSession {
         const source = await local.readSnapshot(operation.scope, projectId)
         const project = await local.withDecryptedSnapshot(operation.scope, source.token, async value => value.project)
         const now = canonicalizeSyncTimestamp(new Date().toISOString())
-        const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${projectId}:${stageId ?? 'project'}`))
-        const id = tips[0]?.header.entity_id ?? 'document-' + Array.from(new Uint8Array(digest).slice(0, 20), byte => byte.toString(16).padStart(2, '0')).join('')
+        const allocated = new Set(owners.flatMap(tips => tips.map(value => value.header.entity_id)))
+        const id = tips[0]?.header.entity_id ?? await newCloudDocumentId(projectId, stageId, allocated)
         const revision = Math.max(0, ...tips.map(value => value.header.revision)) + 1
         const document: PortableDocument = existing ? { ...existing, content_json: contentJson } : {
           id, project_id: projectId, stage_id: stageId, title: target?.name ?? project.name,
@@ -390,9 +394,7 @@ export class BrowserCloudAccountSession {
       })
       return storage.publishDocument(this.auth, keys, snapshot, event)
     })
-    const updated = await this.readRecoveryProject(projectId, operation.signal)
-    if (!Object.values(updated.documentHeads ?? {}).includes(eventId)) throw new BrowserCloudReadError('document_changed')
-    return updated
+    return this.readRecoveryProject(projectId, operation.signal, eventId)
   }
 
   async progressWriteReady(signal: AbortSignal): Promise<boolean> {

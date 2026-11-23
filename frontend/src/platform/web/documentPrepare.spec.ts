@@ -102,3 +102,11 @@ it('reopens an encrypted Web revision only with its exact receipt and server ech
   const token = await prepareDocumentEvent(scope, echo, base, amk, () => true)
   expect(inspectPreparedDocumentGenesis(token, scope, base).projection).toEqual(update.document)
 })
+
+it('allocates a new Desktop-compatible ID after a document has moved out of a scope', async () => {
+  const { newCloudDocumentId } = await import('./documentOutbound')
+  const first = await newCloudDocumentId('project-with-stage', null, new Set())
+  const occupied = new Set([first, `${first}-1`])
+  expect(await newCloudDocumentId('project-with-stage', null, occupied)).toBe(`${first}-2`)
+  expect(await newCloudDocumentId('project-with-stage', 'chapter', occupied)).not.toBe(first)
+})

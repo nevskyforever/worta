@@ -24,3 +24,14 @@ export async function sealDocumentForOutbox(scope: BrowserSyncScope, event: Docu
     } finally { encrypted.nonce.fill(0); encrypted.ciphertext.fill(0) }
   } finally { frame.fill(0) }
 }
+
+/** Use the Desktop ID and suffix convention, reserving IDs from prior cloud history. */
+export async function newCloudDocumentId(projectId: string, stageId: string | null, allocated: ReadonlySet<string>) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${projectId}:${stageId ?? 'project'}`))
+  const base = 'document-' + Array.from(new Uint8Array(digest).slice(0, 20), byte => byte.toString(16).padStart(2, '0')).join('')
+  for (let index = 0; index < 4096; index++) {
+    const candidate = index === 0 ? base : `${base}-${index}`
+    if (!allocated.has(candidate)) return candidate
+  }
+  throw new Error('document_identity_collision')
+}

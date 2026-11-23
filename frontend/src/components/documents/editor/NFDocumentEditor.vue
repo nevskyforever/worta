@@ -55,6 +55,12 @@ const editor = useEditor({
   editable: !props.readOnly,
   extensions: createDocumentEditorExtensions(props.readOnly, props.inertLinks),
   editorProps: {
+    handleDOMEvents: props.inertLinks ? {
+      click: (_view, event) => {
+        if (event.target instanceof Element && event.target.closest('a[href]')) event.preventDefault()
+        return false
+      },
+    } : undefined,
     attributes: {
       class: 'nf-editor-content',
       'aria-label': props.translate?.('Текст документа') ?? 'Текст документа',

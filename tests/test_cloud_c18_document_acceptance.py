@@ -34,9 +34,9 @@ def emit(client,tmp,token,path,identity,user,amk,lose=False):
         sent.append(request)
     return sent
 
-def receive(client,tmp,token,path,identity,user,amk):
+def receive(client,tmp,token,path,identity,user,amk,limit=100):
     with sqlite3.connect(path) as db:cursor=db.execute('SELECT pull_cursor FROM cloud_sync_state').fetchone()[0]
-    response=client.get('/api/v3/sync/encrypted/pull',headers=_headers(token),params=dict(device_id=identity['device_id'],since=cursor,limit=100,protocol_version=3,encrypted_sync_version=3));assert response.status_code==200,response.text
+    response=client.get('/api/v3/sync/encrypted/pull',headers=_headers(token),params=dict(device_id=identity['device_id'],since=cursor,limit=limit,protocol_version=3,encrypted_sync_version=3));assert response.status_code==200,response.text
     outcomes=[]
     for item in response.json()['items']:
         assert item['event']['entity_type']=='document'

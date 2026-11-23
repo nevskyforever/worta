@@ -74,6 +74,7 @@ const cloudProjectMetadataLoading = ref<Record<string, boolean>>({})
 const cloudProjectMetadataError = ref<Record<string, string>>({})
 const selectedCloudProject = ref<string | null>(null)
 const projectBack = ref<HTMLButtonElement | null>(null)
+const projectReader = ref<{ canLeave: () => boolean } | null>(null)
 const projectTiles = new Map<string, HTMLButtonElement>()
 
 const projectEdit = ref<{ name: string; goal: number | null; deadline: string | null } | null>(null)
@@ -128,10 +129,15 @@ async function openProject(id: string): Promise<void> {
 
 async function showProjects(): Promise<void> {
   const id = selectedCloudProject.value
-  if (!id) return
+  if (!id || !(projectReader.value?.canLeave() ?? true)) return
   selectedCloudProject.value = null
   await nextTick()
   projectTiles.get(id)?.focus()
+}
+function switchProject(event: Event) {
+  const select = event.target as HTMLSelectElement
+  if (projectReader.value?.canLeave() ?? true) selectedCloudProject.value = select.value
+  else select.value = selectedCloudProject.value ?? ''
 }
 defineExpose({ showProjects })
 const cloudCatalogOpen = ref(false)
@@ -510,7 +516,7 @@ watch(status, next => {
         <div class="web-projects__actions">
           <button ref="projectBack" type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="showProjects">{{ t('Назад') }}</button>
           <select v-if="cloudProjects && cloudProjects.cloud_project_ids.length > 1" data-testid="cloud-project-switch" :value="selectedCloudProject" :aria-label="t('Выберите проект')"
-            @change="selectedCloudProject = ($event.target as HTMLSelectElement).value">
+            @change="switchProject">
             <option v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id" :value="id">
               {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
             </option>
@@ -535,7 +541,7 @@ watch(status, next => {
           </div>
           <p v-if="projectChangeError" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
         </template>
-        <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @invalidated="refresh(); clearCloudCatalog()" />
+        <BrowserCloudProjectRead ref="projectReader" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @invalidated="refresh(); clearCloudCatalog()" />
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
         <h2 v-if="section && section !== 'project'">{{ t(section === 'texts' ? 'Тексты' : 'Заметки') }}</h2>

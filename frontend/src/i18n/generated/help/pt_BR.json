@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem e desbloqueie a chave. Abra Textos ou Notas, escolha um projeto e selecione Projeto ou uma etapa.</p>\n<p>Os textos mantêm a formatação. Clique em Atualizar para receber as alterações do Desktop. A leitura exige conexão com o servidor. Bloquear a chave oculta o conteúdo.</p>\n<p>Se os dispositivos oferecerem suporte à gravação, escolha Criar ou Editar e pressione Salvar texto. O status Salvo aparece após a verificação da resposta do servidor. Se houver falha, o texto fica no editor aberto. Se as versões forem diferentes, abra-as e escolha o resultado.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem e desbloqueie a chave. Abra Textos ou Notas, escolha um projeto e selecione Projeto ou uma etapa.</p>\n<p>Os textos mantêm a formatação. Clique em Atualizar para receber as alterações do Desktop. A leitura exige conexão com o servidor. Bloquear a chave oculta o conteúdo.</p>\n<p>Se os dispositivos oferecerem suporte à gravação, escolha Criar ou Editar e pressione Salvar texto. O status Salvo aparece após a verificação da resposta do servidor. Se houver falha, o texto fica no editor aberto. Se as versões forem diferentes, abra-as e escolha o resultado.</p>\n<p>Se aparecer uma nova versão enquanto você escreve, clique em Atualizar no editor e compare-a com o rascunho. Salve por cima da nova versão somente após comparar. Se a conexão cair, tente salvar novamente.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Ler documentos na nuvem na Web"
   },
