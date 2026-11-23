@@ -301,6 +301,11 @@ async function synchronizeProject(): Promise<void> {
     })
     return
   }
+  const stageId = selectedSyncStageId.value
+  if (isSharedProject.value && stageId) {
+    await runStageSync(stageId)
+    return
+  }
   syncRunning.value = true
   try {
     const result = await integrationsApi.runProjectSyncs(project.value.id)
@@ -600,20 +605,30 @@ async function reorderStages(stageIds: string[]): Promise<void> {
 }
 
 async function synchronizeStage(stage: Project): Promise<void> {
+  if (!syncSummaries.value.some((summary) => summary.stage_id === stage.id && summary.configured)) {
+    await router.push({ name: 'integrations', query: { projectId: project.value.id, stageId: stage.id } })
+    return
+  }
   if (stage.work_method !== 'sync') {
     if (!window.confirm(t('Синхронизация будет получать записи только из внешнего файла. Ручной ввод и текстовый редактор станут недоступны до следующей смены метода. Переключить метод и продолжить?'))) return
     const updated = await store.updateStage(project.value.id, stage.id, { work_method: 'sync' })
     if (!updated) return
   }
+  await runStageSync(stage.id)
+}
+
+async function runStageSync(stageId: string): Promise<void> {
   feedbackArea.value = 'global'
+  actionSuccess.value = null
   syncRunning.value = true
   try {
-    const result = await integrationsApi.runSync(project.value.id, stage.id)
-    applyProgressFeedback(result.progress, stage.id)
+    const result = await integrationsApi.runSync(project.value.id, stageId)
+    applyProgressFeedback(result.progress, stageId)
     applyGameFeedback(result.progress?.game ?? null)
     announceSuccess(t(result.changed ? 'Синхронизация завершена' : 'Документ не изменился. Текущий объём уже актуален.'))
     await store.refreshCurrent(project.value.id)
     refreshStatistics()
+    await Promise.all([loadSyncSummary(), loadStreakSummaries()])
   } catch (error) {
     store.detailActionError = t(apiErrorMessage(error))
   } finally {

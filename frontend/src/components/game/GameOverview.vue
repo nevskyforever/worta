@@ -35,6 +35,21 @@ const clock = ref(Date.now())
 let clockTimer: ReturnType<typeof setInterval> | undefined
 let expiredSignature = ''
 const serverOffset = ref(0)
+const effectsReceivedAt = ref(clock.value)
+
+function remainingSeconds(buff: GameBuffs['positive'][number]): number | null {
+  if (!buff.expires_at) return null
+  if (typeof buff.remaining_seconds === 'number') {
+    return Math.ceil(buff.remaining_seconds - Math.max(0, clock.value - effectsReceivedAt.value) / 1_000)
+  }
+  const endsAt = Date.parse(buff.expires_at)
+  return Number.isNaN(endsAt) ? null : Math.ceil((endsAt - (clock.value + serverOffset.value)) / 1_000)
+}
+
+const activeBuffs = computed(() => ({
+  positive: props.buffs.positive.filter((buff) => (remainingSeconds(buff) ?? 1) > 0),
+  negative: props.buffs.negative.filter((buff) => (remainingSeconds(buff) ?? 1) > 0),
+}))
 
 const selectedFreezeProject = computed(() =>
   props.streakFreezes.projects.find((project) => project.project_id === freezeTarget.value),
@@ -49,8 +64,8 @@ interface BuffSummary {
 const buffSummaries = computed<BuffSummary[]>(() => {
   const totals = new Map<string, { positive: number; negative: number }>()
   for (const [kind, items] of [
-    ['positive', props.buffs.positive],
-    ['negative', props.buffs.negative],
+    ['positive', activeBuffs.value.positive],
+    ['negative', activeBuffs.value.negative],
   ] as const) {
     for (const buff of items) {
       const target = buff.target || 'параметр'
@@ -87,12 +102,8 @@ function targetName(key: string): string {
 }
 
 function remainingLabel(buff: GameBuffs['positive'][number]): string | null {
-  // A missing expiration is the legacy representation of a permanent effect.
-  // Never turn its remaining_seconds fallback (including 0) into a fake timer.
-  if (!buff.expires_at) return null
-  const endsAt = Date.parse(buff.expires_at)
-  if (Number.isNaN(endsAt)) return null
-  const seconds = Math.max(0, Math.ceil((endsAt - (clock.value + serverOffset.value)) / 1_000))
+  const seconds = remainingSeconds(buff)
+  if (seconds === null || seconds <= 0) return null
   const hours = Math.floor(seconds / 3_600)
   const minutes = Math.floor((seconds % 3_600) / 60)
   const rest = seconds % 60
@@ -103,14 +114,15 @@ function remainingLabel(buff: GameBuffs['positive'][number]): string | null {
 
 onMounted(() => { clockTimer = setInterval(() => { clock.value = Date.now() }, 1_000) })
 onBeforeUnmount(() => clearInterval(clockTimer))
-watch(() => props.buffs.server_time, (serverTime) => {
-  const parsed = Date.parse(serverTime)
-  serverOffset.value = Number.isNaN(parsed) ? 0 : parsed - Date.now()
+watch(() => props.buffs, (buffs) => {
+  effectsReceivedAt.value = Date.now()
+  const parsed = Date.parse(buffs.server_time)
+  serverOffset.value = Number.isNaN(parsed) ? 0 : parsed - effectsReceivedAt.value
   expiredSignature = ''
 }, { immediate: true })
 watch(clock, () => {
   const expired = [...props.buffs.positive, ...props.buffs.negative]
-    .filter((buff) => buff.expires_at && Date.parse(buff.expires_at) <= clock.value + serverOffset.value)
+    .filter((buff) => (remainingSeconds(buff) ?? 1) <= 0)
     .map((buff) => `${buff.name}:${buff.started_at}`)
     .sort()
     .join('|')
@@ -250,11 +262,11 @@ watch(clock, () => {
     <div class="buff-columns">
       <section class="summary-panel buff-panel">
         <h2>{{ t('Активные усиления') }}</h2>
-        <p v-if="buffs.positive.length === 0" class="empty-copy">
+        <p v-if="activeBuffs.positive.length === 0" class="empty-copy">
           {{ t('Сейчас активных усилений нет.') }}
         </p>
         <ul v-else class="buff-list">
-          <li v-for="buff in buffs.positive" :key="`${buff.name}:${buff.started_at}`">
+          <li v-for="buff in activeBuffs.positive" :key="`${buff.name}:${buff.started_at}`">
             <strong>{{ t(buff.name) }}<span v-if="buff.stacks > 1"> ×{{ buff.stacks }}</span></strong>
             <span>{{ t(buff.description) }}</span>
             <time v-if="remainingLabel(buff)" class="buff-timer">{{ remainingLabel(buff) }}</time>
@@ -264,11 +276,11 @@ watch(clock, () => {
 
       <section class="summary-panel buff-panel">
         <h2>{{ t('Активные ограничения') }}</h2>
-        <p v-if="buffs.negative.length === 0" class="empty-copy">
+        <p v-if="activeBuffs.negative.length === 0" class="empty-copy">
           {{ t('Сейчас активных ограничений нет.') }}
         </p>
         <ul v-else class="buff-list">
-          <li v-for="buff in buffs.negative" :key="`${buff.name}:${buff.started_at}`">
+          <li v-for="buff in activeBuffs.negative" :key="`${buff.name}:${buff.started_at}`">
             <strong>{{ t(buff.name) }}<span v-if="buff.stacks > 1"> ×{{ buff.stacks }}</span></strong>
             <span>{{ t(buff.description) }}</span>
             <time v-if="remainingLabel(buff)" class="buff-timer">{{ remainingLabel(buff) }}</time>

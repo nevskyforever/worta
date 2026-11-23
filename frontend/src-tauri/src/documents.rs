@@ -660,15 +660,7 @@ pub fn record_document_progress(command: DocumentProgressCommand) -> Result<Valu
     Ok(serde_json::json!({
         "changed": !entry.is_null(),
         "symbols": symbol_count,
-        "progress": (!entry.is_null()).then(|| {
-            let mut progress = progress_result(project, entry);
-            match feedback {
-                Ok(Some(game)) => progress["game"] = serde_json::json!(game),
-                Err(warning) => progress["warning"] = serde_json::json!(warning),
-                Ok(None) => {}
-            }
-            progress
-        }),
+        "progress": (!entry.is_null()).then(|| progress_result_with_feedback(project, entry, feedback)),
         "document": document,
     }))
 }
@@ -1117,7 +1109,7 @@ pub fn import_word(command: WordImportCommand) -> Result<WordImportResult, Strin
         let total = normalize_total(symbols as f64, unit)?;
         let previous = payload.get("total").and_then(Value::as_f64).unwrap_or(0.0);
         if (total - previous).abs() >= 0.009 {
-            let (project, entry) = record_sync_progress(
+            let (project, entry, feedback) = record_sync_progress(
                 &mut connection,
                 project_id,
                 command.stage_id.as_deref(),
@@ -1128,7 +1120,7 @@ pub fn import_word(command: WordImportCommand) -> Result<WordImportResult, Strin
             )?;
             (
                 Some(project.clone()),
-                Some(progress_result(project, entry)),
+                Some(progress_result_with_feedback(project, entry, feedback)),
                 true,
             )
         } else {
@@ -1723,7 +1715,7 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
     let previous = payload.get("total").and_then(Value::as_f64).unwrap_or(0.0);
     let changed = (total - previous).abs() >= 0.009;
     let progress = if changed && previous_hash.as_deref() != Some(hash.as_str()) {
-        let (_, entry) = record_sync_progress(
+        let (project, entry, feedback) = record_sync_progress(
             &mut connection,
             &command.project_id,
             command.stage_id.as_deref(),
@@ -1740,10 +1732,7 @@ pub fn run_sync(command: SyncScopeCommand) -> Result<SyncRunResult, String> {
                 )
                 .map_err(|error| error.to_string())?;
         }
-        Some(progress_result(
-            crate::project_payload(&mut connection, &command.project_id)?,
-            entry,
-        ))
+        Some(progress_result_with_feedback(project, entry, feedback))
     } else {
         let state = if internal_changed {
             "local_changed"
@@ -1791,7 +1780,7 @@ fn record_source_total(
     hash: &str,
     legacy_id: Option<&str>,
 ) -> Result<SyncRunResult, String> {
-    let (project, entry, _) = record_document_or_sync_progress(
+    let (project, entry, feedback) = record_document_or_sync_progress(
         db,
         &scope.project_id,
         scope.stage_id.as_deref(),
@@ -1806,7 +1795,7 @@ fn record_source_total(
         changed: !entry.is_null(),
         symbols,
         sync: sync_summary(db, &scope.project_id, scope.stage_id.as_deref())?,
-        progress: (!entry.is_null()).then(|| progress_result(project, entry)),
+        progress: (!entry.is_null()).then(|| progress_result_with_feedback(project, entry, feedback)),
     })
 }
 
@@ -1831,6 +1820,20 @@ fn progress_result(project: Value, entry: Value) -> Value {
         "game": Value::Null,
         "warning": Value::Null,
     })
+}
+
+fn progress_result_with_feedback(
+    project: Value,
+    entry: Value,
+    feedback: Result<Option<crate::game::GameCommandResponse>, String>,
+) -> Value {
+    let mut progress = progress_result(project, entry);
+    match feedback {
+        Ok(Some(game)) => progress["game"] = serde_json::json!(game),
+        Err(warning) => progress["warning"] = serde_json::json!(warning),
+        Ok(None) => {}
+    }
+    progress
 }
 
 fn run_all_sync_filtered(project_filter: Option<&str>) -> Result<SyncBatchResult, String> {
@@ -3424,6 +3427,8 @@ mod tests {
             db.execute("INSERT INTO projects(id,name,goal,infinite,unit,status,payload_json) VALUES('book','Book',100,0,'symbols','активен',?1)", [project.to_string()]).map_err(|e| e.to_string())?;
             db.execute("INSERT INTO project_order VALUES('book',0)", [])
                 .map_err(|e| e.to_string())?;
+            db.execute("INSERT OR REPLACE INTO settings(key,value_json) VALUES('game_mode','true')", [])
+                .map_err(|e| e.to_string())?;
             db.execute("INSERT INTO project_bindings(id,project_id,binding_type,external_path,source_id,payload_json) VALUES('legacy','book','scrivener',?1,'CHAPTER','{}')", [&path]).map_err(|e| e.to_string())?;
             drop(db);
 
@@ -3438,6 +3443,9 @@ mod tests {
             let batch = run_project_syncs("book".into())?;
             assert_eq!((batch.checked, batch.changed, batch.failed), (1, 1, 0));
             assert_eq!(batch.items[0].symbols, Some(11));
+            let game = &batch.items[0].progress.as_ref().unwrap()["game"];
+            assert_eq!(game["ok"], serde_json::json!(true));
+            assert!(game["state"]["profile"]["experience"].as_f64().unwrap() > 0.0);
             let repeat = run_sync(scope())?;
             assert!(!repeat.changed);
             assert!(repeat.sync.last_synced_at.is_some());
@@ -3940,7 +3948,7 @@ fn record_sync_progress(
     source_hash: &str,
     created_at: &str,
     proposal: Option<&Value>,
-) -> Result<(Value, Value), String> {
+) -> Result<(Value, Value, Result<Option<crate::game::GameCommandResponse>, String>), String> {
     record_document_or_sync_progress(
         connection,
         project_id,
@@ -3952,7 +3960,6 @@ fn record_sync_progress(
         None,
         None,
     )
-    .map(|(project, entry, _)| (project, entry))
 }
 
 fn record_document_or_sync_progress(
@@ -3980,8 +3987,7 @@ fn record_document_or_sync_progress(
         external_reattach::assert_progress_proposal(&tx, project_id, stage_id, proposal)?;
     }
     let document_id = document_id_for_scope(&tx, project_id, stage_id)?;
-    let local_document =
-        document_revision.is_some() && crate::daily_goals::local_project(&tx, project_id)?;
+    let local_progress = proposal.is_none() && crate::daily_goals::local_project(&tx, project_id)?;
     if let Some(revision) = document_revision {
         let current: i64 = tx
             .query_row(
@@ -4013,10 +4019,9 @@ fn record_document_or_sync_progress(
     };
     // Compare a local Scrivener source with the recorded total. The same
     // file can restore that total after the user deletes a progress entry.
-    let standalone_scrivener = proposal.is_none()
+    let standalone_scrivener = local_progress
         && document_revision.is_none()
-        && binding_type.as_deref() == Some("scrivener")
-        && crate::daily_goals::local_project(&tx, project_id)?;
+        && binding_type.as_deref() == Some("scrivener");
     if !standalone_scrivener && proposal.is_none() && last.as_deref() == Some(source_hash) {
         tx.commit().map_err(|e| e.to_string())?;
         return Ok((
@@ -4061,7 +4066,7 @@ fn record_document_or_sync_progress(
         delta / goal_symbols * 100.0
     };
     let mut entry = serde_json::json!({"id":entry_id,"new_total":total,"new_total_symbols":total*factor,"added":total-previous,"added_symbols":delta,"added_progress":added_progress,"created_at":created_at});
-    let day = local_document
+    let day = local_progress
         .then(|| crate::streaks::logical_writing_day_at(&tx, created_at))
         .transpose()?;
     if let Some(day) = &day {
@@ -4076,7 +4081,7 @@ fn record_document_or_sync_progress(
     entries.push(entry.clone());
     next["progress_entries"] = Value::Array(entries);
     next["total"] = total.into();
-    if local_document || standalone_scrivener {
+    if local_progress {
         next["progress"] = serde_json::json!(if goal > 0.0 {
             total / goal * 100.0
         } else {

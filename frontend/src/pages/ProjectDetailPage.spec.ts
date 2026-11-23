@@ -27,6 +27,7 @@ vi.mock('@/api/integrations', () => ({
   integrationsApi: {
     getProjectSyncs: vi.fn(),
     runProjectSyncs: vi.fn(),
+    runSync: vi.fn(),
   },
 }))
 
@@ -139,6 +140,7 @@ describe('ProjectDetailPage progress sharing', () => {
     vi.mocked(downloadProgressImage).mockReset()
     vi.mocked(integrationsApi.getProjectSyncs).mockReset()
     vi.mocked(integrationsApi.runProjectSyncs).mockReset()
+    vi.mocked(integrationsApi.runSync).mockReset()
     vi.mocked(documentsApi.get).mockReset()
     vi.mocked(settingsApi.get).mockReset()
     pushRoute.mockReset()
@@ -496,6 +498,30 @@ describe('ProjectDetailPage progress sharing', () => {
       name: 'integrations',
       query: { projectId: 'project-id', stageId: 'source-id-2' },
     })
+    wrapper.unmount()
+  })
+
+  it('synchronizes the selected shared-project source directly', async () => {
+    routeParams.stageId = 'source-id'
+    const source = projectFixture({ id: 'source-id', parent_project_id: 'project-id', work_method: 'sync' })
+    vi.mocked(projectsApi.get).mockResolvedValue(projectFixture({
+      id: 'project-id', name: 'Общий проект', infinite: true, stages: [source],
+    }))
+    const sync = {
+      project_id: 'project-id', stage_id: 'source-id', configured: true,
+      type: 'word' as const, path: '/existing/source.docx', item_id: null,
+      last_synced_at: null, desktop_only: true as const,
+    }
+    vi.mocked(integrationsApi.getProjectSyncs).mockResolvedValue({ project_id: 'project-id', syncs: [sync] })
+    vi.mocked(integrationsApi.runSync).mockResolvedValue({ changed: true, symbols: 12, sync, progress: null })
+    const wrapper = mountWorkspace()
+    await flushPromises()
+    await wrapper.get('.project-sync-button').trigger('click')
+    await flushPromises()
+
+    expect(integrationsApi.runSync).toHaveBeenCalledWith('project-id', 'source-id')
+    expect(integrationsApi.runProjectSyncs).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Синхронизация завершена')
     wrapper.unmount()
   })
 

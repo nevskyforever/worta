@@ -1565,13 +1565,38 @@ fn effect_fields(value: &Value) -> Option<&Map<String, Value>> {
     tagged_fields_immutable(value).or_else(|| value.as_object())
 }
 
-fn project_saved_buff(value: &Value, now: &str) -> Option<ProjectedBuff> {
+fn effect_end_time(start: &str, duration_minutes: i64) -> Option<String> {
+    let end = iso_epoch_seconds(start)?.checked_add(duration_minutes.checked_mul(60)?)?;
+    // Limit formatting to the supported four-digit calendar years.
+    (end <= 253_402_300_799).then(|| iso_timestamp_from_epoch(end))
+}
+
+fn project_saved_buff(value: &Value, local_now: &str, utc_now: &str) -> Option<ProjectedBuff> {
     let fields = effect_fields(value)?;
-    let expires_at = optional_field_text(fields, "end_time");
+    let started_at = optional_field_text(fields, "start_time");
+    let duration_minutes = fields
+        .get("duration_minutes")
+        .filter(|value| !value.is_null())
+        .map(|_| integer_field(fields, "duration_minutes", 0).max(0));
+    let expires_at = optional_field_text(fields, "end_time").or_else(|| {
+        let start = started_at.as_deref()?;
+        let duration = duration_minutes.filter(|duration| *duration > 0)?;
+        let end = effect_end_time(start, duration)?;
+        Some(if start.ends_with('Z') {
+            end
+        } else {
+            // Legacy saves use a local wall clock without a time zone suffix.
+            end.trim_end_matches('Z').to_owned()
+        })
+    });
     let remaining_seconds = match expires_at.as_deref() {
         Some(expires_at) => {
             let expiration = iso_epoch_millis(expires_at)?;
-            let current = iso_epoch_millis(now)?;
+            let current = iso_epoch_millis(if expires_at.ends_with('Z') {
+                utc_now
+            } else {
+                local_now
+            })?;
             let remaining_millis = (expiration - current).max(0);
             if remaining_millis == 0 {
                 return None;
@@ -1588,11 +1613,8 @@ fn project_saved_buff(value: &Value, now: &str) -> Option<ProjectedBuff> {
         target: text_value(fields.get("target_cf"), ""),
         value: number_field(fields, "value", 0.0),
         stacks: 1,
-        duration_minutes: fields
-            .get("duration_minutes")
-            .filter(|value| !value.is_null())
-            .map(|_| integer_field(fields, "duration_minutes", 0).max(0)),
-        started_at: optional_field_text(fields, "start_time"),
+        duration_minutes,
+        started_at,
         expires_at,
         remaining_seconds,
         source: optional_field_text(fields, "source"),
@@ -1907,7 +1929,7 @@ fn append_inventory_buff(
     }
 }
 
-fn buffs_projection(gamer: &Map<String, Value>, now: &str) -> Value {
+fn buffs_projection(gamer: &Map<String, Value>, local_now: &str, utc_now: &str) -> Value {
     let mut positive = Vec::new();
     let mut negative = Vec::new();
     let mut inventory_positive = Vec::new();
@@ -1917,14 +1939,14 @@ fn buffs_projection(gamer: &Map<String, Value>, now: &str) -> Value {
 
     if let Some(buffs) = gamer.get("buffs").and_then(Value::as_array) {
         for buff in buffs {
-            if let Some(projected) = project_saved_buff(buff, now) {
+            if let Some(projected) = project_saved_buff(buff, local_now, utc_now) {
                 positive.push(projected);
             }
         }
     }
     if let Some(debuffs) = gamer.get("debuffs").and_then(Value::as_array) {
         for debuff in debuffs {
-            if let Some(projected) = project_saved_buff(debuff, now) {
+            if let Some(projected) = project_saved_buff(debuff, local_now, utc_now) {
                 negative.push(projected);
             }
         }
@@ -1975,7 +1997,7 @@ fn buffs_projection(gamer: &Map<String, Value>, now: &str) -> Value {
     negative.extend(inventory_negative);
 
     json!({
-        "server_time": now,
+        "server_time": utc_now,
         "positive": positive.into_iter().map(ProjectedBuff::into_value).collect::<Vec<_>>(),
         "negative": negative.into_iter().map(ProjectedBuff::into_value).collect::<Vec<_>>(),
     })
@@ -2689,7 +2711,7 @@ fn project_state(
         "enabled": enabled, "server_time": now,
         "profile": {"level": level, "experience": number_field(gamer, "exp", 0.0).max(0.0), "next_level_experience": next_level_experience, "coins": number_field(gamer, "coins", 0.0).max(0.0), "inflation": number_field(gamer, "inflation", 1.0).max(1.0), "health": number_field(gamer, "health", max_health as f64).clamp(0.0, max_health as f64), "max_health": max_health, "inspiration": number_field(gamer, "inspiration", 0.0).clamp(0.0, 100.0), "max_inspiration": 100, "writing_session_streak": integer_field(gamer, "writing_session_streak", 0).max(0), "session_streak_shields": integer_field(gamer, "session_streak_shields", 0).clamp(0, 3), "session_grade_boosts": integer_field(gamer, "session_grade_boosts", 0).clamp(0, 1), "pending_bonuses": {"writing": number_field(gamer, "writing_reward_bonus", 0.0), "session": number_field(gamer, "session_reward_bonus", 0.0), "challenge": number_field(gamer, "challenge_reward_bonus", 0.0), "manuscript": number_field(gamer, "manuscript_reward_bonus", 0.0)}},
         "skills": skills_projection(gamer),
-        "buffs": buffs_projection(gamer, effects_now), "streak_freezes": {"date": now.get(..10).unwrap_or(now), "inventory_count": item_count(gamer, "Предметы", "Заморозка"), "global_available": false, "projects": []},
+        "buffs": buffs_projection(gamer, effects_now, now), "streak_freezes": {"date": now.get(..10).unwrap_or(now), "inventory_count": item_count(gamer, "Предметы", "Заморозка"), "global_available": false, "projects": []},
         "notifications": notifications, "inventory": inventory, "quests": quest_projection(gamer), "daily_challenge": daily_challenge_projection(gamer),
         "weekly_challenge": weekly_challenge_projection(gamer),
         "writing_session": {"server_time": now, "active": session_projection(gamer.get("writing_session"), now), "streak": integer_field(gamer, "writing_session_streak", 0), "history": gamer.get("writing_session_history").cloned().unwrap_or(json!([])), "modes": SESSION_MODE_DEFINITIONS.iter().map(|(key,name,description,reward_bonus)| json!({"key":key,"name":name,"description":description,"reward_bonus":reward_bonus})).collect::<Vec<_>>(), "intentions": SESSION_INTENTION_DEFINITIONS.iter().map(|(key,description)| json!({"key":key,"name":key,"description":description})).collect::<Vec<_>>(), "grades": [{"key":"gold","name":"Золото","target_ratio":1.5,"reward_multiplier":1.3},{"key":"silver","name":"Серебро","target_ratio":1.25,"reward_multiplier":1.15},{"key":"bronze","name":"Бронза","target_ratio":1.0,"reward_multiplier":1.0}], "allowed_durations_minutes":[15,25,45,60]},
@@ -3218,7 +3240,7 @@ impl GameApplicationService {
                     } else {
                         10_080
                     };
-                    array_mut(gamer, "buffs").push(json!({"__type__":"game_data.Buff","fields":{"name":item.key,"description":"Временный бонус предмета.","buff_type":"positive","target_cf":target,"value":value,"duration_minutes":duration_minutes,"start_time":now,"end_time":Value::Null,"source":item.key,"stackable":false}}));
+                    array_mut(gamer, "buffs").push(json!({"__type__":"game_data.Buff","fields":{"name":item.key,"description":"Временный бонус предмета.","buff_type":"positive","target_cf":target,"value":value,"duration_minutes":duration_minutes,"start_time":now,"end_time":effect_end_time(now, duration_minutes),"source":item.key,"stackable":false}}));
                 }
                 "Чернильница потока" => {
                     add_capped(gamer, "session_reward_bonus", 0.25, 1.0)
@@ -5286,6 +5308,28 @@ mod tests {
     }
 
     #[test]
+    fn saved_timed_effects_recover_expiration_with_the_correct_clock() {
+        for (start, expected) in [
+            ("2026-09-06T18:00:00", "2026-09-06T19:00:00"),
+            ("2026-09-06T14:00:00Z", "2026-09-06T15:00:00Z"),
+        ] {
+            let effect = json!({"start_time":start,"duration_minutes":60,"end_time":null});
+            let active = project_saved_buff(
+                &effect,
+                "2026-09-06T18:59:59",
+                "2026-09-06T14:59:59Z",
+            ).unwrap();
+            assert_eq!(active.expires_at.as_deref(), Some(expected));
+            assert_eq!(active.remaining_seconds, Some(1));
+            assert!(project_saved_buff(
+                &effect,
+                "2026-09-06T19:00:00",
+                "2026-09-06T15:00:00Z",
+            ).is_none());
+        }
+    }
+
+    #[test]
     fn buffs_projection_matches_legacy_effect_semantics() {
         fn target_total(values: &[Value], target: &str) -> f64 {
             values
@@ -5381,7 +5425,7 @@ mod tests {
             }
         });
         let gamer = raw.as_object().expect("gamer fixture");
-        let projection = buffs_projection(gamer, "2026-09-06T19:00:00");
+        let projection = buffs_projection(gamer, "2026-09-06T19:00:00", "2026-09-06T19:00:00Z");
         let positive = projection["positive"].as_array().expect("positive buffs");
         let negative = projection["negative"].as_array().expect("negative buffs");
 

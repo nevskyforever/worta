@@ -97,6 +97,26 @@ describe('GameOverview effects', () => {
     wrapper.unmount()
   })
 
+  it('removes expired effects and retains permanent effects while the overview is open', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-06T15:00:00Z'))
+    const timing = { expires_at: '2026-09-06T19:00:01', remaining_seconds: 1 }
+    const wrapper = mountOverview({
+      server_time: '2026-09-06T15:00:00Z',
+      positive: [buff({ name: 'Постоянный эффект' }), buff({ ...timing, name: 'Временное усиление' })],
+      negative: [buff({ ...timing, name: 'Временное ограничение', type: 'negative' })],
+    })
+    expect(wrapper.findAll('.buff-timer').map((timer) => timer.text())).toEqual(['00:01', '00:01'])
+    vi.advanceTimersByTime(1_000)
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Постоянный эффект')
+    expect(wrapper.text()).not.toContain('Временное усиление')
+    expect(wrapper.text()).not.toContain('Временное ограничение')
+    expect(wrapper.emitted('effectsExpired')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('keeps every active modifier in the overview summary', () => {
     const wrapper = mountOverview({
       server_time: '2026-09-06T15:00:00Z',

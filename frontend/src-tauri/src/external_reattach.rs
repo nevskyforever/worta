@@ -397,7 +397,7 @@ pub(super) fn progress_proposal(
     if expected != &proposal {
         return err("external_progress_proposal_stale");
     }
-    let (_, entry) = record_sync_progress(db, p, s, total, &hash, &now(), Some(&proposal))?;
+    let (_, entry, _) = record_sync_progress(db, p, s, total, &hash, &now(), Some(&proposal))?;
     local["progress_pending_v1"] = proposal.clone();
     local
         .as_object_mut()
