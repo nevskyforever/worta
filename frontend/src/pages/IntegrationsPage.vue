@@ -28,7 +28,7 @@ import { announceDataChange } from '@/services/dataChanges'
 import { syncBatchNotification } from '@/utils/syncNotifications'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
-import { gameResponseMessages } from '@/utils/gameNotifications'
+import { progressGameMessages } from '@/utils/gameNotifications'
 import { progressChangeNotification } from '@/utils/progressNotifications'
 import type { ProgressResult, Project } from '@/types/api'
 import type { PlatformCapabilities } from '@/types/content'
@@ -94,7 +94,7 @@ function applyGameFeedback(progress: ProgressResult | null): void {
   const game = progress?.game
   if (!game) return
   notifications.setGameHistory(game.state.notifications)
-  for (const message of gameResponseMessages(game)) notifications.success(t(message))
+  for (const message of progressGameMessages(game, t, locale.formatNumber)) notifications.success(message)
 }
 
 function applyProgressFeedback(

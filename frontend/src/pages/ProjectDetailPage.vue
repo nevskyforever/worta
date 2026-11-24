@@ -49,7 +49,7 @@ import {
 } from '@/platform/progressShare'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
-import { progressGameMessages } from '@/utils/gameNotifications'
+import { gameHistoryMessage, progressGameMessages } from '@/utils/gameNotifications'
 import { progressChangeNotification } from '@/utils/progressNotifications'
 import { useProjectsStore } from '@/stores/projects'
 import type {
@@ -370,7 +370,9 @@ async function refreshGameHistory(): Promise<void> {
     const history = await gameApi.notifications()
     notifications.setGameHistory(history)
     for (const notification of history.unread) {
-      if (!knownUnreadIds.has(notification.id)) notifications.success(t(notification.text))
+      if (!knownUnreadIds.has(notification.id)) {
+        notifications.success(gameHistoryMessage(notification, t, locale.formatNumber))
+      }
     }
   } catch {
     // Project completion remains successful when the optional game history refresh fails.

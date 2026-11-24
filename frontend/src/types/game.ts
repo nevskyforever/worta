@@ -135,6 +135,7 @@ export interface GameNotification {
   tag: string | null
   created_at: string | null
   status: 'new' | 'read'
+  reward?: { kind: string; coins: number; experience: number }
 }
 
 export interface GameNotifications {

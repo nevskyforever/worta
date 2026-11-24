@@ -98,6 +98,44 @@ pub(crate) struct ProgressReward {
     pub experience: f64,
 }
 
+fn append_game_notification(state: &mut Value, id: &str, text: &str, now: &str, reward: Option<&ProgressReward>) -> GameResult<()> {
+    let notifications = object_map(game_object(state)?, "notifications");
+    let already_saved = ["new", "read"].iter().any(|status| {
+        notifications.get(*status).and_then(Value::as_array).is_some_and(|items| {
+            items.iter().any(|item| item["fields"]["notification_id"].as_str() == Some(id))
+        })
+    });
+    if !already_saved {
+        array_mut(notifications, "new").insert(0, json!({
+            "__type__": "Notification",
+            "fields": {"notification_id": id, "text": text, "tag": "game", "date_create": now, "reward": reward},
+        }));
+    }
+    Ok(())
+}
+
+fn append_progress_notifications(
+    state: &mut Value,
+    event_id: &str,
+    rewards: &[ProgressReward],
+    now: &str,
+) -> GameResult<()> {
+    for (index, reward) in rewards.iter().enumerate().rev() {
+        let ProgressReward { kind, coins, experience } = reward;
+        let text = match *kind {
+            "writing" => format!("Вы получили награду {coins} монет и {experience} оп."),
+            "local_streak_started" => format!("Получен бонус {coins} монет за старт стрика в проекте."),
+            "local_streak_restarted" => format!("Получен бонус {coins} монет за старт стрика в проекте (после потери)."),
+            "local_streak_continued" => format!("Получен бонус {coins} монет и {experience} оп. за продление стрика в проекте."),
+            "global_streak_started" => format!("Получен бонус {coins} монет за старт глобального стрика."),
+            "global_streak_continued" => format!("Получен бонус {coins} монет и {experience} оп. за продление глобального стрика."),
+            _ => continue,
+        };
+        append_game_notification(state, &format!("progress-reward:{event_id}:{index}"), &text, now, Some(reward))?;
+    }
+    Ok(())
+}
+
 fn apply_event(
     state: &mut Value,
     event_type: &str,
@@ -558,7 +596,7 @@ pub fn process_pending_events(
                 progress_id.as_deref(),
                 delta.unwrap_or(0.0),
             )? {
-                apply_event(
+                let reward = apply_event(
                     &mut state,
                     &event_type,
                     &event_id,
@@ -573,6 +611,10 @@ pub fn process_pending_events(
                         |r| r.get(0),
                     )
                     .map_err(|e| e.to_string())?;
+                if let Some(reward) = reward {
+                    append_progress_notifications(&mut state, &event_id, &[reward], &now)
+                        .map_err(|e| e.to_string())?;
+                }
                 crate::game_writer::capture_domain(
                     &transaction,
                     &event_id,
@@ -2159,7 +2201,11 @@ fn notification_json(value: &Value, status: &str, index: usize) -> Value {
                 .flatten()
             })
         });
-    json!({"id": text_value(fields.and_then(|fields| fields.get("notification_id")).or_else(|| fields.and_then(|fields| fields.get("id"))), &format!("legacy-{status}-{index}")), "text": text_value(fields.and_then(|fields| fields.get("text")), ""), "tag": fields.and_then(|fields| fields.get("tag")).and_then(Value::as_str), "created_at": created_at, "status": status})
+    let mut projected = json!({"id": text_value(fields.and_then(|fields| fields.get("notification_id")).or_else(|| fields.and_then(|fields| fields.get("id"))), &format!("legacy-{status}-{index}")), "text": text_value(fields.and_then(|fields| fields.get("text")), ""), "tag": fields.and_then(|fields| fields.get("tag")).and_then(Value::as_str), "created_at": created_at, "status": status});
+    if let Some(reward) = fields.and_then(|fields| fields.get("reward")).filter(|reward| reward.is_object()) {
+        projected["reward"] = reward.clone();
+    }
+    projected
 }
 
 fn notifications_state(root: &Map<String, Value>) -> Value {
@@ -2908,6 +2954,10 @@ impl GameApplicationService {
         let effects_now = Self::local_now(&tx)?;
         let mut rng = OsGameRng;
         let (message, result) = mutator(&mut state, &mut rng, &now)?;
+        if let Some(message) = message.as_deref().filter(|text| !text.trim().is_empty()) {
+            let id = crate::new_note_id().map_err(GameError::Database)?;
+            append_game_notification(&mut state, &format!("game-notice:{id}"), message, &now, None)?;
+        }
         if developer_override {
             crate::game_sync::record_developer_override(&tx, &state, &now)
                 .map_err(GameError::Database)?;
@@ -3573,6 +3623,8 @@ pub(crate) fn settle_local_progress(
         rewards.insert(0, reward);
     }
     let now = GameApplicationService::now(&savepoint).map_err(|e| e.to_string())?;
+    append_progress_notifications(&mut state, event_id, &rewards, &now)
+        .map_err(|e| e.to_string())?;
     let local_now = GameApplicationService::local_now(&savepoint).map_err(|e| e.to_string())?;
     let day = crate::streaks::logical_writing_day(&savepoint)?;
     let view = project_state(&state, &now, &local_now, &day, true).map_err(|e| e.to_string())?;
@@ -4450,31 +4502,37 @@ impl GameApplicationService {
     }
 
     pub fn mark_notification(id: String, all: bool) -> GameResult<Value> {
-        let response = Self::mutate(move |state, _rng, _now| {
-            let root = game_object(state)?;
-            let notifications = object_map(root, "notifications");
-            let mut unread_values = std::mem::take(array_mut(notifications, "new"));
-            let read = array_mut(notifications, "read");
-            if all {
-                while let Some(value) = unread_values.pop() {
-                    read.insert(0, value);
-                }
-            } else {
-                let index = unread_values
-                    .iter()
-                    .enumerate()
-                    .find(|(index, value)| {
-                        notification_json(value, "new", *index)["id"].as_str() == Some(id.as_str())
-                    })
-                    .map(|(index, _)| index)
-                    .ok_or_else(|| GameError::NotFound("Уведомление не найдено.".into()))?;
-                let value = unread_values.remove(index);
-                read.insert(0, value);
-            }
-            *array_mut(notifications, "new") = unread_values;
-            Ok((None, None))
-        })?;
-        Ok(response.state["notifications"].clone())
+        let mut connection = crate::open_projects_database().map_err(GameError::Database)?;
+        Self::owner(&connection)?;
+        let tx = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| GameError::Database(error.to_string()))?;
+        let mut state = Self::load(&tx)?;
+        let root = game_object(&mut state)?;
+        let notifications = object_map(root, "notifications");
+        let mut unread_values = std::mem::take(array_mut(notifications, "new"));
+        let read = array_mut(notifications, "read");
+        if all {
+            read.splice(0..0, unread_values.drain(..));
+        } else {
+            let index = unread_values
+                .iter()
+                .enumerate()
+                .find(|(index, value)| {
+                    notification_json(value, "new", *index)["id"].as_str() == Some(id.as_str())
+                })
+                .map(|(index, _)| index)
+                .ok_or_else(|| GameError::NotFound("Уведомление не найдено.".into()))?;
+            read.insert(0, unread_values.remove(index));
+        }
+        *array_mut(notifications, "new") = unread_values;
+        let history = notifications_state(root);
+        tx.execute(
+            "UPDATE game_state SET payload_json=?1, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=1",
+            [state.to_string()],
+        ).map_err(|error| GameError::Database(error.to_string()))?;
+        tx.commit().map_err(|error| GameError::Database(error.to_string()))?;
+        Ok(history)
     }
 
     pub fn custom_award(request: CustomAwardRequest) -> GameResult<GameCommandResponse> {

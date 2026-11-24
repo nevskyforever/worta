@@ -1,4 +1,4 @@
-import type { GameCommandResponse } from '@/types/game'
+import type { GameCommandResponse, GameNotification } from '@/types/game'
 
 export function gameResponseMessages(
   response: Pick<GameCommandResponse, 'message' | 'messages'>,
@@ -18,6 +18,20 @@ const progressRewardMessages: Record<string, string> = {
   local_streak_continued: 'Получен бонус {0} монет и {1} оп. за продление стрика в проекте.',
   global_streak_started: 'Получен бонус {0} монет за старт глобального стрика.',
   global_streak_continued: 'Получен бонус {0} монет и {1} оп. за продление глобального стрика.',
+}
+
+export function gameHistoryMessage(
+  notification: GameNotification,
+  translate: (source: string, parameters?: Record<string, string | number>) => string,
+  formatNumber: (value: number) => string,
+): string {
+  const { reward } = notification
+  if (reward && Object.hasOwn(progressRewardMessages, reward.kind)) {
+    return translate(progressRewardMessages[reward.kind]!, {
+      0: formatNumber(reward.coins), 1: formatNumber(reward.experience),
+    })
+  }
+  return translate(notification.text)
 }
 
 export function progressGameMessages(

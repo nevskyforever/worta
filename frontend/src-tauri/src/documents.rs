@@ -3446,6 +3446,16 @@ mod tests {
             let game = &batch.items[0].progress.as_ref().unwrap()["game"];
             assert_eq!(game["ok"], serde_json::json!(true));
             assert!(game["state"]["profile"]["experience"].as_f64().unwrap() > 0.0);
+            let history = crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
+            let unread = history["unread"].as_array().unwrap();
+            let notice = unread.iter().find(|item| item["reward"]["kind"] == "writing").unwrap();
+            let notice_id = notice["id"].as_str().unwrap().to_owned();
+            let (db, _) = open()?;
+            db.execute("UPDATE settings SET value_json='false' WHERE key='game_mode'", [])
+                .map_err(|e| e.to_string())?;
+            drop(db);
+            crate::game::GameApplicationService::mark_notification(notice_id.clone(), false)
+                .map_err(|e| e.to_string())?;
             let repeat = run_sync(scope())?;
             assert!(!repeat.changed);
             assert!(repeat.sync.last_synced_at.is_some());
@@ -3454,12 +3464,19 @@ mod tests {
                 .unwrap()
                 .to_owned();
             let (mut db, _) = open()?;
+            db.execute("UPDATE settings SET value_json='true' WHERE key='game_mode'", [])
+                .map_err(|e| e.to_string())?;
             crate::delete_progress_in_connection(&mut db, "book".into(), entry, None)?;
             drop(db);
             let restored = run_sync(scope())?;
             assert!(restored.changed);
             assert_eq!(restored.symbols, 11);
             assert!(!run_sync(scope())?.changed);
+            let history = crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
+            assert!(history["unread"].as_array().unwrap().iter().all(|item| item["id"].as_str() != Some(&notice_id)));
+            let archived = history["read"].as_array().unwrap().iter()
+                .find(|item| item["id"].as_str() == Some(&notice_id)).unwrap();
+            assert_eq!(archived["reward"], notice["reward"]);
             assert!(!remove_sync(scope())?.configured);
             let (db, _) = open()?;
             assert_eq!(

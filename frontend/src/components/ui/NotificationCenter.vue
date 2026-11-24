@@ -12,6 +12,7 @@ import { gameApi } from '@/api/game'
 import { useLocaleStore } from '@/stores/locale'
 import { useNotificationsStore } from '@/stores/notifications'
 import type { GameNotification } from '@/types/game'
+import { gameHistoryMessage } from '@/utils/gameNotifications'
 
 const locale = useLocaleStore()
 const t = locale.translate
@@ -44,7 +45,8 @@ async function refresh(showErrors = false): Promise<void> {
   loading.value = true
   if (showErrors) apiError.value = null
   try {
-    notifications.setGameHistory(await gameApi.notifications(controller.signal))
+    const snapshot = await gameApi.notifications(controller.signal)
+    if (!controller.signal.aborted) notifications.setGameHistory(snapshot)
   } catch (error) {
     if (controller.signal.aborted) return
     if (showErrors) apiError.value = t(apiErrorMessage(error))
@@ -71,6 +73,7 @@ function handleDismiss(): void {
 
 async function markRead(notification: GameNotification): Promise<void> {
   if (updating.value) return
+  activeRequest?.abort()
   updating.value = true
   apiError.value = null
   try {
@@ -84,6 +87,7 @@ async function markRead(notification: GameNotification): Promise<void> {
 
 async function markAllRead(): Promise<void> {
   if (updating.value || !hasUnread.value) return
+  activeRequest?.abort()
   updating.value = true
   apiError.value = null
   try {
@@ -189,7 +193,7 @@ onBeforeUnmount(() => activeRequest?.abort())
                 class="notification-center__item notification-center__item--unread"
               >
                 <div>
-                  <p>{{ notification.text }}</p>
+                  <p>{{ gameHistoryMessage(notification, t, locale.formatNumber) }}</p>
                   <time
                     v-if="formatCreatedAt(notification.created_at)"
                     :datetime="notification.created_at ?? undefined"
@@ -228,7 +232,7 @@ onBeforeUnmount(() => activeRequest?.abort())
                 class="notification-center__item"
               >
                 <div>
-                  <p>{{ notification.text }}</p>
+                  <p>{{ gameHistoryMessage(notification, t, locale.formatNumber) }}</p>
                   <time
                     v-if="formatCreatedAt(notification.created_at)"
                     :datetime="notification.created_at ?? undefined"
