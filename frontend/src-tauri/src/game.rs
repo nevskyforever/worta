@@ -98,12 +98,23 @@ pub(crate) struct ProgressReward {
     pub experience: f64,
 }
 
-fn append_game_notification(state: &mut Value, id: &str, text: &str, now: &str, reward: Option<&ProgressReward>) -> GameResult<()> {
+fn append_game_notification(
+    state: &mut Value,
+    id: &str,
+    text: &str,
+    now: &str,
+    reward: Option<&ProgressReward>,
+) -> GameResult<()> {
     let notifications = object_map(game_object(state)?, "notifications");
     let already_saved = ["new", "read"].iter().any(|status| {
-        notifications.get(*status).and_then(Value::as_array).is_some_and(|items| {
-            items.iter().any(|item| item["fields"]["notification_id"].as_str() == Some(id))
-        })
+        notifications
+            .get(*status)
+            .and_then(Value::as_array)
+            .is_some_and(|items| {
+                items
+                    .iter()
+                    .any(|item| item["fields"]["notification_id"].as_str() == Some(id))
+            })
     });
     if !already_saved {
         array_mut(notifications, "new").insert(0, json!({
@@ -121,17 +132,37 @@ fn append_progress_notifications(
     now: &str,
 ) -> GameResult<()> {
     for (index, reward) in rewards.iter().enumerate().rev() {
-        let ProgressReward { kind, coins, experience } = reward;
+        let ProgressReward {
+            kind,
+            coins,
+            experience,
+        } = reward;
         let text = match *kind {
             "writing" => format!("Вы получили награду {coins} монет и {experience} оп."),
-            "local_streak_started" => format!("Получен бонус {coins} монет за старт стрика в проекте."),
-            "local_streak_restarted" => format!("Получен бонус {coins} монет за старт стрика в проекте (после потери)."),
-            "local_streak_continued" => format!("Получен бонус {coins} монет и {experience} оп. за продление стрика в проекте."),
-            "global_streak_started" => format!("Получен бонус {coins} монет за старт глобального стрика."),
-            "global_streak_continued" => format!("Получен бонус {coins} монет и {experience} оп. за продление глобального стрика."),
+            "local_streak_started" => {
+                format!("Получен бонус {coins} монет за старт стрика в проекте.")
+            }
+            "local_streak_restarted" => {
+                format!("Получен бонус {coins} монет за старт стрика в проекте (после потери).")
+            }
+            "local_streak_continued" => format!(
+                "Получен бонус {coins} монет и {experience} оп. за продление стрика в проекте."
+            ),
+            "global_streak_started" => {
+                format!("Получен бонус {coins} монет за старт глобального стрика.")
+            }
+            "global_streak_continued" => format!(
+                "Получен бонус {coins} монет и {experience} оп. за продление глобального стрика."
+            ),
             _ => continue,
         };
-        append_game_notification(state, &format!("progress-reward:{event_id}:{index}"), &text, now, Some(reward))?;
+        append_game_notification(
+            state,
+            &format!("progress-reward:{event_id}:{index}"),
+            &text,
+            now,
+            Some(reward),
+        )?;
     }
     Ok(())
 }
@@ -2202,7 +2233,10 @@ fn notification_json(value: &Value, status: &str, index: usize) -> Value {
             })
         });
     let mut projected = json!({"id": text_value(fields.and_then(|fields| fields.get("notification_id")).or_else(|| fields.and_then(|fields| fields.get("id"))), &format!("legacy-{status}-{index}")), "text": text_value(fields.and_then(|fields| fields.get("text")), ""), "tag": fields.and_then(|fields| fields.get("tag")).and_then(Value::as_str), "created_at": created_at, "status": status});
-    if let Some(reward) = fields.and_then(|fields| fields.get("reward")).filter(|reward| reward.is_object()) {
+    if let Some(reward) = fields
+        .and_then(|fields| fields.get("reward"))
+        .filter(|reward| reward.is_object())
+    {
         projected["reward"] = reward.clone();
     }
     projected
@@ -2956,7 +2990,13 @@ impl GameApplicationService {
         let (message, result) = mutator(&mut state, &mut rng, &now)?;
         if let Some(message) = message.as_deref().filter(|text| !text.trim().is_empty()) {
             let id = crate::new_note_id().map_err(GameError::Database)?;
-            append_game_notification(&mut state, &format!("game-notice:{id}"), message, &now, None)?;
+            append_game_notification(
+                &mut state,
+                &format!("game-notice:{id}"),
+                message,
+                &now,
+                None,
+            )?;
         }
         if developer_override {
             crate::game_sync::record_developer_override(&tx, &state, &now)
@@ -4531,7 +4571,8 @@ impl GameApplicationService {
             "UPDATE game_state SET payload_json=?1, updated_at=strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=1",
             [state.to_string()],
         ).map_err(|error| GameError::Database(error.to_string()))?;
-        tx.commit().map_err(|error| GameError::Database(error.to_string()))?;
+        tx.commit()
+            .map_err(|error| GameError::Database(error.to_string()))?;
         Ok(history)
     }
 
@@ -5372,18 +5413,14 @@ mod tests {
             ("2026-09-06T14:00:00Z", "2026-09-06T15:00:00Z"),
         ] {
             let effect = json!({"start_time":start,"duration_minutes":60,"end_time":null});
-            let active = project_saved_buff(
-                &effect,
-                "2026-09-06T18:59:59",
-                "2026-09-06T14:59:59Z",
-            ).unwrap();
+            let active =
+                project_saved_buff(&effect, "2026-09-06T18:59:59", "2026-09-06T14:59:59Z").unwrap();
             assert_eq!(active.expires_at.as_deref(), Some(expected));
             assert_eq!(active.remaining_seconds, Some(1));
-            assert!(project_saved_buff(
-                &effect,
-                "2026-09-06T19:00:00",
-                "2026-09-06T15:00:00Z",
-            ).is_none());
+            assert!(
+                project_saved_buff(&effect, "2026-09-06T19:00:00", "2026-09-06T15:00:00Z",)
+                    .is_none()
+            );
         }
     }
 

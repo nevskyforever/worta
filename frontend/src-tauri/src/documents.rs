@@ -1795,7 +1795,8 @@ fn record_source_total(
         changed: !entry.is_null(),
         symbols,
         sync: sync_summary(db, &scope.project_id, scope.stage_id.as_deref())?,
-        progress: (!entry.is_null()).then(|| progress_result_with_feedback(project, entry, feedback)),
+        progress: (!entry.is_null())
+            .then(|| progress_result_with_feedback(project, entry, feedback)),
     })
 }
 
@@ -3427,8 +3428,11 @@ mod tests {
             db.execute("INSERT INTO projects(id,name,goal,infinite,unit,status,payload_json) VALUES('book','Book',100,0,'symbols','активен',?1)", [project.to_string()]).map_err(|e| e.to_string())?;
             db.execute("INSERT INTO project_order VALUES('book',0)", [])
                 .map_err(|e| e.to_string())?;
-            db.execute("INSERT OR REPLACE INTO settings(key,value_json) VALUES('game_mode','true')", [])
-                .map_err(|e| e.to_string())?;
+            db.execute(
+                "INSERT OR REPLACE INTO settings(key,value_json) VALUES('game_mode','true')",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
             db.execute("INSERT INTO project_bindings(id,project_id,binding_type,external_path,source_id,payload_json) VALUES('legacy','book','scrivener',?1,'CHAPTER','{}')", [&path]).map_err(|e| e.to_string())?;
             drop(db);
 
@@ -3446,13 +3450,20 @@ mod tests {
             let game = &batch.items[0].progress.as_ref().unwrap()["game"];
             assert_eq!(game["ok"], serde_json::json!(true));
             assert!(game["state"]["profile"]["experience"].as_f64().unwrap() > 0.0);
-            let history = crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
+            let history =
+                crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
             let unread = history["unread"].as_array().unwrap();
-            let notice = unread.iter().find(|item| item["reward"]["kind"] == "writing").unwrap();
+            let notice = unread
+                .iter()
+                .find(|item| item["reward"]["kind"] == "writing")
+                .unwrap();
             let notice_id = notice["id"].as_str().unwrap().to_owned();
             let (db, _) = open()?;
-            db.execute("UPDATE settings SET value_json='false' WHERE key='game_mode'", [])
-                .map_err(|e| e.to_string())?;
+            db.execute(
+                "UPDATE settings SET value_json='false' WHERE key='game_mode'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
             drop(db);
             crate::game::GameApplicationService::mark_notification(notice_id.clone(), false)
                 .map_err(|e| e.to_string())?;
@@ -3464,18 +3475,30 @@ mod tests {
                 .unwrap()
                 .to_owned();
             let (mut db, _) = open()?;
-            db.execute("UPDATE settings SET value_json='true' WHERE key='game_mode'", [])
-                .map_err(|e| e.to_string())?;
+            db.execute(
+                "UPDATE settings SET value_json='true' WHERE key='game_mode'",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
             crate::delete_progress_in_connection(&mut db, "book".into(), entry, None)?;
             drop(db);
             let restored = run_sync(scope())?;
             assert!(restored.changed);
             assert_eq!(restored.symbols, 11);
             assert!(!run_sync(scope())?.changed);
-            let history = crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
-            assert!(history["unread"].as_array().unwrap().iter().all(|item| item["id"].as_str() != Some(&notice_id)));
-            let archived = history["read"].as_array().unwrap().iter()
-                .find(|item| item["id"].as_str() == Some(&notice_id)).unwrap();
+            let history =
+                crate::game::GameApplicationService::notifications().map_err(|e| e.to_string())?;
+            assert!(history["unread"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["id"].as_str() != Some(&notice_id)));
+            let archived = history["read"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["id"].as_str() == Some(&notice_id))
+                .unwrap();
             assert_eq!(archived["reward"], notice["reward"]);
             assert!(!remove_sync(scope())?.configured);
             let (db, _) = open()?;
@@ -3965,7 +3988,14 @@ fn record_sync_progress(
     source_hash: &str,
     created_at: &str,
     proposal: Option<&Value>,
-) -> Result<(Value, Value, Result<Option<crate::game::GameCommandResponse>, String>), String> {
+) -> Result<
+    (
+        Value,
+        Value,
+        Result<Option<crate::game::GameCommandResponse>, String>,
+    ),
+    String,
+> {
     record_document_or_sync_progress(
         connection,
         project_id,
