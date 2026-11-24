@@ -68,3 +68,45 @@ it('requires genuine Stage owner certification for a Stage-scoped Document', asy
   head.history[0]!.wire_digest = '0'.repeat(64)
   await expect(prepareDocumentEvent(scope, input, corrupted, amk, () => true)).rejects.toThrow()
 })
+
+it('reopens an encrypted Web revision only with its exact receipt and server echo', async () => {
+  const { f, event, input } = await fixture(true)
+  const base = inventory(f)
+  const row = (sequence: number, id: string, wire: string) => ({
+    account_id: scope.accountId, device_id: scope.deviceId, event_id: id,
+    server_sequence: sequence, protocol_version: 3, record_version: 1,
+    state: 'received', wire_item: wire,
+  })
+  base.rows.push({
+    ...row(input.server_sequence, event.header.event_id, input.wire_item), record_version: 11, state: 'document_proven',
+    document_proof: { record_version: 1, owner_kind: 'document', outcome: 'applied', ledger_digest: '0'.repeat(64), projection_digest: '0'.repeat(64) },
+  })
+  const { sealDocumentForOutbox } = await import('./documentOutbound')
+  const { BrowserSyncDurability } = await import('./syncDurability')
+  const update = structuredClone(event)
+  Object.assign(update.header, { device_id: scope.deviceId, event_id: crypto.randomUUID(),
+    parents: [event.header.event_id], operation: 'update', revision: 2, generation: 2 })
+  update.document!.content_json = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Web edit', marks: [{ type: 'bold' }] }] }] }
+  const body = await sealDocumentForOutbox(scope, update, amk)
+  const [queued] = await new BrowserSyncDurability(f.transaction).enqueue(scope, [body])
+  const sequence = input.server_sequence + 1
+  const wire = JSON.parse(body).items[0]
+  Object.assign(wire.event, { device_id: scope.deviceId, server_sequence: sequence })
+  const echo = row(sequence, update.header.event_id, JSON.stringify(wire))
+  base.rows.push(echo)
+  base.out = [queued!.item]
+  await expect(prepareDocumentEvent(scope, echo, base, amk, () => true)).rejects.toThrow()
+  base.out = [{ ...queued!.item, state: 'accepted' }]
+  base.receipts = [{ record_version: 1, account_id: scope.accountId, device_id: scope.deviceId,
+    event_id: update.header.event_id, protocol_version: 3, server_sequence: sequence, duplicate: false }]
+  const token = await prepareDocumentEvent(scope, echo, base, amk, () => true)
+  expect(inspectPreparedDocumentGenesis(token, scope, base).projection).toEqual(update.document)
+})
+
+it('allocates a new Desktop-compatible ID after a document has moved out of a scope', async () => {
+  const { newCloudDocumentId } = await import('./documentOutbound')
+  const first = await newCloudDocumentId('project-with-stage', null, new Set())
+  const occupied = new Set([first, `${first}-1`])
+  expect(await newCloudDocumentId('project-with-stage', null, occupied)).toBe(`${first}-2`)
+  expect(await newCloudDocumentId('project-with-stage', 'chapter', occupied)).not.toBe(first)
+})

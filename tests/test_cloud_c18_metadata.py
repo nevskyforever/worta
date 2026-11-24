@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.app.cloud.models import EncryptedObject, SyncEvent
@@ -184,3 +185,104 @@ def test_initial_web_setup_rejects_account_with_project(cloud_client):
     assert result.status_code == 409
     assert result.json()['detail']['code'] == 'initial_web_sync_requires_empty_account'
     assert client.get('/api/v2/sync/encrypted/capabilities', headers=headers).json()['writer_transport_version'] == 1
+
+
+def test_web_project_edit_preserves_history_and_obeys_the_slot_limit(cloud_client):
+    client, engine = cloud_client
+    user = create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    desktop, browser, boot = (str(uuid4()) for _ in range(3))
+    sync = '/api/v3/sync/encrypted'
+    projects = '/api/v1/cloud/projects'
+    bootstrap = projects + '/project-1/bootstrap'
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE global_limits SET max_cloud_projects=1'))
+    assert client.put(f'/api/v1/sync/devices/{desktop}', headers=headers).status_code == 200
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post(sync + '/reader-ready', headers=headers, json={
+        'device_id': desktop, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post(sync + '/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    assert client.post(bootstrap, headers=headers, json={'bootstrap_id': boot, 'device_id': desktop}).status_code == 200
+    assert client.post(bootstrap + '/complete', headers=headers, json={
+        'bootstrap_id': boot, 'device_id': desktop, 'initial_event_count': 0, 'initial_max_server_sequence': 0,
+    }).status_code == 200
+    assert client.get(projects, headers=headers).json()['cloud_project_ids'] == ['project-1']
+    initial = _event()
+    assert client.post(sync + '/push', headers=headers, json=_request(desktop, initial)).status_code == 200
+    replacement_boot = str(uuid4())
+    replacement_name = 'replacement'
+    create_pin = {'web_metadata_version': 1, 'expected_epoch': 2, 'expected_cursor': 1, 'metadata_bootstrap': replacement_boot}
+    new_project = _event(project_id=replacement_name, entity_id=replacement_name)
+    request = _request(browser, new_project)
+    denied = client.post(sync + '/push', headers=headers, params=create_pin, json=request)
+    assert denied.status_code == 409 and 'cloud_project_limit_reached' in denied.text
+    changed = _event(revision=2)
+    pin = {'web_metadata_version': 1, 'expected_epoch': 2, 'expected_cursor': 1, 'metadata_parent': initial['event_id']}
+    assert client.post(sync + '/push', headers=headers, json=_request(browser, changed)).status_code == 409
+    assert client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, changed)).status_code == 200
+    later = _event(revision=3)
+    stale = client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, later))
+    assert stale.status_code == 409 and 'web_metadata_snapshot_changed' in stale.text
+    assert client.get(projects, headers=headers).json()['cloud_project_count'] == 1
+    retry = client.post(sync + '/push', headers=headers, params=pin, json=_request(browser, changed))
+    assert retry.json()['results'][0]['duplicate']
+    pulled = client.get(sync + '/pull', headers=headers, params={
+        'device_id': desktop, 'since': 0, 'protocol_version': 3, 'encrypted_sync_version': 3,
+    })
+    assert pulled.status_code == 200, pulled.text
+    assert [row['event']['event_id'] for row in pulled.json()['items']] == [
+        initial['event_id'], changed['event_id'],
+    ]
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT count(*) FROM sync_devices WHERE user_id=:user'), {'user': user}).scalar_one() == 1
+
+
+def test_web_stage_and_order_publish_atomically_without_enrolling_a_reader(cloud_client):
+    client, engine = cloud_client
+    user = create_user(engine)
+    headers = _headers(login(client).json()['access_token'])
+    desktop, browser, boot = (str(uuid4()) for _ in range(3))
+    sync = '/api/v3/sync/encrypted'
+    assert client.put(f'/api/v1/sync/devices/{desktop}', headers=headers).status_code == 200
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post(sync + '/reader-ready', headers=headers, json={
+        'device_id': desktop, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post(sync + '/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    initial = _event()
+    assert client.post(sync + '/push', headers=headers, json=_request(browser, initial), params={
+        'web_metadata_version': 1, 'expected_cursor': 0, 'expected_epoch': 2, 'metadata_bootstrap': boot,
+    }).status_code == 200
+    stage = _event(entity_type='stage', entity_id=str(uuid4()))
+    order = _event(entity_type='stage_order', entity_id='stage_order')
+    enabled = _event(revision=2)
+    body = _request(browser, stage)
+    body['items'] += [_request(browser, event)['items'][0] for event in (order, enabled)]
+    pin = {'web_stage_version': 1, 'expected_cursor': 1, 'expected_epoch': 2, 'stage_metadata_parent': initial['event_id']}
+
+    def push(request=body, params=pin):
+        return client.post(sync + '/push', headers=headers, params=params, json=request)
+
+    assert push(_request(browser, stage)).status_code == 422
+    assert push(params={**pin, 'web_document_version': 1}).status_code == 422
+    assert push(params={**pin, 'stage_metadata_parent': str(uuid4())}).status_code == 409
+    wrong_project = {**body, 'items': [body['items'][0], _request(browser, {**order, 'project_id': 'other'})['items'][0]]}
+    assert push(wrong_project).status_code == 422
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT count(*) FROM sync_events')).scalar_one() == 1
+    accepted = push()
+    assert accepted.status_code == 200, accepted.text
+    assert [row['server_sequence'] for row in accepted.json()['results']] == [2, 3, 4]
+    assert all(row['duplicate'] for row in push().json()['results'])
+    later_stage = _event(entity_type='stage', entity_id=str(uuid4()))
+    later_order = _event(entity_type='stage_order', entity_id='stage_order', revision=2)
+    later = _request(browser, later_stage)
+    later['items'] += _request(browser, later_order)['items']
+    later_pin = {**pin, 'expected_cursor': 4, 'stage_metadata_parent': enabled['event_id'], 'stage_order_parent': order['event_id']}
+    assert push(later, {**later_pin, 'stage_order_parent': str(uuid4())}).status_code == 409
+    assert push(later, later_pin).status_code == 200
+    assert push({**later, 'items': [later['items'][0], body['items'][1]]}, later_pin).status_code == 409
+    with engine.connect() as connection:
+        assert connection.execute(text('SELECT count(*) FROM sync_events')).scalar_one() == 6
+        assert connection.execute(text('SELECT count(*) FROM sync_devices WHERE user_id=:user'), {'user': user}).scalar_one() == 1

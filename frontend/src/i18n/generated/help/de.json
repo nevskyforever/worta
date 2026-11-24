@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich beim Cloudkonto an und entsperre den Schlüssel. Öffne Texte oder Notizen, wähle ein Projekt und dann Projekt oder eine Etappe.</p>\n<p>Texte werden formatiert angezeigt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen. Zum Lesen ist eine Serververbindung nötig. Das Sperren des Schlüssels blendet die Inhalte aus.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Clouddokumente im Web lesen</h2>\n<p>Melde dich beim Cloudkonto an und entsperre den Schlüssel. Öffne Texte oder Notizen, wähle ein Projekt und dann Projekt oder eine Etappe.</p>\n<p>Texte werden formatiert angezeigt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen. Zum Lesen ist eine Serververbindung nötig. Das Sperren des Schlüssels blendet die Inhalte aus.</p>\n<p>Wenn deine Geräte Schreibzugriff unterstützen, wähle Erstellen oder Bearbeiten und dann Text speichern. Gespeichert erscheint nach Prüfung der Serverantwort. Bei einem Fehler bleibt der Text im geöffneten Editor. Wenn sich Versionen unterscheiden, öffne sie und wähle das Ergebnis.</p>\n<p>Wenn während der Arbeit eine neue Version erscheint, klicke im Editor auf Aktualisieren und vergleiche sie mit deinem Entwurf. Speichere deinen Entwurf erst nach dem Vergleich über der neuen Version. Bei unterbrochener Verbindung wiederhole das Speichern.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Clouddokumente im Web lesen"
   },
@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Lokale Dateien auf jedem Gerät</h2><p>Word und Scrivener werden auf jedem Gerät separat verknüpft. Pfade, ausgewählte Quellen und lokale Prüfungen werden nicht synchronisiert.</p><p>Exportieren Sie eine Word-Kopie oder verknüpfen Sie eine vorhandene Datei erneut. Die Auswahl vergleicht Inhalte ohne Überschreiben. Bei Unterschieden importieren Sie ausdrücklich Word oder schreiben die WORTA-Version; eine separate Kopie kann exportiert werden. Vergleichen Sie nach Änderungen erneut.</p><p>Eine fehlende lokale Datei löscht weder Cloud-Text noch Fortschritt. Wählen Sie ausdrücklich einen anderen Pfad. Word/Scrivener-Fortschrittsänderungen erfordern eine Bestätigung des Vergleichs. Lokale Verknüpfungen sind im Web nicht verfügbar; WORTA-Text bleibt verfügbar.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Lokale Dateien auf jedem Gerät"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Cloudprojekte im Web</h2>\n<p>Unter Projekte kannst du Projekte bis zum Kontolimit erstellen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.</p>\n<p>Wähle im geöffneten Projekt Etappe hinzufügen und gib Name, Ziel und Termin ein. Ziel und Termin sind optional. Unter Texte öffnest du das Manuskript für das ausgewählte Projekt oder die Etappe. Nach der Serverbestätigung sind Änderungen bei der Synchronisierung auf anderen Geräten verfügbar.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Cloudprojekte im Web"
   }
 ]

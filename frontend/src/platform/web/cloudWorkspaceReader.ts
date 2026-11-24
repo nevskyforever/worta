@@ -37,17 +37,23 @@ const formatting: Record<string, RegExp> = {
   textAlign: /^(?:left|right|center|justify)$/,
 }
 
-export function cloudDocumentForReading(document: PortableDocument): TiptapDocument {
+export function cloudDocumentForReading(document: PortableDocument, editable = false): TiptapDocument {
   // The recovery owner has already checked the portable document schema.
   // Construct a display copy without link actions or arbitrary DOM attributes.
   function nodeForReading(node: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = { type: node.type }
     if (typeof node.text === 'string') result.text = node.text
     if (Array.isArray(node.content)) result.content = node.content.map(nodeForReading)
-    if (Array.isArray(node.marks)) result.marks = node.marks.filter(mark => mark.type !== 'link').map(nodeForReading)
+    if (Array.isArray(node.marks)) result.marks = node.marks.filter(mark => editable || mark.type !== 'link').map(nodeForReading)
     if (node.attrs && typeof node.attrs === 'object') {
       result.attrs = Object.fromEntries(Object.entries(node.attrs).filter(([key, value]) =>
         (key === 'level' || key === 'start') && Number.isSafeInteger(value)
+        || key === 'language' && node.type === 'codeBlock' && typeof value === 'string' && /^[\w+-]{1,32}$/.test(value)
+        || key === 'type' && node.type === 'orderedList' && typeof value === 'string' && /^[1aAiI]$/.test(value)
+        || editable && node.type === 'link' && typeof value === 'string'
+          && (key === 'href' && /^(https?:\/\/|mailto:|#)/.test(value)
+            || key === 'target' && /^_(?:blank|self|parent|top)$/.test(value)
+            || (key === 'rel' || key === 'class') && /^[\w -]{0,128}$/.test(value))
         || typeof value === 'string' && Object.hasOwn(formatting, key) && formatting[key]!.test(value)))
     }
     return result

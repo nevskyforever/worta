@@ -402,34 +402,33 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const authorActive=counts.some(r=>r.result.length),author={out:counts[0]!.result,receipts:counts[1]!.result,intents:counts[2]!.result}
       const authority=inspectContentAuthorityInventory(s,{...author,history:future,rows,bindings:imported,localNotes:notes,cursor:checkpoint})
       const authored=authority.candidates.sort((a,b)=>a.header.revision-b.header.revision),authorMutations=authored.length+authority.intents.filter(i=>i.record_version===2).length
-      const progressOut = authority.out.filter(row => JSON.parse(row.raw_body).items[0].event.entity_type === 'progress')
-      const progressIds = new Set(progressOut.map(row => row.event_id))
-      const gameOut = authority.out.filter(row => JSON.parse(row.raw_body).items[0].event.entity_type === 'account_game')
-      const gameIds = new Set(gameOut.map(row => row.event_id))
+      const onlineOut = authority.out.filter(row => ['progress', 'document', 'account_game'].includes(JSON.parse(row.raw_body).items[0].event.entity_type))
+      const onlineIds = new Set(onlineOut.map(row => row.event_id))
       for (const row of rows) {
         const descriptor = JSON.parse(row.wire_item).event
         if (descriptor.entity_type === 'account_game' && descriptor.device_id === s.deviceId) {
           assertAccountGameEcho(s, { manifest, rows, bindings: imported, owners: heads, author }, row)
+          continue
         }
-        if (descriptor.entity_type !== 'progress' || descriptor.device_id !== s.deviceId) continue
-        const outbound = progressOut.find(value => value.event_id === row.event_id)
+        if (!['progress', 'document', 'account_game'].includes(descriptor.entity_type) || descriptor.device_id !== s.deviceId) continue
+        const outbound = onlineOut.find(value => value.event_id === row.event_id)
         const receipt = author.receipts.find((value: {event_id: string}) => value.event_id === row.event_id)
         const evidence = validateBrowserRetainedHistory(s, descriptor, outbound, receipt, row)
         if (!evidence.outbox || !evidence.receipt || !evidence.inbox) fail()
       }
-      const resolutionsOut=authority.out.filter(o=>!progressIds.has(o.event_id)&&!gameIds.has(o.event_id)&&!authored.some(c=>c.event_id===o.event_id))
-      if (progressOut.length || gameOut.length) {
+      const resolutionsOut=authority.out.filter(o=>!onlineIds.has(o.event_id)&&!authored.some(c=>c.event_id===o.event_id))
+      if (onlineOut.length) {
         const allocated = [...authority.out, ...authority.intents].sort((a, b) => a.local_ordinal - b.local_ordinal)
         if (allocated.some((row, index) => row.local_ordinal !== index + 1)
           || checkpoint.next_local_ordinal !== allocated.length + 1) fail()
       }
-      const noteAuthorActive = authority.out.length !== progressOut.length + gameOut.length || author.intents.length > 0
+      const noteAuthorActive = authority.out.length !== onlineOut.length || author.intents.length > 0
       for(const o of resolutionsOut){const e=JSON.parse(o.raw_body).items[0].event,root=resolutions.find(r=>r.event_id===o.event_id),group=future.find(g=>g.record_kind==='group'&&g.project_id===e.project_id&&g.note_id===e.entity_id&&e.revision===g.tip_revision+1)
         if(o.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||!group||!root&&future.some(t=>t.record_kind==='group_transition'&&t.group_id===(group as any).group_id)||root&&root.source_device_id!==s.deviceId)fail()
         const row=rows.find(r=>r.event_id===o.event_id)
         if(row){const w=JSON.parse(row.wire_item),{device_id,server_sequence,...event}=w.event,receipt=author.receipts.find((r:any)=>r.event_id===o.event_id) as any;if(device_id!==s.deviceId||!receipt||receipt.record_version!==1||receipt.server_sequence!==server_sequence||!replaySame({event,object:w.object},JSON.parse(o.raw_body).items[0]))fail()}
       }
-      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length+progressOut.length+gameOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length+onlineOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
 
 
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []
@@ -577,7 +576,7 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
         // Import high-water is account-wide. A proven account Game outcome can
         // be its boundary; seed/bootstrap still identify this project. The Game
         // owner reauthenticates the exact account source/ledger before use/UI.
-        const contentBoundary = rows.find(value => value.server_sequence === record.remote_high_water && (value.state === 'content_note_proven' && value.content_note_proof.header.project_id === record.project_id || value.state === 'applied' && value.applied_proof.project_id === record.project_id || (value.state === 'document_proven'||value.state === 'map_proven'||value.state === 'progress_proven'||value.state === 'game_proven') && JSON.parse(value.wire_item).event.project_id === record.project_id || value.state === 'game_proven' && JSON.parse(value.wire_item).event.scope === 'account' && JSON.parse(value.wire_item).event.entity_type === 'account_game' && gameReads.length === 2 && gameReads[0]!.result.some((ledger: {event_id:string;project_id:string;entity_id:string}) => ledger.event_id === value.event_id && ledger.project_id === 'account' && ledger.entity_id === 'account')))
+        const contentBoundary = rows.find(value => value.server_sequence === record.remote_high_water && (value.state === 'content_note_proven' && value.content_note_proof.header.project_id === record.project_id || (value.state === 'applied' || value.state === 'stage_proven' || value.state === 'stage_order_proven') || (value.state === 'document_proven'||value.state === 'map_proven'||value.state === 'progress_proven'||value.state === 'game_proven') && JSON.parse(value.wire_item).event.project_id === record.project_id || value.state === 'game_proven' && JSON.parse(value.wire_item).event.scope === 'account' && JSON.parse(value.wire_item).event.entity_type === 'account_game' && gameReads.length === 2 && gameReads[0]!.result.some((ledger: {event_id:string;project_id:string;entity_id:string}) => ledger.event_id === value.event_id && ledger.project_id === 'account' && ledger.entity_id === 'account')))
         const retainedImport = manifest?.contract_version === 6 && seed && genesis && contentBoundary && record.remote_high_water !== null
           && contentBoundary.server_sequence === record.remote_high_water
           && genesis.server_sequence <= record.remote_high_water && seed.initial_max_server_sequence <= record.remote_high_water
@@ -595,7 +594,9 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
             || proof.protocol_version !== 3 || proof.source_device_id === s.deviceId) fail()
         }
         const genesis = head.history.find(proof => proof.operation === 'create')
-        if (!genesis || genesis.source_device_id !== manifest!.anchor.registry.projects.find(record => record.project_id === project)?.origin_device_id) fail()
+        const lineage = manifest!.anchor.registry.projects.find(record => record.project_id === project)
+        if (!genesis || !lineage || (head.owner_kind === 'project_metadata' || genesis.server_sequence <= lineage.initial_max_server_sequence!)
+          && genesis.source_device_id !== lineage.origin_device_id) fail()
       }
       bytes += new TextEncoder().encode(JSON.stringify({ manifest, imported, heads, sources, notes, history: future,author,documents:documentReads.map(request=>request.result),games:gameReads.map(request=>request.result),progress:progressReads.map(request=>request.result),maps:mapReads.map(request=>request.result) })).length + REPLAY_LIMITS.controlReserveBytes
       if (manifest && (ciphertextBytes !== manifest.ciphertext_bytes || bytes > REPLAY_LIMITS.inventoryBytes)) fail()

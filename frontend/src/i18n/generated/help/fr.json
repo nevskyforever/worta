@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous à votre compte cloud et déverrouillez la clé. Ouvrez Textes ou Notes, choisissez un projet, puis sélectionnez Projet ou une étape.</p>\n<p>Les textes conservent leur mise en forme. Cliquez sur Actualiser pour récupérer les modifications de Desktop. La lecture nécessite une connexion au serveur. Le verrouillage de la clé masque le contenu.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Lire les documents cloud sur le Web</h2>\n<p>Connectez-vous à votre compte cloud et déverrouillez la clé. Ouvrez Textes ou Notes, choisissez un projet, puis sélectionnez Projet ou une étape.</p>\n<p>Les textes conservent leur mise en forme. Cliquez sur Actualiser pour récupérer les modifications de Desktop. La lecture nécessite une connexion au serveur. Le verrouillage de la clé masque le contenu.</p>\n<p>Si vos appareils prennent en charge l’écriture, choisissez Créer ou Modifier, puis Enregistrer le texte. Le statut Enregistré apparaît après vérification de la réponse du serveur. En cas d’échec, le texte reste dans l’éditeur ouvert. Si les versions diffèrent, ouvrez-les et choisissez le résultat.</p>\n<p>Si une nouvelle version apparaît pendant la rédaction, cliquez sur Actualiser dans l’éditeur et comparez-la à votre brouillon. Enregistrez votre brouillon à la place de la nouvelle version après les avoir comparés. Si la connexion est interrompue, réessayez d’enregistrer.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Lire les documents cloud sur le Web"
   },
@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Fichiers locaux sur chaque appareil</h2><p>Word et Scrivener sont connectés séparément sur chaque appareil. Les chemins, sources choisies et vérifications locales ne sont pas synchronisés.</p><p>Exportez une copie Word ou reconnectez un fichier existant. Sa sélection compare le contenu sans l’écraser. En cas de différence, importez explicitement Word ou écrivez la version WORTA ; une copie séparée peut être exportée. Comparez à nouveau après une modification.</p><p>Un fichier local manquant ne supprime ni le texte ni la progression cloud. Choisissez explicitement un autre chemin. La progression Word/Scrivener nécessite de confirmer la comparaison. Les liens locaux sont indisponibles sur Web ; le texte WORTA reste accessible.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Fichiers locaux sur chaque appareil"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Projets cloud sur le Web</h2>\n<p>Dans Projets, vous pouvez créer des projets dans la limite de votre compte. Ouvrez un projet et choisissez Modifier le projet pour changer le nom, l’objectif ou l’échéance. Les modifications apparaissent sur les autres appareils après synchronisation. Desktop importe le nom depuis l’historique cloud vérifié. Seuls les anciens projets dépourvus de paramètres cloud demandent un nom.</p>\n<p>Dans un projet ouvert, choisissez Ajouter une étape et saisissez son nom, son objectif et son échéance. L’objectif et l’échéance sont facultatifs. Dans Textes, ouvrez le manuscrit du projet ou de l’étape sélectionnée. Les changements confirmés par le serveur sont disponibles sur les autres appareils lors de la synchronisation.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Projets cloud sur le Web"
   }
 ]

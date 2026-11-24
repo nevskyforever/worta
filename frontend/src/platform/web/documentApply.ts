@@ -31,7 +31,7 @@ export async function commitDocumentEvent(transaction: BrowserSyncTransaction, s
     ledger.previous_projection = await transaction(scope, ['documentProjection'], 'readonly', (tx, done, abort) => {
       const read = tx.objectStore('documentProjection').get([scope.accountId, h.project_id, h.entity_id])
       read.onsuccess = () => { try { const previous = read.result as DocumentProjection | undefined
-        if (!previous || previous.head_event_id !== h.parents[0]) fail()
+        if (!previous) fail()
         done(structuredClone(previous!))
       } catch (error) { abort(error) } }
     })
@@ -100,27 +100,42 @@ export function documentPreparationInventory(snapshot: import('./replayInventory
 /** Reauthenticate durable outcomes using the same source/ledger/projection checks
  * for recovery, source reimport and unlocked presentation. Digests alone never
  * authorize a row. The caller retains its full snapshot CAS/lifetime check. */
-export async function authenticateReplayDocuments(scope: BrowserSyncScope,
+export async function authenticateDocumentTips(scope: BrowserSyncScope,
   snapshot: import('./replayInventory').ReplaySnapshot, amk: AccountMasterKey, current: () => boolean) {
   if (!current()) throw new BrowserPersistenceError('closed')
   if (!snapshot.rows.some(row => row.state === 'document_proven')) return []
-  const inventory = documentPreparationInventory(snapshot), documents = [], verified = new Map<number, PreparedDocumentGenesis>()
+  const inventory = documentPreparationInventory(snapshot), histories = new Map<string, Map<string, import('@/cloud/documentCodec').DocumentEvent>>(), verified = new Map<number, PreparedDocumentGenesis>()
   for (const row of snapshot.rows) if (row.state === 'document_proven') {
     if (!current()) throw new BrowserPersistenceError('closed')
     const joined = joinDocumentRecords(scope, row, snapshot.documents?.ledger ?? [], snapshot.documents?.projections ?? [])
     if (await documentDigest(joined.ledger) !== row.document_proof.ledger_digest
       || await documentDigest(joined.projection) !== row.document_proof.projection_digest) fail()
     const token = await prepareDocumentEvent(scope, row, inventory, amk, current, verified)
-    const document = await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
-    if (snapshot.documents?.projections.some(value => (value as DocumentProjection).head_event_id === row.event_id)) documents.push(document)
+    await authenticateDocumentProjection(scope, token, inventory, joined.ledger, joined.projection, amk)
+    const { event } = inspectPreparedDocumentGenesis(token, scope, inventory)
+    const key = JSON.stringify([event.header.project_id, event.header.entity_id])
+    const tips = histories.get(key) ?? new Map()
+    for (const parent of event.header.parents) tips.delete(parent)
+    tips.set(row.event_id, event)
+    histories.set(key, tips)
   }
+  if (!current()) throw new BrowserPersistenceError('closed')
+  return [...histories.values()].map(tips => [...tips.values()])
+}
+
+export async function authenticateReplayDocuments(scope: BrowserSyncScope,
+  snapshot: import('./replayInventory').ReplaySnapshot, amk: AccountMasterKey, current: () => boolean) {
+  return documentsFromTips(await authenticateDocumentTips(scope, snapshot, amk, current))
+}
+
+export function documentsFromTips(owners: Awaited<ReturnType<typeof authenticateDocumentTips>>) {
+  const documents = owners.flatMap(tips => tips.length === 1 && tips[0]!.document ? [tips[0]!.document] : [])
   const slots = new Set<string>()
   for (const document of documents) {
     const slot = JSON.stringify([document.project_id, document.stage_id])
     if (slots.has(slot)) fail()
     slots.add(slot)
   }
-  if (!current()) throw new BrowserPersistenceError('closed')
   return documents
 }
 

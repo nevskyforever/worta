@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account and unlock the key. Open Texts or Notes, choose a project, then select Project or a stage.</p>\n<p>Texts open with formatting. Click Refresh to load changes from Desktop. Reading requires a server connection. Locking the key hides the content.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Reading cloud documents on Web</h2>\n<p>Sign in to your cloud account and unlock the key. Open Texts or Notes, choose a project, then select Project or a stage.</p>\n<p>Texts open with formatting. Click Refresh to load changes from Desktop. Reading requires a server connection. Locking the key hides the content.</p>\n<p>When your devices support writing, choose Create or Edit, then Save text. Saved appears after the server response has been verified. If saving fails, the text stays in the open editor. If versions differ, open them and choose the result.</p>\n<p>If a new version appears while you work, use Refresh in the editor and compare it with your draft. Save your draft over the new version only after comparing. If the connection drops, retry the save.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Reading cloud documents on Web"
   },
@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Local files on each device</h2><p>Word and Scrivener are attached separately on each device. Paths, selected sources and local checks are not synchronized.</p><p>Export a Word copy first or reattach an existing file. Selecting an existing file compares content without overwriting it. If versions differ, explicitly import Word or write the WORTA version; you can export a separate copy. Compare again if WORTA or the file changed since comparison.</p><p>A missing local file does not delete cloud text or progress. Choose another path explicitly. Word/Scrivener progress changes require confirmation of the comparison. Local links are unavailable on Web; WORTA text remains available.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Local files on each device"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Cloud projects on the Web</h2>\n<p>In Projects, you can create projects within your account limit. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.</p>\n<p>In an open project, choose Add stage and enter its name, goal and deadline. The goal and deadline are optional. In Texts, open the manuscript for the selected project or stage. Once the server confirms a change, it is available to other devices when they sync.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Cloud projects on the Web"
   }
 ]

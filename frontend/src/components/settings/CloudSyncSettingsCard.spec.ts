@@ -149,9 +149,7 @@ describe('CloudSyncSettingsCard', () => {
     await startImport!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Название для проекта без облачных настроек')
-    expect(wrapper.find('input').attributes('required')).toBeUndefined()
-    expect(wrapper.text()).toContain('Введите название только при отсутствии этих настроек')
+    expect(wrapper.text()).not.toContain('Название для проекта без облачных настроек')
     expect(instance.importRemoteProject).not.toHaveBeenCalled()
     ;(instance.importRemoteProject as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new MetadataImportContinuationError(16))
     await wrapper.find('form.cloud-sync-card__inline-form').trigger('submit'); await flushPromises()

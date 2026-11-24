@@ -1,3 +1,4 @@
+import { sealDocumentForOutbox } from '@/platform/web/documentOutbound'
 import {selectWriterFrame,normalizeAuthenticatedFrame,COMPRESSION_LIMITS} from './frameCompression'
 import {encryptProjectCover} from './projectCoverCrypto'
 import {createCoverReference,authenticateCoverReference,type ProjectCoverReference} from './projectCoverReference'
@@ -60,7 +61,8 @@ interface CatalogSealRequest {action:'catalog_seal';payload:CatalogEvent;amk:num
 interface CatalogOpenRequest {action:'catalog_open';canonical_user_id:string;amk:number[];item:{event:{entity_id:string;entity_type:string};object:OpenRequest['item']['object']}}
 interface ContentSealRequest{action:'content_note_seal';frame:number[];amk:number[]}
 interface ContentOpenRequest{action:'content_note_open';canonical_user_id:string;amk:number[];item:OpenRequest['item']}
-interface DocumentEventSealRequest{action:'document_event_seal';payload:import('./documentCodec').DocumentEvent;amk:number[]}
+type DocumentEventSealRequest = { payload: import('./documentCodec').DocumentEvent; amk: number[] }
+  & ({ action: 'document_event_seal' } | { action: 'web_document_seal' })
 interface DocumentSealRequest{action:'document_seal';frame:number[];amk:number[];compression_ready?:boolean}
 interface DocumentOpenRequest{action:'document_open';canonical_user_id:string;amk:number[];item:OpenRequest['item']}
 interface MapEventSealRequest{action:'map_event_seal';payload:import('./mapCodec').MapEvent;amk:number[]}
@@ -112,6 +114,12 @@ async function execute(request: BridgeRequest): Promise<Record<string, unknown>>
     const decoded=unframeGameEvent(frame,request.scope);expect(decoded.header.event_id).toBe(d.event_id);expect(decoded.header.account_id).toBe(request.canonical_user_id);expect(decoded.header.device_id).toBe(d.device_id);expect(decoded.header.entity_id).toBe(d.entity_id)
     if(decoded.header.scope==='project')expect(decoded.header.project_id).toBe(d.project_id);else expect(d.canonical_user_id).toBe(request.canonical_user_id)
     return {decoded,nonce:[...nonce],ciphertext:[...ciphertext],frame:[...frame]}
+  }
+  if (request.action === 'web_document_seal') {
+    const h = request.payload.header
+    const body = await sealDocumentForOutbox({ canonicalUserId: h.account_id, deviceId: h.device_id, accountId: h.account_id },
+      request.payload, asAccountMasterKey(Uint8Array.from(request.amk)))
+    return JSON.parse(body)
   }
   if(request.action==='document_event_seal'){return execute({action:'document_seal',frame:[...await frameDocumentEvent(request.payload)],amk:request.amk})}
   if(request.action==='progress_event_seal'){return execute({action:'progress_seal',frame:[...await frameProgressEvent(request.payload)],amk:request.amk})}

@@ -775,11 +775,45 @@ class SyncService:
                     'encrypted_sync_batch_too_large', 'Encrypted sync batch exceeds ciphertext size limit.', 413,
                 )
 
+    def _check_web_stage(self, session: Session, user_id: object, state, items,
+                         pin: tuple[int, int, object, object | None]) -> None:
+        expected, epoch, metadata_id, order_id = pin
+        stage, order = (item.event for item in items[:2])
+        if state.cutover_epoch != epoch:
+            raise SyncProtocolError('web_stage_snapshot_changed', 'Web stage snapshot changed.', 409)
+        # A complete retry still goes through the normal byte-for-byte duplicate checks.
+        existing = [self._sync.event(session, user_id, item.event.event_id) for item in items]
+        if all(row is not None for row in existing):
+            if [row.server_sequence for row in existing] != list(range(expected + 1, expected + len(items) + 1)):
+                raise SyncProtocolError('web_stage_snapshot_changed', 'Web stage snapshot changed.', 409)
+            return
+        if any(row is not None for row in existing) or state.current_sequence != expected:
+            raise SyncProtocolError('web_stage_snapshot_changed', 'Web stage snapshot changed.', 409)
+        project = self._projects.get(session, user_id, stage.project_id)
+        if project is None or project.bootstrap_state != 'active':
+            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+        history = select(SyncEvent).where(SyncEvent.user_id == user_id, SyncEvent.project_id == stage.project_id)
+        def latest(entity_type: str, entity_id: str):
+            return session.scalar(history.where(SyncEvent.entity_type == entity_type, SyncEvent.entity_id == entity_id)
+                                  .order_by(SyncEvent.server_sequence.desc()).limit(1))
+
+        metadata = latest('project_metadata', stage.project_id)
+        previous_order = latest('stage_order', 'stage_order')
+        if (metadata is None or metadata.operation != 'upsert' or metadata.event_id != metadata_id
+                or (previous_order.event_id if previous_order else None) != order_id
+                or order.revision != (previous_order.revision if previous_order else 0) + 1
+                or latest('stage', stage.entity_id) is not None
+                or len(items) == 3 and items[2].event.revision != metadata.revision + 1):
+            raise SyncProtocolError('web_stage_parent_changed', 'Web stage parents changed.', 409)
+
     def push_encrypted(self, session: Session, user_id: object, device_id: object,
                        items: list[EncryptedSyncPushItem] | list[V2EncryptedSyncPushItem], *,
                        transport_version: int = 1, metadata_cover: bool = False,
                        web_progress: tuple[int, int, object] | None = None,
-                       web_game: tuple[int, int, object] | None = None) -> tuple[list[SyncPushResult], int]:
+                       web_document: tuple[int, int, object | None] | None = None,
+                       web_game: tuple[int, int, object] | None = None,
+                       web_metadata: tuple[int, int, object | None, object | None] | None = None,
+                       web_stage: tuple[int, int, object, object | None] | None = None) -> tuple[list[SyncPushResult], int]:
         try:
             from .schemas import AccountSyncEventEnvelope
             for item in items:
@@ -789,15 +823,35 @@ class SyncService:
             if web_progress is not None and (transport_version != 3 or metadata_cover or len(items) != 1
                                              or items[0].event.entity_type != 'progress'):
                 raise SyncProtocolError('web_progress_scope_invalid', 'Web Progress accepts one Progress event.', 422)
+            if sum(scope is not None for scope in (web_progress, web_game, web_document, web_metadata, web_stage)) > 1:
+                raise SyncProtocolError('web_write_scope_invalid', 'Web write scopes cannot be combined.', 422)
             if web_game is not None and (transport_version != 3 or metadata_cover or web_progress is not None
                                         or len(items) != 1 or items[0].event.entity_type != 'account_game'):
                 raise SyncProtocolError('web_game_scope_invalid', 'Web Game accepts one account Game event.', 422)
+            if web_document is not None and (transport_version != 3 or metadata_cover or web_progress is not None
+                                             or len(items) != 1 or items[0].event.entity_type != 'document'):
+                raise SyncProtocolError('web_document_scope_invalid', 'Web texts accept one Document event.', 422)
+            if web_metadata is not None and (transport_version != 3 or metadata_cover or web_document is not None
+                                             or web_progress is not None or len(items) != 1
+                                             or items[0].event.entity_type != 'project_metadata'
+                                             or items[0].event.operation != 'upsert'):
+                raise SyncProtocolError('web_metadata_scope_invalid', 'Web projects accept one Metadata update.', 422)
+            if web_stage is not None:
+                events = [item.event for item in items]
+                types = [event.entity_type for event in events]
+                if (transport_version != 3 or metadata_cover
+                        or types not in (['stage', 'stage_order'], ['stage', 'stage_order', 'project_metadata'])
+                        or any(event.project_id != events[0].project_id or event.operation != 'upsert'
+                               for event in events) or events[0].revision != 1):
+                    raise SyncProtocolError('web_stage_scope_invalid', 'Web stages accept one Stage and its order.', 422)
             session.commit()
             with session.begin():
+                if web_metadata is not None and web_metadata[3] is not None:
+                    session.scalar(select(User.id).where(User.id == user_id).with_for_update())
                 state = self._sync.ensure_user_state(session, user_id, lock=True)
                 # Scoped Web writes do not enroll a reader, grant pull/ACK,
                 # or change the device set that the ordinary gates protect.
-                if web_progress is None and web_game is None:
+                if all(scope is None for scope in (web_progress, web_game, web_document, web_metadata, web_stage)):
                     device = self._registered_device(session, user_id, device_id)
                     device.last_seen_at = utc_now()
                 if metadata_cover and (transport_version != 3 or any(item.event.entity_type != 'project_metadata' for item in items)
@@ -818,6 +872,8 @@ class SyncService:
                 if any(item.event.entity_type == 'note' and item.event.operation == 'event' for item in items):
                     if not self.content_note_gate(session, user_id)[0]:
                         raise SyncProtocolError('content_note_readers_not_ready', 'Registered devices must support Note readers.', 409)
+                if web_stage is not None:
+                    self._check_web_stage(session, user_id, state, items, web_stage)
                 results: list[SyncPushResult] = []
                 for item in items:
                     event = item.event
@@ -833,8 +889,44 @@ class SyncService:
                         results.append(SyncPushResult(event.event_id, existing.server_sequence, True))
                         continue
                     project = self._projects.get(session, user_id, event.project_id) if event.project_id is not None else None
+                    if web_metadata is not None and web_metadata[3] is not None:
+                        expected, epoch, _, bootstrap_id = web_metadata
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_metadata_snapshot_changed', 'Web project snapshot changed.', 409)
+                        if project is not None or event.operation != 'upsert' or event.revision != 1:
+                            raise SyncProtocolError('web_metadata_scope_invalid', 'Invalid project creation.', 409)
+                        try:
+                            limit = LimitsService().effective_for_user(session, user_id).max_cloud_projects
+                        except LimitsUnavailableError:
+                            raise SyncProtocolError('limits_unavailable', 'Limits are temporarily unavailable.', 503) from None
+                        if self._projects.count(session, user_id) >= limit:
+                            raise SyncProtocolError('cloud_project_limit_reached', 'Cloud project limit reached.', 409)
+                        if session.scalar(select(CloudProject).where(
+                            CloudProject.user_id == user_id, CloudProject.bootstrap_id == bootstrap_id,
+                        )) is not None:
+                            raise SyncProtocolError('web_metadata_scope_invalid', 'Bootstrap ID already exists.', 409)
+                        project = self._projects.add(session, user_id, event.project_id)
+                        project.bootstrap_id = bootstrap_id
+                        project.bootstrap_device_id = device_id
+                        project.bootstrap_state = 'active'
+                        project.bootstrap_completed_at = utc_now()
+                        project.initial_event_count = 1
+                        project.initial_max_server_sequence = state.current_sequence + 1
+                        session.flush()
                     if event.project_id is not None and project is None:
                         raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not enabled.')
+                    if web_metadata is not None and web_metadata[3] is None:
+                        expected, epoch, parent_id, _ = web_metadata
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_metadata_snapshot_changed', 'Web project snapshot changed.', 409)
+                        if project is None or project.bootstrap_state != 'active':
+                            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+                        latest = session.scalar(select(SyncEvent).where(
+                            SyncEvent.user_id == user_id, SyncEvent.project_id == event.project_id,
+                            SyncEvent.entity_type == 'project_metadata',
+                        ).order_by(SyncEvent.server_sequence.desc()).limit(1))
+                        if latest is None or latest.event_id != parent_id or latest.revision + 1 != event.revision:
+                            raise SyncProtocolError('web_metadata_parent_changed', 'Web project parent changed.', 409)
                     if web_progress is not None:
                         expected, epoch, parent_id = web_progress
                         if state.current_sequence != expected or state.cutover_epoch != epoch:
@@ -860,6 +952,23 @@ class SyncService:
                         ).order_by(SyncEvent.revision.desc(), SyncEvent.server_sequence.desc()).limit(1))
                         if latest is None or latest.event_id != parent_id or latest.revision + 1 != event.revision:
                             raise SyncProtocolError('web_game_parent_changed', 'Web Game parent changed.', 409)
+                    if web_document is not None:
+                        expected, epoch, parent_id = web_document
+                        if state.current_sequence != expected or state.cutover_epoch != epoch:
+                            raise SyncProtocolError('web_document_snapshot_changed', 'Web text snapshot changed.', 409)
+                        if project is None or project.bootstrap_state != 'active':
+                            raise SyncProtocolError('cloud_project_not_enabled', 'Cloud project is not active.', 409)
+                        history = select(SyncEvent).where(
+                            SyncEvent.user_id == user_id,
+                            SyncEvent.project_id == event.project_id,
+                            SyncEvent.entity_type == 'document',
+                            SyncEvent.entity_id == event.entity_id,
+                        )
+                        latest = session.scalar(history.order_by(SyncEvent.server_sequence.desc()).limit(1))
+                        max_revision = session.scalar(history.with_only_columns(func.max(SyncEvent.revision))) or 0
+                        if (event.revision != max_revision + 1
+                                or (latest.event_id if latest is not None else None) != parent_id):
+                            raise SyncProtocolError('web_document_parent_changed', 'Web text parent changed.', 409)
                     if (project is not None and project.bootstrap_state == 'initializing'
                             and project.bootstrap_device_id != device_id):
                         raise SyncProtocolError(

@@ -1,3 +1,5 @@
+import { sealDocumentForOutbox } from './documentOutbound'
+import type { DocumentEvent } from '@/cloud/documentCodec'
 import { decodeBase64Url } from '@/api/base64url'
 import { ApiError } from '@/api/client'
 import { openBrowserCanonicalObject } from './canonicalReaders'
@@ -38,7 +40,7 @@ import type { LocalProjectRecord } from './localAuthorityRecords'
 import { BrowserPersistenceError, persistenceError, runBrowserTransaction } from './persistence'
 import { BrowserSyncDurability, snapshotBrowserSyncScope,
   type BrowserOutboxRecord, type BrowserReceivedInboxRecord, type BrowserSyncScope, type BrowserSyncTransaction } from './syncDurability'
-import { REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame, replayUuid,
+import { REPLAY_LIMITS, prepareReplayPage, recoveryRegistryExtends, replayAnchor, replaySame, replayUuid,
   type ReplayAnchor, type ReplayManifest } from './replayRecords'
 import type { ReplaySourceSeedReference } from './replayRecords'
 
@@ -224,7 +226,7 @@ class BrowserReplayStorage {
           this.scope.deviceId, command, new Date().toISOString(), crypto.randomUUID())
         return sealAccountGame(this.scope, event, amk)
       })
-      const [queued] = await new BrowserSyncDurability(this.authorTransaction(expected, current)).enqueue(this.scope, [raw])
+      const [queued] = await new BrowserSyncDurability(this.onlineAuthorTransaction(expected, current)).enqueue(this.scope, [raw])
       item = queued?.item
       if (!item) throw new BrowserPersistenceError('closed')
     }
@@ -243,7 +245,7 @@ class BrowserReplayStorage {
         throw error
       })
     if (!current()) throw new BrowserPersistenceError('closed')
-    await new BrowserSyncDurability(this.authorTransaction(staged, current)).commitUploadAcceptance(this.scope, pending, response.value)
+    await new BrowserSyncDurability(this.onlineAuthorTransaction(staged, current)).commitUploadAcceptance(this.scope, pending, response.value)
     return pending.event_id
   }
 
@@ -275,9 +277,62 @@ class BrowserReplayStorage {
       transitionProgress(event, plan.projection)
       return sealProgressForOutbox(this.scope, event, amk)
     })
-    const [queued] = await new BrowserSyncDurability(this.authorTransaction(expected, current)).enqueue(this.scope, [raw])
+    const [queued] = await new BrowserSyncDurability(this.onlineAuthorTransaction(expected, current)).enqueue(this.scope, [raw])
     if (!queued || !current()) throw new BrowserPersistenceError('closed')
     return this.sendProgress(auth, await this.read(), queued.item, parent.event_id, current)
+  }
+
+  async publishDocument(auth: NormalUserAuthRuntime, keys: RuntimeKeyContext, expected: ReplaySnapshot, event: DocumentEvent) {
+    event = structuredClone(event)
+    const context = auth.requireContext(), lease = keys.leaseForAccount(this.scope.accountId)
+    const current = () => !this.signal.aborted && auth.isCurrent(context) && !!lease?.isCurrent()
+    if (!lease || !current() || context.userId !== this.scope.canonicalUserId || !expected.manifest
+      || expected.manifest.applied_cursor !== expected.manifest.receive_cursor)
+      throw new BrowserPersistenceError('stale_authority')
+    const applied = new Set(expected.rows.map(row => row.event_id))
+    if (expected.author?.out.some(value => !applied.has((value as BrowserOutboxRecord).event_id)))
+      throw new BrowserPersistenceError('stale_authority')
+    const raw = await lease.use(amk => sealDocumentForOutbox(this.scope, event, amk))
+    const [queued] = await new BrowserSyncDurability(this.onlineAuthorTransaction(expected, current)).enqueue(this.scope, [raw])
+    if (!queued || !current()) throw new BrowserPersistenceError('closed')
+    return this.sendOnline(auth, await this.read(), queued.item, this.documentParentPin(expected, event), current, 'document')
+  }
+
+  private documentParentPin(snapshot: ReplaySnapshot, event: DocumentEvent) {
+    const parents = new Set(event.header.parents)
+    const last = snapshot.rows.filter(row => parents.has(row.event_id)).at(-1)
+    if (parents.size && !last) throw new BrowserPersistenceError('missing_history')
+    return last?.event_id ?? null
+  }
+
+  /** Explicit retry of the same save. Never constructs a replacement event ID. */
+  async retryDocument(auth: NormalUserAuthRuntime, keys: RuntimeKeyContext, matches: (event: DocumentEvent) => boolean) {
+    const expected = await this.read()
+    const applied = new Set(expected.rows.filter(row => row.state === 'document_proven').map(row => row.event_id))
+    const unresolved = (expected.author?.out as BrowserOutboxRecord[] | undefined)?.filter(item =>
+      !applied.has(item.event_id) && JSON.parse(item.raw_body).items[0].event.entity_type === 'document') ?? []
+    if (!unresolved.length) return null
+    if (unresolved.length !== 1) throw new BrowserPersistenceError('conflicting_record')
+    const context = auth.requireContext(), lease = keys.leaseForAccount(this.scope.accountId)
+    const current = () => !this.signal.aborted && auth.isCurrent(context) && !!lease?.isCurrent()
+    if (!lease || context.userId !== this.scope.canonicalUserId || !current()) throw new BrowserPersistenceError('closed')
+    const item = unresolved[0]!, wire = JSON.parse(item.raw_body).items[0]
+    const parentId = await lease.use(async amk => {
+      const nonce = decodeBase64Url(wire.object.nonce), ciphertext = decodeBase64Url(wire.object.ciphertext)
+      try {
+        const event = await openBrowserCanonicalObject(amk, { accountId: this.scope.canonicalUserId,
+          projectId: wire.event.project_id, entityId: wire.event.entity_id, entityType: 'document', eventId: item.event_id },
+        { ...wire.object, nonce, ciphertext }) as DocumentEvent
+        if (event.header.device_id !== this.scope.deviceId || event.header.revision !== wire.event.revision
+          || event.header.updated_at !== wire.event.updated_at || !matches(event))
+          throw new BrowserPersistenceError('stale_authority')
+        return this.documentParentPin(expected, event)
+      } finally { nonce.fill(0); ciphertext.fill(0) }
+    })
+    if (item.state === 'accepted') return item.event_id
+    const gate = await auth.authorized(token => encryptedSyncV3Api.webDocumentWriteReady(token, this.signal))
+    if (!gate.value) throw new BrowserPersistenceError('unsupported_local_source')
+    return this.sendOnline(auth, expected, item, parentId, current, 'document')
   }
 
   /** Explicit retry of the same save. Never constructs a replacement event ID. */
@@ -312,18 +367,25 @@ class BrowserReplayStorage {
 
   private async sendProgress(auth: NormalUserAuthRuntime, staged: ReplaySnapshot, item: BrowserOutboxRecord,
     parentId: string, current: () => boolean) {
+    return this.sendOnline(auth, staged, item, parentId, current, 'progress')
+  }
+
+  private async sendOnline(auth: NormalUserAuthRuntime, staged: ReplaySnapshot, item: BrowserOutboxRecord,
+    parentId: string | null, current: () => boolean, family: 'progress' | 'document') {
     const manifest = staged.manifest
     if (!manifest || !current() || !replaySame(await this.read(), staged)) throw new BrowserPersistenceError('stale_authority')
     const pin = { cursor: manifest.anchor.registry.current_cursor, epoch: manifest.anchor.transport.cutover_epoch, parentId }
-    const response = await auth.authorized(token => encryptedSyncV3Api.pushSealedProgress(token, item.event_id, item.raw_body, this.signal, pin))
+    const response = await auth.authorized(token => family === 'document'
+      ? encryptedSyncV3Api.pushSealedDocument(token, item.event_id, item.raw_body, this.signal, pin)
+      : encryptedSyncV3Api.pushSealedProgress(token, item.event_id, item.raw_body, this.signal, { ...pin, parentId: parentId! }))
       .catch(async error => {
         if (current() && error instanceof ApiError && error.status === 409
-          && ['web_progress_snapshot_changed', 'web_progress_parent_changed'].includes(error.code))
+          && [`web_${family}_snapshot_changed`, `web_${family}_parent_changed`].includes(error.code))
           await this.discardRejectedPublication(staged, item, current)
         throw error
       })
     if (!current()) throw new BrowserPersistenceError('closed')
-    await new BrowserSyncDurability(this.authorTransaction(staged, current)).commitUploadAcceptance(this.scope, item, response.value)
+    await new BrowserSyncDurability(this.onlineAuthorTransaction(staged, current)).commitUploadAcceptance(this.scope, item, response.value)
     return item.event_id
   }
 
@@ -358,7 +420,7 @@ class BrowserReplayStorage {
     }, abort))
   }
 
-  private authorTransaction(base: ReplaySnapshot, current: () => boolean): BrowserSyncTransaction {
+  private onlineAuthorTransaction(base: ReplaySnapshot, current: () => boolean): BrowserSyncTransaction {
     return (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope) || mode !== 'readwrite' || !current()) fail()
       return this.run(mode, (tx, result, abort) => this.load(tx, before => {
@@ -402,7 +464,8 @@ class BrowserReplayStorage {
       check()
       const before = await this.read(), manifest = before.manifest, seed = manifest?.source_seeds?.find(value => value.project_id === projectId)
       if (!manifest || !seed || !before.sources?.some(value => value.project_id === projectId) || before.bindings.some(value => value.project_id === projectId)
-        || before.rows.some(row => row.state !== 'received')) throw new BrowserPersistenceError('stale_authority')
+        || before.rows.some(row => row.state !== 'received' && (delivery !== 'recovery' || JSON.parse(row.wire_item).event.project_id === projectId)))
+        throw new BrowserPersistenceError('stale_authority')
       const server = async () => {
         check()
         const registry = await auth.authorized(token => cloudProjectsApi.listBootstraps(token, this.signal)); check()
@@ -697,7 +760,7 @@ class BrowserReplayStorage {
       const inventory=documentPreparationInventory(expected),token=await prepareDocumentEvent(this.scope,row,inventory,amk,current)
       const document=inspectPreparedDocumentGenesis(token,this.scope,inventory).projection
       const existing=await authenticateReplayDocuments(this.scope,expected,amk,current)
-      if(existing.some(value=>value.project_id===document.project_id&&value.stage_id===document.stage_id&&value.id!==document.id))throw new BrowserPersistenceError('unsupported_local_source')
+      if(document && existing.some(value=>value.project_id===document.project_id&&value.stage_id===document.stage_id&&value.id!==document.id))throw new BrowserPersistenceError('unsupported_local_source')
       return commitDocumentEvent(this.ownerPort().transaction(expected,sequence,server),this.scope,token,inventory,amk,current,
         (tx,done,abort)=>readStageInventory(tx,this.scope,done,abort))
     })
@@ -881,7 +944,7 @@ class BrowserReplayStorage {
     const expected = structuredClone(input), prior = expected.manifest, anchor = replayAnchor(nextAnchor.registry, nextAnchor.transport)
     if (!prior || prior.contract_version !== 6 || anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
       || prior.receive_cursor > prior.anchor.registry.current_cursor
-      || !replaySame(prior.anchor.transport, anchor.transport) || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)
+      || !recoveryRegistryExtends(prior.anchor, anchor)
       || prior.revision === Number.MAX_SAFE_INTEGER) throw new BrowserPersistenceError('stale_authority')
     const { page, bytes } = prepareReplayPage(raw, prior.receive_cursor, this.scope, anchor)
     if (page.next_cursor > anchor.registry.current_cursor || !page.items.length
@@ -963,7 +1026,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateGames' | 'authenticateProgress' | 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'|'publishProgress'|'retryProgress'|'publishGameShop'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateGames' | 'authenticateProgress' | 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'|'publishProgress'|'retryProgress'|'publishDocument'|'retryDocument'|'publishGameShop'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)

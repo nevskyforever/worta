@@ -37,7 +37,7 @@ const fail = (code: string): never => { throw new BrowserReplayError(code) }
 
 /** Authenticates the server's actual bootstrap cohort; it never applies any Note. */
 export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snapshot: ReplaySnapshot, projectId: string, amk: AccountMasterKey,
-  current: () => boolean): Promise<Evidence> {
+  current: () => boolean, recovery = false): Promise<Evidence> {
   const manifest = snapshot.manifest
   if (!manifest) throw new BrowserReplayError('source_seed_ineligible')
   if (manifest.phase !== 'received' || snapshot.rows.length !== manifest.receive_cursor
@@ -59,9 +59,12 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
       // received until the Document owner authenticates and applies it. Persisted
       // outcomes were freshly authenticated above, never trusted by state alone.
       const accountGame = String(event.entity_type) === 'account_game'
-      if ((!accountGame && event.project_id !== projectId) || row.server_sequence <= remote.initial_max_server_sequence
+      const eventProject = accountGame ? undefined
+        : manifest.anchor.registry.projects.find(project => project.project_id === event.project_id)
+      if ((!accountGame && (eventProject?.state !== 'active' || eventProject.initial_max_server_sequence === null
+            || row.server_sequence <= eventProject.initial_max_server_sequence))
         || !['received', ['project_game','account_game'].includes(event.entity_type) ? 'game_proven' : event.entity_type === 'progress' ? 'progress_proven' : event.entity_type === 'map' ? 'map_proven' : 'document_proven'].includes(row.state) || event.operation !== (accountGame ? 'upsert' : 'event') || !Number.isSafeInteger(event.revision) || event.revision < 1
-        || event.deleted_at !== null || (event.device_id === scope.deviceId && event.entity_type !== 'progress' && !accountGame)) fail('source_seed_unsupported_family')
+        || event.deleted_at !== null || (event.device_id === scope.deviceId && !['progress', 'document', 'account_game'].includes(event.entity_type))) fail('source_seed_unsupported_family')
       if (event.device_id === scope.deviceId) {
         const sameEvent = (candidate: unknown) => (candidate as {event_id: string}).event_id === event.event_id
         const proof = validateBrowserRetainedHistory(scope, event,
@@ -83,15 +86,18 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
     }
     if (event.project_id === projectId && event.entity_type === 'project_metadata') metadataRows.push(row)
   }
-  if (initial.length !== remote.initial_event_count || (initial.at(-1)?.server_sequence ?? 0) !== remote.initial_max_server_sequence) fail('source_seed_cohort_mismatch')
+  const metadataBootstrap = recovery && remote.initial_event_count === 1 && initial.length === 0
+    && metadataRows[0]?.server_sequence === remote.initial_max_server_sequence
+  if (!metadataBootstrap && (initial.length !== remote.initial_event_count
+    || (initial.at(-1)?.server_sequence ?? 0) !== remote.initial_max_server_sequence)) fail('source_seed_cohort_mismatch')
   if (!metadataRows.length) fail('source_seed_genesis_missing')
   let project: NativeLocalProject | undefined
   const chain: BrowserMetadataProof[] = []
   for (const [index, row] of metadataRows.entries()) {
     if (!current()) fail('session_closed')
     const wire = JSON.parse(row.wire_item), descriptor = wire.event as V3Descriptor
-    if (descriptor.entity_id !== projectId || descriptor.project_id !== projectId || descriptor.device_id !== remote.origin_device_id
-      || descriptor.operation !== 'upsert' || descriptor.deleted_at !== null || row.protocol_version !== 3) fail('source_seed_metadata_history_rejected')
+    if (descriptor.entity_id !== projectId || descriptor.project_id !== projectId || (!recovery || index === 0) && descriptor.device_id !== remote.origin_device_id
+      || (descriptor.operation !== 'upsert' && !(recovery && index === metadataRows.length - 1 && descriptor.operation === 'delete')) || row.protocol_version !== 3) fail('source_seed_metadata_history_rejected')
     let nonce: Uint8Array | undefined, ciphertext: Uint8Array | undefined, identity: Uint8Array<ArrayBuffer> | undefined, digest: Uint8Array | undefined
     try {
       nonce = decodeBase64Url(wire.object.nonce); ciphertext = decodeBase64Url(wire.object.ciphertext)
@@ -101,13 +107,15 @@ export async function authenticateReplaySourceSeed(scope: BrowserSyncScope, snap
       digest = new Uint8Array(await crypto.subtle.digest('SHA-256', identity))
       const hash = Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
       const verified = metadataProofFor(scope, descriptor, event, hash, row.protocol_version)
-      const previous = chain.at(-1), metadata = event.metadata ?? fail('source_seed_metadata_history_rejected')
-      if (verified.bootstrap_id !== remote.bootstrap_id || verified.source_device_id !== remote.origin_device_id
-        || (index === 0 ? metadata.status !== 'активен' : !['активен','завершен'].includes(metadata.status))
+      const previous = chain.at(-1), metadata = event.metadata
+      const retired = recovery && index > 0 && index === metadataRows.length - 1 && verified.operation === 'delete'
+      if (verified.bootstrap_id !== remote.bootstrap_id || (!recovery || index === 0) && verified.source_device_id !== remote.origin_device_id
+        || (!retired && (index === 0 ? metadata?.status !== 'активен' : !metadata || !['активен','завершен'].includes(metadata.status)))
         || (index === 0 ? verified.operation !== 'create' || verified.revision !== 1 || verified.generation !== 1 || verified.parent_event_ids.length
-          : verified.operation !== 'update' || verified.revision !== previous!.revision + 1
+          : (!retired && verified.operation !== 'update') || verified.revision !== previous!.revision + 1
             || verified.generation <= previous!.generation || !replaySame(verified.parent_event_ids, [previous!.event_id]))) fail('source_seed_metadata_history_rejected')
       if (index === 0) {
+        if (!metadata) return fail('source_seed_genesis_rejected')
         if (row.state !== 'received' && (row.state !== 'applied'
           || !snapshot.owners.some(head => head.owner_kind === 'project_metadata' && head.owner_id === projectId
             && head.history.some(proof => proof.event_id === descriptor.event_id)))) fail('source_seed_genesis_rejected')
@@ -177,13 +185,13 @@ export async function seedReplayNoteSource(port: SeedPort, scope: BrowserSyncSco
       : new Set<number>()
     await reauthenticateReplayOwners(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, true, noteSequences)
     for (const previous of snapshot.manifest!.source_seeds ?? []) {
-      const evidence = await authenticateReplaySourceSeed(scope, snapshot, previous.project_id, amk, () => { try { check(); return true } catch { return false } })
+      const evidence = await authenticateReplaySourceSeed(scope, snapshot, previous.project_id, amk, () => { try { check(); return true } catch { return false } }, delivery === 'recovery')
       const row = snapshot.sources?.find(source => source.project_id === previous.project_id)
       if (!row || !replaySame(previous, evidence.reference)) fail('source_seed_reauthentication_failed')
       const project = row!.source_revision === 1 ? await openEmptyLocalProject(scope, row, amk) : (await port.readSource(snapshot, previous.project_id)).project
       if (!replaySame(project, evidence.project)) fail('source_seed_reauthentication_failed')
     }
-    const evidence = await authenticateReplaySourceSeed(scope, snapshot, projectId, amk, () => { try { check(); return true } catch { return false } })
+    const evidence = await authenticateReplaySourceSeed(scope, snapshot, projectId, amk, () => { try { check(); return true } catch { return false } }, delivery === 'recovery')
     if (snapshot.manifest!.source_seeds?.some(seed => seed.project_id === projectId)) return { evidence, row: null }
     return { evidence, row: await sealEmptyLocalProject(scope, evidence.project, amk) }
   })
@@ -198,7 +206,7 @@ export async function seedReplayNoteSource(port: SeedPort, scope: BrowserSyncSco
       ? await reauthenticateReplayNotes(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, id => port.readSource(snapshot, id))
       : new Set<number>()
     await reauthenticateReplayOwners(scope, snapshot, amk, () => { try { check(); return true } catch { return false } }, true, noteSequences)
-    const evidence = await authenticateReplaySourceSeed(scope, snapshot, projectId, amk, () => { try { check(); return true } catch { return false } })
+    const evidence = await authenticateReplaySourceSeed(scope, snapshot, projectId, amk, () => { try { check(); return true } catch { return false } }, delivery === 'recovery')
     const seed = snapshot.manifest?.source_seeds?.find(value => value.project_id === projectId)
     const row = snapshot.sources?.find(value => value.project_id === projectId)
     if (!seed || !row || !replaySame(seed, evidence.reference)) fail('source_seed_reauthentication_failed')

@@ -208,7 +208,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem e desbloqueie a chave. Abra Textos ou Notas, escolha um projeto e selecione Projeto ou uma etapa.</p>\n<p>Os textos mantêm a formatação. Clique em Atualizar para receber as alterações do Desktop. A leitura exige conexão com o servidor. Bloquear a chave oculta o conteúdo.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Ler documentos na nuvem na Web</h2>\n<p>Entre na conta na nuvem e desbloqueie a chave. Abra Textos ou Notas, escolha um projeto e selecione Projeto ou uma etapa.</p>\n<p>Os textos mantêm a formatação. Clique em Atualizar para receber as alterações do Desktop. A leitura exige conexão com o servidor. Bloquear a chave oculta o conteúdo.</p>\n<p>Se os dispositivos oferecerem suporte à gravação, escolha Criar ou Editar e pressione Salvar texto. O status Salvo aparece após a verificação da resposta do servidor. Se houver falha, o texto fica no editor aberto. Se as versões forem diferentes, abra-as e escolha o resultado.</p>\n<p>Se aparecer uma nova versão enquanto você escreve, clique em Atualizar no editor e compare-a com o rascunho. Salve por cima da nova versão somente após comparar. Se a conexão cair, tente salvar novamente.</p>\n</body></html>",
     "key": "web_document_reading",
     "title": "Ler documentos na nuvem na Web"
   },
@@ -265,5 +265,11 @@
     "content": "<html><body><h2>Arquivos locais em cada dispositivo</h2><p>Word e Scrivener são vinculados separadamente em cada dispositivo. Caminhos, fontes selecionadas e verificações locais não são sincronizados.</p><p>Exporte uma cópia Word ou reconecte um arquivo existente. A seleção compara o conteúdo sem sobrescrevê-lo. Se houver diferença, importe Word ou grave a versão WORTA explicitamente; uma cópia separada pode ser exportada. Compare novamente após alterações.</p><p>Um arquivo local ausente não exclui o texto ou progresso na nuvem. Escolha outro caminho explicitamente. O progresso Word/Scrivener requer confirmar a comparação. Os vínculos locais não estão disponíveis na Web; o texto WORTA permanece disponível.</p></body></html>",
     "key": "local_external_reattachment",
     "title": "Arquivos locais em cada dispositivo"
+  },
+  {
+    "children": [],
+    "content": "<html><body>\n<h2>Projetos na nuvem na Web</h2>\n<p>Em Projetos, você pode criar projetos até o limite da conta. Abra um projeto e selecione Editar projeto para mudar o nome, a meta ou o prazo. As alterações aparecem nos outros dispositivos após a sincronização. O Desktop importa o nome do histórico verificado da nuvem. Somente projetos antigos sem configurações na nuvem pedem um nome.</p>\n<p>Em um projeto aberto, escolha Adicionar etapa e informe o nome, a meta e o prazo. A meta e o prazo são opcionais. Em Textos, abra o manuscrito do projeto ou da etapa selecionada. Depois da confirmação do servidor, as alterações ficam disponíveis nos outros dispositivos ao sincronizar.</p>\n</body></html>",
+    "key": "web_cloud_projects",
+    "title": "Projetos na nuvem na Web"
   }
 ]

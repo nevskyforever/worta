@@ -3,8 +3,6 @@ import type { ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
 import { validateBrowserMetadataHead } from './metadataApplyRecords'
 import { prepareMapEvent } from './mapPrepare'
 import { authenticateReplayMaps, mapPreparationInventory } from './mapApply'
-import { authenticateReplayDocuments, documentPreparationInventory } from './documentApply'
-import { prepareDocumentEvent, inspectPreparedDocumentGenesis } from './documentPrepare'
 import { readReplayStages } from './replayStageView'
 import { validateStageHead } from './stageRecords'
 import { validateStageOrderHead } from './stageOrderRecords'
@@ -17,12 +15,11 @@ import type { NormalUserAuthRuntime } from '@/auth/userAuth'
 import type { AuthoritativeKeyContextLease } from '@/auth/keyContext'
 import { BrowserPersistenceError } from './persistence'
 import { snapshotBrowserSyncScope, type BrowserSyncScope } from './syncDurability'
-import { BrowserReplayError, REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame } from './replayRecords'
+import { BrowserReplayError, REPLAY_LIMITS, prepareReplayPage, recoveryRegistryExtends, replayAnchor, replaySame } from './replayRecords'
 import { openBrowserReplayStorage, type ReplaySnapshot, type ReplayStorage } from './replayStorage'
 import { openBrowserCanonicalObject } from './canonicalReaders'
 import { decodeBase64Url } from '@/api/base64url'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
-import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { ContentNoteEvent } from '@/cloud/contentNoteCodec'
 
 export interface BrowserAccountReceiveResult {
@@ -85,8 +82,7 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
       const prior = previous.manifest
       if (prior && !replaySame(prior.anchor, anchor)) {
         if (anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
-          || !replaySame(prior.anchor.transport, anchor.transport)
-          || !replaySame(prior.anchor.registry.projects, anchor.registry.projects)) fail('server_changed')
+          || !recoveryRegistryExtends(prior.anchor, anchor)) fail('server_changed')
         let offset = 0
         while (offset < prior.receive_cursor) {
           const limit = Math.min(REPLAY_LIMITS.page, prior.receive_cursor - offset)
@@ -109,6 +105,32 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           anchor.registry.current_cursor, anchor.transport.cutover_epoch, signal))
         const { page } = prepareReplayPage(raw, prior.receive_cursor, scope, anchor)
         if (!page.items.length) fail('history_incomplete')
+        const added = anchor.registry.projects.filter(project =>
+          !prior.anchor.registry.projects.some(value => value.project_id === project.project_id))
+        const newMetadata = new Map<string, ProjectMetadataEvent['header']>()
+        if (added.length) await lease.use(async amk => {
+          for (const project of added) {
+            const item = page.items.find(value => value.event.server_sequence === project.initial_max_server_sequence)
+            if (!item) return fail('invalid_history')
+            const wire = item
+            const event = wire.event as V3Descriptor & { scope?: string }
+            if (event.entity_type !== 'project_metadata' || 'scope' in event || event.project_id !== project.project_id
+              || event.device_id !== project.origin_device_id || event.operation !== 'upsert'
+              || event.revision !== 1 || event.deleted_at !== null) fail('invalid_history')
+            const object = wire.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
+            const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
+            try {
+              const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId,
+                projectId: project.project_id, entityId: project.project_id, entityType: 'project_metadata', eventId: event.event_id },
+              { ...object, nonce, ciphertext }) as ProjectMetadataEvent
+              const h = decoded.header
+              if (h.bootstrap_id !== project.bootstrap_id || h.device_id !== event.device_id || h.operation !== 'create'
+                || h.revision !== 1 || h.generation !== 1 || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at)
+                || h.parent_event_ids.length || !decoded.metadata) fail('invalid_history')
+              newMetadata.set(event.project_id, h)
+            } finally { nonce.fill(0); ciphertext.fill(0) }
+          }
+        })
         if (prior.phase === 'receiving' || prior.applied_cursor !== prior.receive_cursor) {
           // Re-pin an interrupted receive/apply only after comparing ALL retained
           // wire above. Keep the prior proofs/import and replay the unproven rows;
@@ -120,11 +142,12 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
             const event = JSON.parse(row.wire_item).event
             if (event.entity_type === 'note' && row.state === 'content_note_proven') heads.set(JSON.stringify([event.project_id, event.entity_id]), event)
           }
-          let documentHead: DocumentEvent['header'] | undefined
-          for (const item of page.items) {
+          const pairedOrders = new Set<string>()
+          const stageExtensions = new Map<string, { order: StructuralEvent['header']; members: Record<string, string[]> }>()
+          for (const [index, item] of page.items.entries()) {
             const event = item.event as V3Descriptor & { scope?: string }
-            const accountGame = String(event.entity_type) === 'account_game'
-            if ('scope' in event && !accountGame || event.device_id === scope.deviceId && event.entity_type !== 'progress' && !accountGame) fail('unsupported_history_family')
+            if (pairedOrders.has(event.event_id)) continue
+            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId && !['progress', 'document', 'account_game'].includes(event.entity_type)) fail('unsupported_history_family')
             if (event.device_id === scope.deviceId) {
               const echo: BrowserReceivedInboxRecord = { record_version: 1, account_id: scope.accountId,
                 device_id: scope.deviceId, event_id: event.event_id, server_sequence: event.server_sequence,
@@ -133,17 +156,22 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
               const evidence = validateBrowserRetainedHistory(scope, event, previous.author?.out.find(find), previous.author?.receipts.find(find), echo)
               if (!evidence.outbox || !evidence.receipt) fail('invalid_history')
             }
-            if (event.entity_type === 'project_metadata' && event.operation === 'upsert') {
+            if (event.entity_type === 'project_metadata' && ['upsert', 'delete'].includes(event.operation)) {
+              if (added.some(project => project.project_id === event.project_id
+                && project.initial_max_server_sequence === event.server_sequence)) continue
               const rawHead=previous.owners.find(owner=>owner.owner_kind==='project_metadata'&&owner.owner_id===event.project_id)
-              if(!rawHead)fail('invalid_history')
-              const head=validateBrowserMetadataHead(rawHead,scope),tip=head.history.find(proof=>proof.event_id===head.tip_event_ids[0]) ?? fail('invalid_history')
-              if(!tip||head.tip_event_ids.length!==1)fail('invalid_history')
+              const head = rawHead && validateBrowserMetadataHead(rawHead, scope)
+              const tip = newMetadata.get(event.project_id)
+                ?? (head?.tip_event_ids.length === 1 ? head.history.find(proof => proof.event_id === head.tip_event_ids[0]) : undefined)
+                ?? fail('invalid_history')
               const object=item.object as {crypto_version:1;aad_version:1;nonce:string;ciphertext:string},nonce=decodeBase64Url(object.nonce),ciphertext=decodeBase64Url(object.ciphertext)
               try {
                 const decoded=await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:event.project_id,entityId:event.entity_id,entityType:'project_metadata',eventId:event.event_id},{...object,nonce,ciphertext}) as ProjectMetadataEvent
                 const h=decoded.header
-                if(h.device_id!==event.device_id||h.bootstrap_id!==head.bootstrap_id||h.operation!=='update'||h.parent_event_ids.length!==1||h.parent_event_ids[0]!==tip.event_id
-                  ||h.revision!==tip.revision+1||h.generation<=tip.generation||h.revision!==event.revision||h.updated_at!==canonicalizeSyncTimestamp(event.updated_at))fail('invalid_history')
+                if(h.device_id!==event.device_id||h.bootstrap_id!==(newMetadata.get(event.project_id)?.bootstrap_id ?? head?.bootstrap_id)||h.operation!==(event.operation==='delete'?'delete':'update')||h.parent_event_ids.length!==1||h.parent_event_ids[0]!==tip.event_id
+                  ||h.revision!==tip.revision+1||h.generation<=tip.generation||h.revision!==event.revision||h.updated_at!==canonicalizeSyncTimestamp(event.updated_at)
+                  ||decoded.deleted_at!==(event.deleted_at===null?null:canonicalizeSyncTimestamp(event.deleted_at)))fail('invalid_history')
+                newMetadata.set(event.project_id, h)
               }finally{nonce.fill(0);ciphertext.fill(0)}
               continue // Receipt only. The Metadata owner still authenticates/commits its outcome.
             }
@@ -161,51 +189,50 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
               continue
             }
             if (event.entity_type === 'document' && event.operation === 'event') {
-              const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
-              const inventory = documentPreparationInventory(previous)
-              if (!documentHead) {
-                await authenticateReplayDocuments(scope, previous, amk, current)
-                if (event.revision < 2) fail('unsupported_history_family')
-                const token = await prepareDocumentEvent(scope, {server_sequence:event.server_sequence!,wire_item:JSON.stringify(item)}, inventory, amk, current)
-                documentHead = inspectPreparedDocumentGenesis(token, scope, inventory).event.header
-              } else {
-                const object = item.object as { crypto_version: 1; aad_version: 1; nonce: string; ciphertext: string }
-                const nonce = decodeBase64Url(object.nonce), ciphertext = decodeBase64Url(object.ciphertext)
-                try {
-                  const decoded = await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id,
-                    entityId: event.entity_id, entityType: 'document', eventId: event.event_id }, { ...object, nonce, ciphertext }) as DocumentEvent
-                  const h = decoded.header
-                  if (h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.entity_id !== event.entity_id
-                    || h.event_id !== event.event_id || h.device_id !== event.device_id || h.revision !== event.revision
-                    || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at) || h.operation !== 'update'
-                    || h.project_id !== documentHead.project_id || h.entity_id !== documentHead.entity_id || h.stage_id !== documentHead.stage_id
-                    || h.bootstrap_id !== documentHead.bootstrap_id || h.parents.length !== 1 || h.parents[0] !== documentHead.event_id
-                    || h.revision !== documentHead.revision + 1 || h.generation !== documentHead.generation + 1) fail('invalid_history')
-                  documentHead = h
-                } finally { nonce.fill(0); ciphertext.fill(0) }
-              }
+              await authenticateCanonicalWires([item])
               continue
             }
-            if (documentHead) fail('unsupported_history_family')
-            if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 2 && item === page.items[0]) {
-              await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())
+            const following = page.items[index + 1]
+            if (event.entity_type === 'stage' && event.operation === 'upsert' && event.revision === 1 && following) {
+              const next = following.event as V3Descriptor
+              if (next.entity_type !== 'stage_order' || next.project_id !== event.project_id || next.operation !== 'upsert'
+                || next.device_id !== event.device_id || next.device_id === scope.deviceId) fail('invalid_history')
+              const current = () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent()
+              const extension = stageExtensions.get(event.project_id)
+              if (!extension) await readReplayStages(scope, previous, event.project_id, amk, current)
               const rawOrder = previous.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === event.project_id)
-              if (!rawOrder || previous.owners.some(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id && owner.stage_id === event.entity_id)) fail('invalid_history')
-              const orderHead = validateStageOrderHead(rawOrder, scope), tip = orderHead.history.find(proof => proof.event_id === orderHead.tip_event_ids[0])
-              const following = page.items[1]!, next = following.event as V3Descriptor
+              const orderHead = rawOrder && validateStageOrderHead(rawOrder, scope)
+              const tip = extension?.order ?? orderHead?.history.find(proof => proof.event_id === orderHead.tip_event_ids[0])
+              const rawMetadata = previous.owners.find(owner => owner.owner_kind === 'project_metadata' && owner.owner_id === event.project_id)
+              const metadata = rawMetadata && validateBrowserMetadataHead(rawMetadata, scope)
+              const metadataExtension = newMetadata.get(event.project_id)
+              const bootstrap = metadata?.bootstrap_id ?? metadataExtension?.bootstrap_id
+              if (!bootstrap || (orderHead && (!tip || orderHead.tip_event_ids.length !== 1))) fail('invalid_history')
               const open = async (value: typeof item, type: 'stage' | 'stage_order') => {
                 const nonce = decodeBase64Url((value.object as { nonce: string }).nonce), ciphertext = decodeBase64Url((value.object as { ciphertext: string }).ciphertext)
                 try { return await openBrowserCanonicalObject(amk, { accountId: scope.canonicalUserId, projectId: event.project_id, entityId: (value.event as V3Descriptor).entity_id, entityType: type, eventId: value.event.event_id }, { ...(value.object as { crypto_version: 1; aad_version: 1 }), nonce, ciphertext }) as StructuralEvent }
                 finally { nonce.fill(0); ciphertext.fill(0) }
               }
-              if (next.entity_type !== 'stage_order' || next.project_id !== event.project_id || next.operation !== 'upsert' || next.device_id !== event.device_id) fail('invalid_history')
               const created = await open(item, 'stage'), ordered = await open(following, 'stage_order'), h = created.header, o = ordered.header
-              const expected = Object.fromEntries(previous.owners.filter(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id).map(owner => { const head = validateStageHead(owner, scope); return [head.stage_id, head.tip_event_ids] }))
+              const expected = extension?.members ?? Object.fromEntries(previous.owners.filter(owner => owner.owner_kind === 'stage' && owner.project_id === event.project_id).map(owner => {
+                const head = validateStageHead(owner, scope)
+                return [head.stage_id, head.tip_event_ids]
+              }))
+              if (Object.hasOwn(expected, event.entity_id)) fail('invalid_history')
               expected[event.entity_id] = [event.event_id]
-              if (!tip || created.version !== 1 || h.operation !== 'create' || h.account_id !== scope.canonicalUserId || h.project_id !== event.project_id || h.entity_id !== event.entity_id || h.event_id !== event.event_id || h.device_id !== event.device_id || h.bootstrap_id !== orderHead.bootstrap_id || h.metadata_event_id !== tip.metadata_event_id || h.revision !== 1 || event.revision !== 1 || h.generation !== 1 || h.parent_event_ids.length || !created.stage
-                || ordered.version !== 1 || o.operation !== 'update' || o.account_id !== scope.canonicalUserId || o.project_id !== event.project_id || o.entity_id !== 'stage_order' || o.event_id !== next.event_id || o.device_id !== next.device_id || o.bootstrap_id !== orderHead.bootstrap_id || o.metadata_event_id !== tip.metadata_event_id || o.revision !== tip.revision + 1 || o.revision !== next.revision || o.generation !== tip.generation + 1 || !replaySame(o.parent_event_ids, orderHead.tip_event_ids)
-                || canonicalizeSyncTimestamp(h.updated_at) !== canonicalizeSyncTimestamp(event.updated_at) || canonicalizeSyncTimestamp(o.updated_at) !== canonicalizeSyncTimestamp(next.updated_at) || !replaySame(ordered.stage_heads, expected)) fail('invalid_history')
-              break
+              const metadataId = h.metadata_event_id
+              if ((!metadata?.history.some(value => value.event_id === metadataId && value.operation !== 'delete')
+                  && (metadataExtension?.event_id !== metadataId || metadataExtension.operation === 'delete'))
+                || created.version !== 1 || h.operation !== 'create' || h.device_id !== event.device_id
+                || h.bootstrap_id !== bootstrap || h.revision !== 1 || !created.stage
+                || ordered.version !== 1 || o.operation !== (tip ? 'update' : 'create') || o.device_id !== next.device_id
+                || o.bootstrap_id !== bootstrap || o.metadata_event_id !== metadataId || o.revision !== (tip?.revision ?? 0) + 1
+                || o.revision !== next.revision || o.generation !== (tip?.generation ?? 0) + 1 || !replaySame(o.parent_event_ids, tip ? [tip.event_id] : [])
+                || h.updated_at !== canonicalizeSyncTimestamp(event.updated_at) || o.updated_at !== canonicalizeSyncTimestamp(next.updated_at)
+                || !replaySame(ordered.stage_heads, expected)) fail('invalid_history')
+              stageExtensions.set(event.project_id, { order: o, members: expected })
+              pairedOrders.add(next.event_id)
+              continue
             }
             if (event.entity_type === 'stage' && event.operation === 'upsert' && page.items.length === 1) {
               await readReplayStages(scope, previous, event.project_id, amk, () => !signal.aborted && input.current() && auth.isCurrent(context) && lease.isCurrent())

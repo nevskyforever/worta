@@ -34,9 +34,9 @@ def emit(client,tmp,token,path,identity,user,amk,lose=False):
         sent.append(request)
     return sent
 
-def receive(client,tmp,token,path,identity,user,amk):
+def receive(client,tmp,token,path,identity,user,amk,limit=100):
     with sqlite3.connect(path) as db:cursor=db.execute('SELECT pull_cursor FROM cloud_sync_state').fetchone()[0]
-    response=client.get('/api/v3/sync/encrypted/pull',headers=_headers(token),params=dict(device_id=identity['device_id'],since=cursor,limit=100,protocol_version=3,encrypted_sync_version=3));assert response.status_code==200,response.text
+    response=client.get('/api/v3/sync/encrypted/pull',headers=_headers(token),params=dict(device_id=identity['device_id'],since=cursor,limit=limit,protocol_version=3,encrypted_sync_version=3));assert response.status_code==200,response.text
     outcomes=[]
     for item in response.json()['items']:
         assert item['event']['entity_type']=='document'
@@ -226,3 +226,81 @@ def test_documents_real_two_devices_moves_conflicts_extensions_and_gate(cloud_cl
     with engine.connect() as db:
         columns=db.execute(text('SELECT entity_id,entity_type,operation FROM sync_events')).fetchall();assert all('Secret portable manuscript' not in str(row) and 'Private document heading' not in str(row) for row in columns)
         cipher=db.execute(text('SELECT ciphertext FROM encrypted_objects')).fetchall();assert all(b'Secret portable manuscript' not in bytes(row[0]) and str(word).encode() not in bytes(row[0]) for row in cipher)
+
+
+@pytest.mark.parametrize('stage_id', [None, 'chapter'])
+def test_web_document_save_applies_in_native_sqlite(cloud_client, tmp_path, stage_id):
+    client, engine = cloud_client
+    user = str(create_user(engine))
+    token = login(client).json()['access_token']
+    headers = _headers(token)
+    path, identity = provision(tmp_path, 'document-native-web', user, True)
+    device, web = identity['device_id'], str(uuid4())
+    document(tmp_path, path, identity, user, 'init')
+    with sqlite3.connect(path) as db:
+        register_remote_apply_authorization_guard(db)
+        db.execute("UPDATE projects SET payload_json=json_set(payload_json,'$.work_method','app')")
+    base = '/api/v3/sync/encrypted'
+    assert client.put(f'/api/v1/sync/devices/{device}', headers=headers).status_code == 200
+    boot = bootstrap(tmp_path, path, identity, 'bootstrap_prepare')['bootstrap_id']
+    bootstrap_url = f'/api/v1/cloud/projects/{PROJECT_ID}/bootstrap'
+    assert client.post(bootstrap_url, headers=headers, json={'bootstrap_id': boot, 'device_id': device}).status_code == 200
+    bootstrap(tmp_path, path, identity, 'bootstrap_prepare_capture', bootstrap_id=boot, remote_high_water=0)
+    assert client.post(bootstrap_url + '/complete', headers=headers, json={
+        'bootstrap_id': boot, 'device_id': device, 'initial_event_count': 0, 'initial_max_server_sequence': 0,
+    }).status_code == 200
+    bootstrap(tmp_path, path, identity, 'bootstrap_confirm_active', bootstrap_id=boot, remote_high_water=0)
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post(base + '/reader-ready', headers=headers, json={
+        'device_id': device, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post(base + '/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    assert client.put(base + '/note-reader-capabilities', headers=headers, json=capabilities(device)).status_code == 204
+    support(client, headers, device)
+    amk = list(os.urandom(32))
+    native(tmp_path, path, identity, user, 'begin')
+    metadata, _ = publish(client, tmp_path, token, path, identity, user, amk)
+    assert sync(client, tmp_path, token, path, identity, user, amk)['view']['state'] == 'active'
+
+    stage_refs = []
+    if stage_id:
+        stage_event = event(identity, user, boot, metadata['header']['event_id'], entity=stage_id)
+        stage = stage_event['stage']
+        stage['work_method'] = 'app'
+        with sqlite3.connect(path) as db:
+            db.execute('INSERT INTO stages(id,project_id,name,goal,infinite,unit,status,created_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?)',
+                       (stage_id, PROJECT_ID, stage['name'], stage['goal'], int(stage['infinite']), stage['unit'],
+                        stage['status'], stage['created_at'], json.dumps(stage)))
+            db.execute('INSERT INTO stage_order VALUES(?,?,?)', (stage_id, PROJECT_ID, 0))
+        structural(tmp_path, path, identity, user, 'capture', stage_id=stage_id)
+        structural_publish(client, tmp_path, token, path, identity, user, amk, stage_event)
+        structural_sync(client, tmp_path, token, path, identity, user, amk)
+        stage_refs = [stage_event['header']['event_id']]
+    import hashlib
+    doc_id = 'document-' + hashlib.sha256(f"{PROJECT_ID}:{stage_id or 'project'}".encode()).hexdigest()[:40]
+    header = {
+        'account_id': user, 'device_id': web, 'project_id': PROJECT_ID, 'stage_id': stage_id,
+        'entity_id': doc_id, 'event_id': str(uuid4()), 'bootstrap_id': boot,
+        'metadata_event_id': metadata['header']['event_id'], 'stage_event_ids': stage_refs,
+        'parents': [], 'revision': 1, 'generation': 1, 'operation': 'create', 'updated_at': NOW,
+    }
+    portable = {
+        'id': doc_id, 'project_id': PROJECT_ID, 'stage_id': stage_id, 'title': 'Manuscript',
+        'content_json': content('First Web draft'), 'content_format': 'tiptap-json/v1',
+        'created_at': NOW, 'extensions': {},
+    }
+    for revision, text_value in [(1, 'First Web draft'), (2, 'Revised Web draft')]:
+        portable['content_json'] = content(text_value)
+        portable['content_json']['content'][0]['content'][0]['marks'] = [{'type': 'bold'}]
+        wire = _crypto_bridge(tmp_path, {
+            'action': 'web_document_seal', 'amk': amk,
+            'payload': {'version': 1, 'header': header, 'document': portable, 'mutation': 'upsert', 'deleted_at': None},
+        })
+        pin = {'web_document_version': 1, 'expected_cursor': revision + len(stage_refs), 'expected_epoch': 2}
+        if header['parents']:
+            pin['document_parent'] = header['parents'][0]
+        response = client.post(base + '/push', headers=headers, params=pin, json=wire)
+        assert response.status_code == 200, response.text
+        assert receive(client, tmp_path, token, path, identity, user, amk) == ['applied']
+        assert stored(path, doc_id)['content_json'] == portable['content_json']
+        header.update(event_id=str(uuid4()), parents=[header['event_id']], revision=2, generation=2, operation='update')

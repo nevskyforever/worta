@@ -12,6 +12,7 @@ const props = defineProps<{
   translate?: (source: string) => string
   zoom?: number
   typewriterMode?: boolean
+  inertLinks?: boolean
   readOnly?: boolean
 }>()
 const emit = defineEmits<{
@@ -52,8 +53,14 @@ const contentLayerStyle = computed(() => ({
 const editor = useEditor({
   content: props.initialContent,
   editable: !props.readOnly,
-  extensions: createDocumentEditorExtensions(props.readOnly),
+  extensions: createDocumentEditorExtensions(props.readOnly, props.inertLinks),
   editorProps: {
+    handleDOMEvents: props.inertLinks ? {
+      click: (_view, event) => {
+        if (event.target instanceof Element && event.target.closest('a[href]')) event.preventDefault()
+        return false
+      },
+    } : undefined,
     attributes: {
       class: 'nf-editor-content',
       'aria-label': props.translate?.('Текст документа') ?? 'Текст документа',

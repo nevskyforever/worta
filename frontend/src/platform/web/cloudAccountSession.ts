@@ -1,3 +1,14 @@
+import { ApiError } from '@/api/client'
+import { sealStructuralEvent, type StructuralEvent } from '@/cloud/stageCodec'
+import { validateStageHead } from './stageRecords'
+import { validateStageOrderHead } from './stageOrderRecords'
+import { immutableWireIdentity } from './syncDurability'
+import type { TiptapDocument } from '@/types/documents'
+import { canonical, sealProjectMetadataEvent, type ProjectMetadata, type ProjectMetadataEvent } from '@/cloud/projectMetadataCodec'
+import { authenticateDocumentTips, documentPreparationInventory, documentsFromTips } from './documentApply'
+import { verifyDocumentDependencies } from './documentPrepare'
+import { newCloudDocumentId } from './documentOutbound'
+import type { DocumentEvent } from '@/cloud/documentCodec'
 import type { BrowserProjectGame } from './gameApply'
 import type { AccountGameBase, ProjectGameEvent } from '@/cloud/gameCodec'
 import type { GameShopCommand } from '@/cloud/gameShop'
@@ -11,7 +22,7 @@ import type { ReplayMetadataResult, ReplayStructuralResult, ReplayInitialNoteRes
 import type { ReplaySourceSeedResult } from './replaySourceSeed'
 import { accountCryptoApi, type AccountCryptoTransport, type AccountCryptoProvisioningTransport } from '@/api/accountCrypto'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
-import { encryptedSyncV3Api } from '@/api/encryptedSyncV3'
+import { encodeV3MetadataPush, encryptedSyncV3Api, isAccountItem, parseV3Pull, type V3MetadataPushItem, type WebStagePin } from '@/api/encryptedSyncV3'
 import { prepareProgressAppend, prepareProgressTombstone } from '@/cloud/progressAuthor'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
 import { normalizeProgressTotal } from '@/core/progress/calculations'
@@ -41,7 +52,8 @@ import { readBrowserCloudProject, BrowserCloudReadError, type BrowserCloudProjec
 import { generateAccountMasterKey, generateRecoveryKey } from '@/crypto/keys'
 import { wrapAmkWithPassphrase, wrapAmkWithRecoveryKey } from '@/crypto/wrapping'
 import { encodeBase64Url } from '@/api/base64url'
-import { stageCloudProjectMetadata, type CloudProjectCreateScope } from './cloudProjectCreate'
+import { createCloudProjectMetadata } from './cloudProjectMetadataCreate'
+import { legacyPendingCloudProjectId, stageCloudProjectMetadata } from './cloudProjectCreate'
 import { withReceivedBrowserAccountHistory, receiveBrowserAccountHistory, type BrowserAccountReceiveResult } from './replayReceiver'
 
 type BrowserStorage = Awaited<ReturnType<typeof openBrowserPersistence>>
@@ -54,6 +66,15 @@ export interface BrowserLocalNoteRepository {
   readonly source: Pick<BrowserLocalAuthorityRuntime, 'listProjects' | 'readSnapshot' | 'withDecryptedSnapshot' | 'assertSnapshot' | 'initializeProject' | 'createProject' | 'createNote' | 'updateNote' | 'tombstoneNote' | 'replaceProject' | 'deleteProject'>
   readonly stages: Pick<BrowserLocalStagesRuntime, 'list' | 'create' | 'rename' | 'remove' | 'reorder'>
   readonly documents: Pick<BrowserLocalDocumentsRuntime, 'read' | 'open' | 'save'>
+}
+
+interface PendingStageCreate {
+  projectId: string
+  input: string
+  stageId: string
+  rawBody: string
+  eventIds: string[]
+  pin: WebStagePin
 }
 
 export interface BrowserAccountSessionOptions {
@@ -81,6 +102,10 @@ export class BrowserCloudAccountSession {
   private disposed = false
   private legalStatus: LegalDocumentStatus | null = null
   private readonly revocations = new EventTarget()
+  private pendingStage: PendingStageCreate | null = null
+  private stageCreating = false
+  private pendingProjectCreate: Awaited<ReturnType<typeof createCloudProjectMetadata>> | null = null
+  private projectCreateInFlight = false
   private readonly onPageHide = () => { void this.logout().catch(() => undefined) }
 
   constructor(options: BrowserAccountSessionOptions = {}) {
@@ -124,7 +149,7 @@ export class BrowserCloudAccountSession {
     if (!this.auth.isCurrent(context)) throw new StaleAuthContextError()
     if (!value || !Array.isArray(value.cloud_project_ids) || !Number.isSafeInteger(value.cloud_project_count)
       || !Number.isSafeInteger(value.max_cloud_projects) || value.cloud_project_count !== value.cloud_project_ids.length
-      || value.cloud_project_count < 0 || value.max_cloud_projects < value.cloud_project_count
+      || value.cloud_project_count < 0 || value.max_cloud_projects < 0
       || value.cloud_project_ids.some(id => typeof id !== 'string' || !id.trim() || new TextEncoder().encode(id).length > 512)
       || new Set(value.cloud_project_ids).size !== value.cloud_project_ids.length) {
       throw new Error('cloud_project_catalog_response_invalid')
@@ -134,14 +159,71 @@ export class BrowserCloudAccountSession {
   }
 
   /** Server read only. The result belongs to this active key/auth session. */
-  async readCloudProject(projectId: string, signal: AbortSignal, delivery?: 'recovery'): Promise<BrowserCloudProjectRead> {
+  async readCloudProject(projectId: string, signal: AbortSignal, delivery?: 'recovery', metadataOnly = false): Promise<BrowserCloudProjectRead> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const lease = identity && this.keys?.leaseForAccount(identity.local_account_id)
     if (this.status !== 'unlocked' || !identity || !lease || !this.controller) throw new BrowserCloudReadError('key_locked')
-    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId, delivery,
+    return readBrowserCloudProject({ auth: this.auth, lease, deviceId: identity.device_id, projectId, delivery, metadataOnly,
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context) })
+  }
+
+  async changeCloudProject(projectId: string, expectedHead: string,
+    patch: Pick<ProjectMetadata, 'name' | 'goal' | 'infinite' | 'deadline'>, signal: AbortSignal) {
+    const operation = this.unlockedSync(signal)
+    const snapshot = await this.readCloudProject(projectId, operation.signal, 'recovery', true)
+    const parent = snapshot.metadataHead, epoch = snapshot.cutoverEpoch
+    if (!parent || parent.event_id !== expectedHead || epoch === undefined)
+      throw new BrowserCloudReadError('project_changed')
+    // The scoped online sender has no ordinary device or reader permissions.
+    const deviceId = crypto.randomUUID()
+    const now = canonicalizeSyncTimestamp(new Date().toISOString())
+    const metadata = { ...snapshot.metadata, ...patch, name: patch.name.trim() }
+    const event: ProjectMetadataEvent = {
+      version: Object.hasOwn(metadata, 'cover_reference') ? 2 : 1, metadata, deleted_at: null,
+      header: { ...parent, device_id: deviceId, event_id: crypto.randomUUID(), operation: 'update',
+        parent_event_ids: [parent.event_id], revision: parent.revision + 1, generation: parent.generation + 1, updated_at: now },
+    }
+    const envelope = await operation.lease.use(amk => sealProjectMetadataEvent(amk, event))
+    try {
+      await this.submitWebMetadata(operation, event, envelope, { cursor: snapshot.cursor, epoch, parent: expectedHead })
+      return metadata
+    } finally { envelope.nonce.fill(0); envelope.ciphertext.fill(0) }
+  }
+
+  private async submitWebMetadata(operation: ReturnType<BrowserCloudAccountSession['unlockedSync']>,
+    event: ProjectMetadataEvent, envelope: Awaited<ReturnType<typeof sealProjectMetadataEvent>>,
+    pin: { cursor: number; epoch: number } & ({ parent: string } | { bootstrap: string })) {
+    const h = event.header
+    const item = {
+      event: { event_id: h.event_id, project_id: h.project_id, entity_id: h.project_id, entity_type: 'project_metadata' as const,
+        operation: event.metadata ? 'upsert' as const : 'delete' as const, revision: h.revision, updated_at: h.updated_at, deleted_at: event.deleted_at },
+      object: envelope,
+    }
+    const receipt = await operation.request(token => encryptedSyncV3Api.pushWebMetadata(token, h.device_id, item, pin, operation.signal))
+    const seq = receipt.results[0]!.server_sequence
+    if ((!receipt.results[0]!.duplicate && seq !== pin.cursor + 1) || seq > receipt.current_cursor)
+      throw new BrowserCloudReadError('project_changed')
+    const registry = await operation.request(token => cloudProjectsApi.listBootstraps(token, operation.signal))
+    const lineage = registry.projects.find(project => project.project_id === h.project_id)
+    if (!lineage || lineage.bootstrap_id !== h.bootstrap_id || lineage.state !== 'active' || registry.current_cursor < seq
+      || ('bootstrap' in pin && (lineage.origin_device_id !== h.device_id || lineage.initial_max_server_sequence !== seq
+          || lineage.initial_event_count !== 1))) throw new BrowserCloudReadError('project_changed')
+    const raw = await operation.request(token => encryptedSyncV3Api.recoveryRaw(token, seq - 1, 1, registry.current_cursor, pin.epoch, operation.signal))
+    const page = parseV3Pull(JSON.parse(raw), seq - 1, 1)
+    try {
+      const echoed = page.items[0]
+      if (!echoed || isAccountItem(echoed) || echoed.event.entity_type !== 'project_metadata') throw new BrowserCloudReadError('project_changed')
+      const { device_id, server_sequence, ...descriptor } = echoed.event
+      if (device_id !== h.device_id || server_sequence !== seq || encodeV3MetadataPush(h.device_id, [item]) !==
+        encodeV3MetadataPush(h.device_id, [{ event: { ...descriptor, updated_at: canonicalizeSyncTimestamp(descriptor.updated_at),
+          deleted_at: descriptor.deleted_at && canonicalizeSyncTimestamp(descriptor.deleted_at) }, object: echoed.object }]))
+        throw new BrowserCloudReadError('project_changed')
+      return seq
+    } finally {
+      for (const value of page.items) { value.object.nonce.fill(0); value.object.ciphertext.fill(0) }
+    }
   }
 
   /** Explicit ciphertext receipt only; no owner apply, project opening or background work. */
@@ -157,7 +239,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal, confirmedGameEventId?: string): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; accountGameHead?: string; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal, requiredDocumentEventId?: string, confirmedGameEventId?: string): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; documentHeads?: Record<string, string>; documentConflicts?: DocumentEvent[][]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; accountGameHead?: string; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -166,7 +248,16 @@ export class BrowserCloudAccountSession {
     return withReceivedBrowserAccountHistory({ auth: this.auth, lease, scope, delivery: 'recovery',
       signal: AbortSignal.any([signal, this.controller.signal]),
       current: () => !this.disposed && this.generation === generation && this.auth.isCurrent(context),
-    }, async storage => {
+    }, async (storage, received) => {
+      const dependentProjects = new Set(received.rows.flatMap(row => {
+        const event = JSON.parse(row.wire_item).event
+        return ['note', 'stage', 'stage_order', 'document', 'map', 'progress', 'project_game'].includes(event.entity_type)
+          ? [event.project_id as string] : []
+      }))
+      for (const id of dependentProjects) {
+        if (id !== projectId && !received.bindings.some(binding => binding.project_id === id))
+          await storage.importRecoveryProject(id, this.auth, bindings, keys, 'recovery')
+      }
       await storage.importRecoveryProject(projectId, this.auth, bindings, keys, 'recovery')
       for (let i = 0; i <= 200; i++) {
         const result = await storage.recoverV10(this.auth, bindings, keys, 'recovery')
@@ -195,7 +286,14 @@ export class BrowserCloudAccountSession {
       const accountGame = accountGameOwner?.state as AccountGameBase | undefined
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
-      const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
+      const documentOwners = await lease.use(amk => authenticateDocumentTips(scope, snapshot, amk, current))
+      if (requiredDocumentEventId && !snapshot.rows.some(row => row.event_id === requiredDocumentEventId &&
+        row.state === 'document_proven' && JSON.parse(row.wire_item).event.project_id === projectId))
+        throw new BrowserCloudReadError('document_changed')
+      const documents = documentsFromTips(documentOwners).filter(document => document.project_id === projectId)
+      const documentHeads = Object.fromEntries(documentOwners.flatMap(tips => tips.length === 1 && tips[0]!.header.project_id === projectId
+        ? [[tips[0]!.header.entity_id, tips[0]!.header.event_id]] : []))
+      const documentConflicts = documentOwners.filter(tips => tips.length > 1 && tips[0]!.header.project_id === projectId)
       const result = await local.withDecryptedSnapshot(scope, source.token, async value => ({
         progress: progressChains.filter(chain => chain.stage_id !== null || !stages.length || stages.every(stage => progressChains.some(progress => progress.stage_id === stage.id))).map(chain => {
           const settings = chain.stage_id === null ? value.project : stages.find(stage => stage.id === chain.stage_id)?.settings
@@ -209,8 +307,7 @@ export class BrowserCloudAccountSession {
           }, 0) : undefined
           return presentProgress(chain, settings as unknown as ProgressSettings, day, total)
         }),
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps, games,
-        accountGame: accountGame ? structuredClone(accountGame) : null, accountGameHead: accountGameOwner?.event.header.event_id,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, documentHeads, documentConflicts, maps, games, accountGame: accountGame ? structuredClone(accountGame) : null, accountGameHead: accountGameOwner?.event.header.event_id,
       }))
       if (games.some(value => value.event.header.stage_id !== null && !stages.some(stage=>stage.id===value.event.header.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')
@@ -244,6 +341,197 @@ export class BrowserCloudAccountSession {
     return { scope, lease, check, request, signal: operationSignal, storage, bindings }
   }
 
+  stageCreatePending(projectId: string): boolean {
+    return this.pendingStage?.projectId === projectId
+  }
+
+  async createStage(projectId: string, input: { name: string; goal: number | null; deadline: string | null }, signal: AbortSignal) {
+    const operation = this.unlockedSync(signal)
+    const name = input.name.trim()
+    if (!name || this.stageCreating) throw new BrowserCloudReadError('stage_changed')
+    const intent = canonical({ ...input, name })
+    this.stageCreating = true
+    try {
+      let pending = this.pendingStage
+      if (pending && (pending.projectId !== projectId || pending.input !== intent))
+        throw new BrowserCloudReadError('stage_retry_required')
+      if (!pending) {
+        await this.readRecoveryProject(projectId, operation.signal)
+        const metadata = await this.readCloudProject(projectId, operation.signal, 'recovery', true)
+        const parent = metadata.metadataHead, epoch = metadata.cutoverEpoch
+        if (!parent || epoch === undefined || metadata.metadata.status !== 'активен')
+          throw new BrowserCloudReadError('stage_changed')
+        const current = () => { try { operation.check(); return true } catch { return false } }
+        pending = await withReceivedBrowserAccountHistory({
+          auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
+        }, async (_storage, snapshot) => operation.lease.use(async amk => {
+          if (snapshot.manifest?.applied_cursor !== metadata.cursor || snapshot.manifest.receive_cursor !== metadata.cursor
+            || snapshot.manifest.anchor.transport.cutover_epoch !== epoch)
+            throw new BrowserCloudReadError('stage_changed')
+          const stages = await readReplayStages(operation.scope, snapshot, projectId, amk, current)
+          const order = snapshot.owners.find(owner => owner.owner_kind === 'stage_order' && owner.project_id === projectId)
+          const orderHead = order && validateStageOrderHead(order, operation.scope)
+          const orderTip = orderHead?.history.find(proof => proof.event_id === orderHead.tip_event_ids[0])
+          if (orderHead && (!orderTip || orderHead.tip_event_ids.length !== 1))
+            throw new BrowserCloudReadError('stage_changed')
+          const now = canonicalizeSyncTimestamp(new Date().toISOString())
+          const stageId = crypto.randomUUID(), deviceId = crypto.randomUUID()
+          const header = { account_id: operation.scope.canonicalUserId, device_id: deviceId, project_id: projectId,
+            bootstrap_id: parent.bootstrap_id, metadata_event_id: parent.event_id, updated_at: now }
+          const empty = { version: 1 as const, stage: null, stage_ids: null, stage_heads: null, deleted_at: null }
+          const stage: StructuralEvent = { ...empty,
+            header: { ...header, entity_type: 'stage', entity_id: stageId, event_id: crypto.randomUUID(),
+              revision: 1, generation: 1, parent_event_ids: [], operation: 'create' },
+            stage: { name, goal: input.goal, infinite: input.goal === null, deadline: input.deadline,
+              unit: metadata.metadata.unit, status: 'активен', work_method: metadata.metadata.work_method,
+              personal_goal: 0, auto_freeze: metadata.metadata.auto_freeze, streak_enabled: metadata.metadata.streak_enabled,
+              created_at: now, completed_at: null },
+          }
+          const stageHeads = Object.fromEntries(snapshot.owners.filter(owner => owner.owner_kind === 'stage' && owner.project_id === projectId)
+            .map(owner => { const head = validateStageHead(owner, operation.scope); return [head.stage_id, head.tip_event_ids] }))
+          const stageOrder: StructuralEvent = { ...empty,
+            header: { ...header, entity_type: 'stage_order', entity_id: 'stage_order', event_id: crypto.randomUUID(),
+              revision: (orderTip?.revision ?? 0) + 1, generation: (orderTip?.generation ?? 0) + 1,
+              parent_event_ids: orderTip ? [orderTip.event_id] : [], operation: orderTip ? 'update' : 'create' },
+            stage_ids: [...stages.map(value => value.id), stageId],
+            stage_heads: { ...stageHeads, [stageId]: [stage.header.event_id] },
+          }
+          const items: V3MetadataPushItem[] = []
+          try {
+            for (const structural of [stage, stageOrder]) {
+              const h = structural.header
+              items.push({ event: { event_id: h.event_id, project_id: projectId, entity_id: h.entity_id,
+                entity_type: h.entity_type, operation: 'upsert', revision: h.revision, updated_at: now, deleted_at: null },
+                object: await sealStructuralEvent(amk, structural) })
+            }
+            if (!metadata.metadata.stages_enabled) {
+              const eventId = crypto.randomUUID()
+              const revision = parent.revision + 1
+              const event: ProjectMetadataEvent = { version: Object.hasOwn(metadata.metadata, 'cover_reference') ? 2 : 1,
+                header: { ...parent, device_id: deviceId, event_id: eventId, revision, generation: parent.generation + 1,
+                  parent_event_ids: [parent.event_id], operation: 'update', updated_at: now },
+                metadata: { ...metadata.metadata, stages_enabled: true }, deleted_at: null }
+              items.push({ event: { event_id: eventId, project_id: projectId, entity_id: projectId,
+                entity_type: 'project_metadata', operation: 'upsert', revision, updated_at: now, deleted_at: null },
+                object: await sealProjectMetadataEvent(amk, event) })
+            }
+            return { projectId, input: intent, stageId, rawBody: encodeV3MetadataPush(deviceId, items),
+              eventIds: items.map(({ event }) => event.event_id),
+              pin: { cursor: metadata.cursor, epoch, metadata: parent.event_id, order: orderTip?.event_id ?? null } }
+          } finally {
+            for (const item of items) { item.object.nonce.fill(0); item.object.ciphertext.fill(0) }
+          }
+        }))
+        operation.check()
+        this.pendingStage = pending
+      }
+      const { rawBody, eventIds, pin, stageId } = pending
+      let receipt
+      try {
+        receipt = await operation.request(token => encryptedSyncV3Api.pushWebStage(token, rawBody, eventIds, pin, operation.signal))
+      } catch (error) {
+        if (error instanceof ApiError && ['web_stage_parent_changed', 'web_stage_snapshot_changed', 'cloud_project_not_enabled',
+          'web_stage_parameters_invalid', 'web_stage_scope_invalid'].includes(error.code)) this.pendingStage = null
+        throw error
+      }
+      if (eventIds.some((id, index) => receipt.results.find(result => result.event_id === id)?.server_sequence !== pin.cursor + index + 1))
+        throw new BrowserCloudReadError('stage_changed')
+      const registry = await operation.request(token => cloudProjectsApi.listBootstraps(token, operation.signal))
+      const echo = await operation.request(token => encryptedSyncV3Api.recoveryRaw(token, pin.cursor, eventIds.length,
+        registry.current_cursor, pin.epoch, operation.signal))
+      const expected = JSON.parse(rawBody)
+      const rows = JSON.parse(echo).items as { event: { device_id: string; server_sequence: number; updated_at: string }; object: unknown }[]
+      if (rows.length !== eventIds.length || rows.some(({ event: { device_id, server_sequence, ...event }, object }, index) =>
+        device_id !== expected.device_id || server_sequence !== pin.cursor + index + 1
+        || immutableWireIdentity({ event: { ...event, updated_at: canonicalizeSyncTimestamp(event.updated_at) }, object })
+          !== immutableWireIdentity(expected.items[index])))
+        throw new BrowserCloudReadError('stage_changed')
+      const project = await this.readRecoveryProject(projectId, operation.signal)
+      if (!project.stages.some(stage => stage.id === stageId)) throw new BrowserCloudReadError('stage_changed')
+      this.pendingStage = null
+      return { project, stageId }
+    } finally {
+      this.stageCreating = false
+    }
+  }
+
+  async documentWriteReady(signal: AbortSignal): Promise<boolean> {
+    const operation = this.unlockedSync(signal)
+    return operation.request(token => encryptedSyncV3Api.webDocumentWriteReady(token, operation.signal))
+  }
+
+  async saveDocument(projectId: string, stageId: string | null, parentId: string | null,
+    content: TiptapDocument, signal: AbortSignal, resolution?: { entityId: string; eventId: string; tips: string[] }) {
+    const operation = this.unlockedSync(signal), keys = this.keys!, bindings = operation.bindings
+    const current = () => { try { operation.check(); return true } catch { return false } }
+    const parents = resolution ? [...resolution.tips].sort() : parentId ? [parentId] : []
+    const contentJson = JSON.parse(JSON.stringify(content))
+    const replay = await openBrowserReplayStorage(operation.scope, operation.signal, current)
+    let pending: string | null
+    try {
+      pending = await replay.retryDocument(this.auth, keys, event =>
+        event.header.project_id === projectId && event.header.stage_id === stageId
+        && (!resolution || event.header.entity_id === resolution.entityId) && (replaySame(event.header.parents, parents) || (!resolution && parentId === null && event.header.parents.length === 1))
+        && !!event.document && canonical(event.document.content_json) === canonical(contentJson))
+    } finally { await replay.close() }
+    if (!pending) await this.readRecoveryProject(projectId, operation.signal)
+    const eventId = pending ?? await withReceivedBrowserAccountHistory({
+      auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
+    }, async storage => {
+      const snapshot = await storage.read()
+      const manifest = snapshot.manifest
+      if (!manifest || manifest.applied_cursor !== manifest.receive_cursor)
+        throw new BrowserCloudReadError('unsupported_history')
+      if (!(await this.documentWriteReady(operation.signal))) throw new BrowserCloudReadError('document_reader_required')
+      const event = await operation.lease.use(async amk => {
+        const inventory = documentPreparationInventory(snapshot)
+        const owners = await authenticateDocumentTips(operation.scope, snapshot, amk, current)
+        const matches = owners.filter(tips => tips.some(value => value.header.project_id === projectId && value.header.stage_id === stageId))
+        const tips = (resolution ? matches.find(values => values[0]?.header.entity_id === resolution.entityId) : matches[0]) ?? []
+        const selected = resolution ? tips.find(value => value.header.event_id === resolution.eventId) : tips[0]
+        const existing = selected?.document
+        const recordedParents = tips.map(value => value.header.event_id).sort()
+        const recreate = !resolution && parentId === null && tips.length === 1 && !existing
+        if (matches.length > 1 || (!resolution && tips.length > 1)
+          || (!recreate && !replaySame(recordedParents, parents))
+          || (resolution && (tips.length < 2 || !existing || selected?.header.stage_id !== stageId)))
+          throw new BrowserCloudReadError('document_changed')
+        const eventParents = recreate ? recordedParents : parents
+        const metadata = snapshot.owners.find(value => value.owner_kind === 'project_metadata' && value.owner_id === projectId)
+        const stage = stageId === null ? undefined : snapshot.owners.find(value =>
+          value.owner_kind === 'stage' && value.project_id === projectId && value.stage_id === stageId)
+        const metadataEventId = metadata?.tip_event_ids[0], stageEventId = stage?.tip_event_ids[0]
+        if (!metadataEventId || metadata.tip_event_ids.length !== 1 || (stageId !== null && (!stageEventId || stage?.tip_event_ids.length !== 1)))
+          throw new BrowserCloudReadError('unsupported_history')
+        const stages = await readReplayStages(operation.scope, snapshot, projectId, amk, current)
+        const target = stages.find(value => value.id === stageId)
+        if (stageId !== null && !target) throw new BrowserCloudReadError('unsupported_history')
+        const local = storage.contentAuthorOwner(this.auth, bindings, keys).local
+        const source = await local.readSnapshot(operation.scope, projectId)
+        const project = await local.withDecryptedSnapshot(operation.scope, source.token, async value => value.project)
+        const now = canonicalizeSyncTimestamp(new Date().toISOString())
+        const allocated = new Set(owners.flatMap(tips => tips.map(value => value.header.entity_id)))
+        const id = tips[0]?.header.entity_id ?? await newCloudDocumentId(projectId, stageId, allocated)
+        const revision = Math.max(0, ...tips.map(value => value.header.revision)) + 1
+        const document: PortableDocument = existing ? { ...existing, content_json: contentJson } : {
+          id, project_id: projectId, stage_id: stageId, title: target?.name ?? project.name,
+          content_json: contentJson, content_format: 'tiptap-json/v1', created_at: now, extensions: {},
+        }
+        const event: DocumentEvent = { version: 1, mutation: 'upsert', deleted_at: null, document, header: {
+          account_id: operation.scope.canonicalUserId, device_id: operation.scope.deviceId, project_id: projectId,
+          stage_id: stageId, entity_id: id, event_id: crypto.randomUUID(), bootstrap_id: metadata.bootstrap_id,
+          metadata_event_id: metadataEventId, stage_event_ids: stageEventId ? [stageEventId] : [], parents: eventParents,
+          revision, generation: revision, operation: resolution ? 'resolution' : eventParents.length ? 'update' : 'create', updated_at: now,
+        } }
+        await verifyDocumentDependencies(operation.scope, { server_sequence: manifest.receive_cursor + 1, wire_item: '' },
+          event, inventory, amk, current)
+        return event
+      })
+      return storage.publishDocument(this.auth, keys, snapshot, event)
+    })
+    return this.readRecoveryProject(projectId, operation.signal, eventId)
+  }
+
   async progressWriteReady(signal: AbortSignal): Promise<boolean> {
     const operation = this.unlockedSync(signal)
     return operation.request(token => encryptedSyncV3Api.webProgressWriteReady(token, operation.signal))
@@ -266,7 +554,7 @@ export class BrowserCloudAccountSession {
       auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
     }, async storage => storage.publishGameShop(this.auth, keys, command, parentId))
     if (!eventId) throw new BrowserCloudReadError('unsupported_history')
-    return this.readRecoveryProject(projectId, operation.signal, eventId)
+    return this.readRecoveryProject(projectId, operation.signal, undefined, eventId)
   }
 
   /** Compose the same append/tombstone event as Desktop from verified current history. */
@@ -365,25 +653,54 @@ export class BrowserCloudAccountSession {
     operation.check()
   }
 
-  /** Create a new encrypted cloud project through the production sync v3 writer. */
+  /** Atomically allocate a cloud slot and publish its encrypted Metadata genesis. */
   async createCloudProject(name: string, signal?: AbortSignal): Promise<{ projectId: string; serverSequence: number }> {
-    this.assertWebRuntime()
-    const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
-    const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
-    if (this.status !== 'unlocked' || !identity || !lease || !keys || !bindings || !this.storage || !this.controller) {
-      throw new BrowserCloudReadError('key_locked')
-    }
-    const scope: CloudProjectCreateScope = {
-      accountId: identity.local_account_id,
-      canonicalUserId: context.userId,
-      deviceId: identity.device_id,
-    }
-    const current = () => !this.disposed && this.generation === generation && this.auth.isCurrent(context)
-    if (!current()) throw new BrowserCloudReadError('key_locked')
-    return stageCloudProjectMetadata(scope, name, {
-      auth: this.auth, bindings, keys,
-      storage: this.storage,
-    }, signal ? AbortSignal.any([signal, this.controller.signal]) : this.controller.signal)
+    const operation = this.unlockedSync(signal)
+    if (this.projectCreateInFlight) throw new BrowserPersistenceError('writer_busy')
+    this.projectCreateInFlight = true
+    try {
+      const legacyId = legacyPendingCloudProjectId(operation.scope.accountId)
+      if (legacyId) {
+        const old = await operation.storage.projects.read(operation.scope, legacyId)
+        operation.check()
+        if (!old || old.remote_state !== 'active') {
+          return await stageCloudProjectMetadata(operation.scope, name, {
+            auth: this.auth, bindings: operation.bindings, keys: this.keys!, storage: operation.storage,
+          }, operation.signal)
+        }
+      }
+      if (this.pendingProjectCreate && this.pendingProjectCreate.event.metadata?.name !== name.trim())
+        throw new BrowserCloudReadError('retry_pending_project_create')
+      const mode = await operation.request(token => encryptedSyncV2Api.capabilities(token, operation.signal))
+      const registry = await operation.request(token => cloudProjectsApi.listBootstraps(token, operation.signal))
+      if (mode.writer_transport_version !== 3) throw new BrowserCloudReadError('transport_v3_required')
+      const canonicalUserId = operation.scope.canonicalUserId
+      const pending = this.pendingProjectCreate ?? await operation.lease.use(amk =>
+        createCloudProjectMetadata({ accountId: canonicalUserId, canonicalUserId, deviceId: crypto.randomUUID() }, name, amk))
+      try { operation.check() } catch (error) {
+        pending.object.nonce.fill(0); pending.object.ciphertext.fill(0)
+        throw error
+      }
+      this.pendingProjectCreate = pending
+      try {
+        const h = pending.event.header
+        const serverSequence = await this.submitWebMetadata(operation, pending.event, pending.object,
+          { cursor: registry.current_cursor, epoch: mode.cutover_epoch, bootstrap: h.bootstrap_id })
+        this.clearPendingProjectCreate()
+        return { projectId: h.project_id, serverSequence }
+      } catch (error) {
+        if (error instanceof ApiError && ['cloud_project_limit_reached', 'web_metadata_snapshot_changed',
+          'web_metadata_scope_invalid', 'sync_transport_mode_incompatible', 'limits_unavailable'].includes(error.code))
+          this.clearPendingProjectCreate()
+        throw error
+      }
+    } finally { this.projectCreateInFlight = false }
+  }
+
+  private clearPendingProjectCreate() {
+    this.pendingProjectCreate?.object.nonce.fill(0)
+    this.pendingProjectCreate?.object.ciphertext.fill(0)
+    this.pendingProjectCreate = null
   }
 
   /** Bounded peer Metadata only. Fresh server reconciliation is mandatory on every call. */
@@ -480,6 +797,8 @@ export class BrowserCloudAccountSession {
   }
 
   private async revoke(clearIdentity: boolean): Promise<void> {
+    this.clearPendingProjectCreate()
+    this.pendingStage = null
     this.generation += 1
     this.controller?.abort()
     this.controller = null

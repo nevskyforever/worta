@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from 'vitest'
 import { encryptedSyncV2Api } from '@/api/encryptedSyncV2'
-import { cloudProjectsApi } from '@/api/cloudProjects'
+import { cloudProjectsApi, type CloudProjectBootstrapDescriptor } from '@/api/cloudProjects'
 import { encodeV3MetadataPush, encryptedSyncV3Api, type V3MetadataPushItem } from '@/api/encryptedSyncV3'
 import { encodeBase64Url } from '@/api/base64url'
 import { wrapAmkWithPassphrase } from '@/crypto/wrapping'
@@ -160,8 +160,35 @@ it('cancels during completion and keeps the same retry identity', async () => {
   expect(f.push).toHaveBeenCalledOnce()
 })
 
-it('creates two distinct active projects through the public unlocked session', async () => {
+it('creates two projects without enrolling a device and retries the same ciphertext after a lost response', async () => {
   const f = await setup()
+  const records: Array<{ project: CloudProjectBootstrapDescriptor; wire: ReturnType<typeof JSON.parse> }> = []
+  vi.spyOn(cloudProjectsApi, 'listBootstraps').mockImplementation(async () => ({
+    projects: records.map(record => record.project), current_cursor: records.length,
+  }))
+  let lost = false
+  const push = vi.spyOn(encryptedSyncV3Api, 'pushWebMetadata').mockImplementation(async (_token, device, item, pin) => {
+    if (!('bootstrap' in pin)) throw new Error('Expected project creation')
+    const raw = encodeV3MetadataPush(device, [item])
+    expect(raw).not.toContain('Private project')
+    const wire = JSON.parse(raw).items[0]
+    const existing = records.find(record => record.wire.event.event_id === item.event.event_id)
+    if (existing) expect(existing.wire).toEqual(wire)
+    const seq = existing?.project.initial_max_server_sequence ?? records.length + 1
+    if (!existing) records.push({ wire, project: {
+      project_id: item.event.project_id, bootstrap_id: pin.bootstrap, origin_device_id: device,
+      state: 'active', initial_event_count: 1, initial_max_server_sequence: seq,
+    } })
+    if (!lost) { lost = true; throw new Error('response lost') }
+    return { protocol_version: 3, encrypted_sync_version: 3, current_cursor: records.length,
+      results: [{ event_id: item.event.event_id, server_sequence: seq, duplicate: !!existing }] }
+  })
+  vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since) => {
+    const record = records[since]!
+    return JSON.stringify({ protocol_version: 3, encrypted_sync_version: 3, next_cursor: since + 1,
+      has_more: since + 1 < records.length, items: [{ ...record.wire, event: { ...record.wire.event,
+        device_id: record.project.origin_device_id, server_sequence: since + 1 } }] })
+  })
   const password = await wrapAmkWithPassphrase(amk, 'fixture passphrase')
   const session = new BrowserCloudAccountSession({
     auth: f.auth,
@@ -183,19 +210,17 @@ it('creates two distinct active projects through the public unlocked session', a
     await session.login('fixture', 'fixture')
     await expect(session.createCloudProject('Private project')).rejects.toMatchObject({ code: 'key_locked' })
     await session.unlock('fixture passphrase')
-    const first = await session.createCloudProject('Private project')
-    await expect(session.createCloudProject(' Private project ')).resolves.toEqual(first)
-    expect(f.complete).toHaveBeenCalledOnce()
-
+    await expect(session.createCloudProject('Private project')).rejects.toThrow('response lost')
+    const first = await session.createCloudProject(' Private project ')
     const second = await session.createCloudProject('Another project')
     expect(second.projectId).not.toBe(first.projectId)
     expect([first.serverSequence, second.serverSequence]).toEqual([1, 2])
-    for (const { projectId } of [first, second]) {
-      expect(await f.projects.read(scope, projectId)).toMatchObject({ remote_state: 'active' })
-    }
-    expect(f.push).toHaveBeenCalledTimes(2)
-    expect(f.complete).toHaveBeenCalledTimes(2)
-    expect(f.pending.size).toBe(1)
+    expect(records.map(record => record.project.project_id)).toEqual([first.projectId, second.projectId])
+    expect(records.every(record => record.project.origin_device_id !== scope.deviceId)).toBe(true)
+    expect(push).toHaveBeenCalledTimes(3)
+    expect(f.register).not.toHaveBeenCalled()
+    expect(f.complete).not.toHaveBeenCalled()
+    expect(f.pending.size).toBe(0)
   } finally { await session.dispose() }
 })
 

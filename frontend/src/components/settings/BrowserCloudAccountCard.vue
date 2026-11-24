@@ -74,7 +74,44 @@ const cloudProjectMetadataLoading = ref<Record<string, boolean>>({})
 const cloudProjectMetadataError = ref<Record<string, string>>({})
 const selectedCloudProject = ref<string | null>(null)
 const projectBack = ref<HTMLButtonElement | null>(null)
+const projectReader = ref<{ canLeave: () => boolean } | null>(null)
 const projectTiles = new Map<string, HTMLButtonElement>()
+
+const projectEdit = ref<{ name: string; goal: number | null; deadline: string | null } | null>(null)
+const projectChangeError = ref(false)
+const projectChangeBusy = ref(false)
+const projectAtLimit = computed(() => !!cloudProjects.value &&
+  cloudProjects.value.cloud_project_count >= cloudProjects.value.max_cloud_projects)
+watch(selectedCloudProject, () => {
+  projectEdit.value = null
+  projectChangeError.value = false
+})
+
+function editSelectedProject() {
+  const metadata = selectedCloudProject.value && cloudProjectMetadata.value[selectedCloudProject.value]?.metadata
+  if (!metadata) return
+  projectEdit.value = { name: metadata.name, goal: metadata.goal, deadline: metadata.deadline }
+}
+
+async function changeSelectedProject() {
+  const id = selectedCloudProject.value, controller = cloudCatalogController
+  const snapshot = id && cloudProjectMetadata.value[id]
+  const edit = projectEdit.value
+  if (!id || !snapshot || !snapshot.metadataHead || !controller || projectChangeBusy.value || !edit?.name.trim()) return
+  projectChangeBusy.value = true
+  projectChangeError.value = false
+  try {
+    await session.changeCloudProject(id, snapshot.metadataHead.event_id, {
+      name: edit.name, goal: typeof edit.goal === 'number' ? edit.goal : null, infinite: typeof edit.goal !== 'number', deadline: edit.deadline || null,
+    }, controller.signal)
+    if (controller.signal.aborted) return
+    projectEdit.value = null
+    await loadCloudCatalog()
+    if (session.status === 'unlocked') await openProject(id)
+  } catch {
+    if (!controller.signal.aborted) projectChangeError.value = true
+  } finally { projectChangeBusy.value = false }
+}
 
 function registerProjectTile(id: string, element: unknown): void {
   if (element instanceof HTMLButtonElement) projectTiles.set(id, element)
@@ -89,10 +126,15 @@ async function openProject(id: string): Promise<void> {
 
 async function showProjects(): Promise<void> {
   const id = selectedCloudProject.value
-  if (!id) return
+  if (!id || !(projectReader.value?.canLeave() ?? true)) return
   selectedCloudProject.value = null
   await nextTick()
   projectTiles.get(id)?.focus()
+}
+function switchProject(event: Event) {
+  const select = event.target as HTMLSelectElement
+  if (projectReader.value?.canLeave() ?? true) selectedCloudProject.value = select.value
+  else select.value = selectedCloudProject.value ?? ''
 }
 defineExpose({ showProjects })
 const cloudCatalogOpen = ref(false)
@@ -136,7 +178,7 @@ async function loadCloudProjectMetadata(ids: string[], controller: AbortControll
   cloudProjectMetadataLoading.value = loading
   await Promise.all(ids.map(async id => {
     try {
-      const value = await session.readCloudProject(id, controller.signal, props.workspacePage ? 'recovery' : undefined)
+      const value = await session.readCloudProject(id, controller.signal, props.workspacePage ? 'recovery' : undefined, props.workspacePage)
       if (generation !== cloudCatalogGeneration || controller.signal.aborted) return
       cloudProjectMetadata.value = { ...cloudProjectMetadata.value, [id]: value }
       const nextError = { ...cloudProjectMetadataError.value }
@@ -152,6 +194,11 @@ async function loadCloudProjectMetadata(ids: string[], controller: AbortControll
       }
     }
   }))
+}
+
+function reloadSelectedMetadata(): void {
+  if (selectedCloudProject.value && cloudCatalogController)
+    void loadCloudProjectMetadata([selectedCloudProject.value], cloudCatalogController, cloudCatalogGeneration)
 }
 
 async function loadCloudCatalog(): Promise<void> {
@@ -225,7 +272,7 @@ function resetCloudCreate(): void {
 
 async function createCloudProject(): Promise<void> {
   const name = cloudProjectName.value.trim()
-  if (session.status !== 'unlocked' || (props.session && syncMode.value !== 3) || busy.value || cloudCreateBusy.value || !name) return
+  if (session.status !== 'unlocked' || (props.session && syncMode.value !== 3) || busy.value || cloudCreateBusy.value || projectAtLimit.value || !name) return
   cloudCreateError.value = null
   cloudCreateSaved.value = false
   if (new TextEncoder().encode(name).length > 512) {
@@ -411,7 +458,7 @@ watch(status, next => {
 <template>
   <section :class="workspacePage ? 'web-projects' : 'settings-card'" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
     <div :class="workspacePage ? 'page-header web-projects__header' : 'settings-card__heading'">
-      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? section === 'game' ? 'Игра' : 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
+      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? section === 'game' ? 'Игра' : section === 'texts' ? 'Тексты' : section === 'notes' ? 'Заметки' : 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
       <p v-if="!props.session">{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
       <div v-if="workspacePage" class="web-projects__actions">
         <button class="nf-button nf-button--quiet" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
@@ -459,28 +506,40 @@ watch(status, next => {
         <button v-if="!syncBusy" class="nf-button" type="button" :disabled="busy" data-testid="cloud-sync-setup"
           @click="checkSyncMode(syncMode !== null)">{{ syncMode === null ? t('Повторить') : setupWords.action }}</button>
       </div>
-      <form v-if="section !== 'game' && status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
+      <form v-if="(!section || section === 'project') && status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
         data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
         <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
-        <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || !cloudProjectName.trim()">{{ createWords.title }}</button>
+        <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || projectAtLimit || !cloudProjectName.trim()">{{ createWords.title }}</button>
         <p v-if="cloudCreateBusy" role="status">{{ createWords.saving }}</p>
         <p v-else-if="cloudCreateSaved" role="status">{{ createWords.saved }}</p>
-        <p v-if="cloudCreateError" role="alert">{{ cloudCreateError }}</p>
+        <p v-if="cloudCreateError || projectAtLimit" role="alert">{{ cloudCreateError ?? createWords.limit }}</p>
       </form>
       <section v-if="workspacePage && selectedCloudProject" class="web-projects__detail">
         <div class="web-projects__actions">
           <button ref="projectBack" type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="showProjects">{{ t('Назад') }}</button>
           <select v-if="cloudProjects && cloudProjects.cloud_project_ids.length > 1" data-testid="cloud-project-switch" :value="selectedCloudProject" :aria-label="t('Выберите проект')"
-            @change="selectedCloudProject = ($event.target as HTMLSelectElement).value">
+            @change="switchProject">
             <option v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id" :value="id">
               {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
             </option>
           </select>
         </div>
-        <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @invalidated="refresh(); clearCloudCatalog()" />
+        <template v-if="(!section || section === 'project') && cloudProjectMetadata[selectedCloudProject]?.metadataHead">
+          <div v-if="!projectEdit" class="web-projects__actions">
+            <button class="nf-button nf-button--secondary" type="button" @click="editSelectedProject">{{ t('Редактировать проект') }}</button>
+          </div>
+          <form v-if="projectEdit" class="browser-cloud-account__inputs" @submit.prevent="changeSelectedProject()">
+            <label>{{ createWords.name }} <input v-model="projectEdit.name" required /></label>
+            <label>{{ t('Цель') }} <input v-model.number="projectEdit.goal" type="number" min="0" step="any" /></label>
+            <label>{{ t('Дедлайн') }} <input v-model="projectEdit.deadline" type="date" /></label>
+            <button class="nf-button" type="submit" :disabled="projectChangeBusy">{{ t('Сохранить') }}</button>
+            <button class="nf-button nf-button--secondary" type="button" :disabled="projectChangeBusy" @click="projectEdit = null">{{ t('Отмена') }}</button>
+          </form>
+          <p v-if="projectChangeError" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+        </template>
+        <BrowserCloudProjectRead ref="projectReader" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @metadata-changed="reloadSelectedMetadata" @invalidated="refresh(); clearCloudCatalog()" />
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
-        <h2 v-if="section === 'texts' || section === 'notes'">{{ t(section === 'texts' ? 'Тексты' : 'Заметки') }}</h2>
         <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
         <StatePanel v-if="cloudCatalogBusy" :title="t('Загружаем с сервера…')" loading />
         <p v-else-if="cloudCatalogError" role="alert">{{ cloudCatalogError }}</p>

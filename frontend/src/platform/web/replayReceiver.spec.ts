@@ -53,7 +53,7 @@ beforeEach(async () => {
   // Unit tests cover receiver orchestration only. Native IDB atomicity/schema
   // and restart are exercised by the real Chromium/PostgreSQL acceptance.
   store = {
-    publishProgress: vi.fn(), retryProgress: vi.fn(), publishGameShop: vi.fn(),
+    publishProgress: vi.fn(), retryProgress: vi.fn(), publishDocument: vi.fn(), retryDocument: vi.fn(), publishGameShop: vi.fn(),
     authenticateGames: vi.fn(), authenticateProgress: vi.fn(), authenticateMaps: vi.fn(), authenticateDocuments: vi.fn(), applyDocumentGenesis: vi.fn(), recoverV10: vi.fn(), importRecoveryProject: vi.fn(), stageRecoveryExtension: vi.fn(),
     contentAuthorOwner:vi.fn(),receiveContentAuthorEcho:vi.fn(),inspectNoteReaderReadiness: vi.fn(), applyContentUpdate: vi.fn(), applyOrderedContentUpdate: vi.fn(), applyMetadata: vi.fn(), applyStructure: vi.fn(), applyInitialNotes: vi.fn(), seedNoteSource: vi.fn(),
     start: vi.fn(async () => {

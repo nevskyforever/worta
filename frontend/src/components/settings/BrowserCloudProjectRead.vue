@@ -8,16 +8,18 @@ import StatePanel from '@/components/ui/StatePanel.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
+import type { TiptapDocument } from '@/types/documents'
 import type { BrowserProgressView } from '@/platform/web/progressView'
 import type { GameShopCommand } from '@/cloud/gameShop'
 import { cloudDocumentForReading, cloudNoteCard, readCloudWorkspaceProject } from '@/platform/web/cloudWorkspaceReader'
+import { ApiError } from '@/api/client'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
 const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean; section?: 'project' | 'texts' | 'notes' | 'game' }>()
-const emit = defineEmits<{ invalidated: [] }>()
+const emit = defineEmits<{ invalidated: []; metadataChanged: [] }>()
 const locale = useLocaleStore(), t = locale.translate
 const NFDocumentEditor = defineAsyncComponent(() => import('@/components/documents/editor/NFDocumentEditor.vue'))
 const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: string; network: string; register: string }> = {
@@ -108,7 +110,8 @@ const projectMap = computed<MindMapResponse | null>(() => {
     combined: false, read_only: true, has_empty_completed_stage_map: false } : null
 })
 const refuseMapWrite = async (): Promise<never> => { throw new Error('read_only') }
-const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value))
+const activeDocument = computed(() => stageDocuments.value.find(document => document.id === selectedDocument.value)
+  ?? (props.workspace && showTexts.value ? stageDocuments.value[0] : undefined))
 const documentForReading = computed(() => activeDocument.value && cloudDocumentForReading(activeDocument.value))
 const stageNotes = computed(() => recovery.value?.notes.filter(note => note.stage_id === selectedStage.value) ?? [])
 const selectedStage = ref<string | null>(null)
@@ -130,8 +133,11 @@ function rememberStage(): void {
   catch { /* Reading remains available when optional browser preferences are blocked. */ }
 }
 function selectStage(id: string | null): void {
-  if (id !== selectedStage.value) selectedDocument.value = null
-  selectedStage.value = id; rememberStage()
+  if (id === selectedStage.value || draft.value) return
+  selectedStage.value = id
+  selectedDocument.value = props.section === 'texts' ? stageDocuments.value[0]?.id ?? null : null
+  documentSaved.value = false
+  rememberStage()
 }
 const recoveryError = ref(false)
 const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecoveryProject']>> | null>(null)
@@ -154,10 +160,114 @@ const displayedStages = computed(() => props.section === 'game'
 const displayedGameStage = computed(() => props.section !== 'game' || gameScopes.value.has(selectedStage.value)
   ? selectedStage.value
   : gameScopes.value.has(null) ? null : displayedStages.value[0]?.id)
+
+const stageDraft = ref<{ name: string; goal: number | ''; deadline: string } | null>(null)
+const stageSaving = ref(false)
+const stageSaveFailed = ref(false)
+const stageRetryRequired = ref(false)
+const selectedStageView = computed(() => recovery.value?.stages.find(stage => stage.id === selectedStage.value))
+const canAddStage = computed(() => props.workspace && showProject.value
+  && (recovery.value?.project.status ?? result.value?.metadata.status) === 'активен'
+  && typeof props.session.createStage === 'function')
+const documentWritable = ref(false)
+const documentSaving = ref(false)
+const documentSaved = ref(false)
+const documentSaveFailed = ref(false)
+const documentRetryRequired = ref(false)
+const documentChanged = ref(false)
+const comparisonLoaded = ref(false)
+const draft = ref<{ stageId: string | null; parentId: string | null; initial: TiptapDocument; content: TiptapDocument; resolution?: { entityId: string; eventId: string; tips: string[] } } | null>(null)
+const documentConflict = computed(() => recovery.value?.documentConflicts?.find(tips =>
+  tips.some(value => value.header.stage_id === selectedStage.value)))
+const mayEditDocument = computed(() => documentWritable.value && props.workspace && !documentConflict.value &&
+  (activeDocument.value ? !!recovery.value?.documentHeads?.[activeDocument.value.id] : !stageDocuments.value.length))
+const comparisonDocument = computed(() => comparisonLoaded.value ? stageDocuments.value[0] : undefined)
+function clearDocumentStatus() {
+  documentSaveFailed.value = documentRetryRequired.value = documentChanged.value = comparisonLoaded.value = false
+}
+function editDocument() {
+  if (!mayEditDocument.value || draft.value) return
+  const initial: TiptapDocument = activeDocument.value ? cloudDocumentForReading(activeDocument.value, true) :
+    { type: 'doc', content: [{ type: 'paragraph' }] }
+  draft.value = { stageId: selectedStage.value,
+    parentId: activeDocument.value ? recovery.value!.documentHeads![activeDocument.value.id]! : null,
+    initial, content: initial }
+  documentSaved.value = false
+  clearDocumentStatus()
+}
+function resolveDocument(event: NonNullable<typeof documentConflict.value>[number]) {
+  if (!documentWritable.value || !documentConflict.value || !event.document || event.header.stage_id !== selectedStage.value || draft.value) return
+  const initial = cloudDocumentForReading(event.document, true)
+  draft.value = { stageId: selectedStage.value, parentId: null, initial, content: initial,
+    resolution: { entityId: event.header.entity_id, eventId: event.header.event_id, tips: documentConflict.value.map(value => value.header.event_id) } }
+  documentSaved.value = false
+  clearDocumentStatus()
+}
+function protectDocumentDraft(event: BeforeUnloadEvent) {
+  if (!draft.value && !stageDraft.value) return
+  event.preventDefault()
+  event.returnValue = true
+}
+function canLeave(): boolean {
+  return !documentSaving.value && !stageSaving.value && !stageRetryRequired.value && (!(draft.value || stageDraft.value) || window.confirm(t('Есть несохранённые изменения.')))
+}
+defineExpose({ canLeave })
+function cancelDocument() {
+  draft.value = null
+  clearDocumentStatus()
+}
+async function compareDocument() {
+  const signal = controller?.signal
+  if (!signal || signal.aborted || !draft.value || documentSaving.value) return
+  documentSaving.value = true
+  try {
+    const updated = await props.session.readRecoveryProject(props.projectId, signal)
+    if (signal.aborted) return
+    recovery.value = updated
+    result.value = null
+    comparisonLoaded.value = true
+    documentSaveFailed.value = false
+  } catch {
+    if (!signal.aborted) documentSaveFailed.value = true
+  } finally { documentSaving.value = false }
+}
+function keepDocumentDraft() {
+  if (!draft.value || !comparisonLoaded.value || documentConflict.value) return
+  const latest = comparisonDocument.value
+  const head = latest && recovery.value?.documentHeads?.[latest.id]
+  if (latest && !head) return
+  draft.value.parentId = head ?? null
+  draft.value.resolution = undefined
+  clearDocumentStatus()
+}
+async function saveDocument() {
+  const value = draft.value, signal = controller?.signal
+  if (!value || !signal || signal.aborted || documentSaving.value || documentChanged.value) return
+  documentSaving.value = true
+  documentSaveFailed.value = false
+  try {
+    const updated = await props.session.saveDocument(props.projectId, value.stageId, value.parentId, value.content, signal, value.resolution)
+    if (signal.aborted) return
+    recovery.value = updated
+    result.value = null
+    selectedDocument.value = updated.documents.find(document => document.stage_id === value.stageId)?.id ?? null
+    draft.value = null
+    clearDocumentStatus()
+    documentSaved.value = true
+  } catch (cause) {
+    if (!signal.aborted) {
+      documentSaveFailed.value = true
+      documentChanged.value = cause instanceof BrowserCloudReadError && cause.code === 'document_changed'
+        || cause instanceof ApiError && ['web_document_snapshot_changed', 'web_document_parent_changed'].includes(cause.code)
+      documentRetryRequired.value = cause instanceof ApiError && (cause.status === 0 || cause.status >= 500)
+        || (cause instanceof BrowserCloudReadError || cause instanceof BrowserReplayError) && cause.code === 'connection_failed'
+    }
+  } finally { documentSaving.value = false }
+}
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
-  controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false
+  draft.value = null; clearDocumentStatus(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = false
   emit('invalidated')
 })
 async function open(): Promise<void> {
@@ -175,7 +285,8 @@ async function open(): Promise<void> {
   } finally { if (controller === active) busy.value = false }
 }
 async function openRecovery(): Promise<void> {
-  if (disposed) return
+  if (disposed || draft.value || stageDraft.value) return
+  documentWritable.value = false; documentSaved.value = false
   const priorDocument = selectedDocument.value, priorSelection = selectedStage.value, hadRecovery = recovery.value !== null
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
@@ -185,6 +296,10 @@ async function openRecovery(): Promise<void> {
     const opened = props.workspace
       ? await readCloudWorkspaceProject(props.session, props.projectId, active.signal)
       : { kind: 'project' as const, project: await props.session.readRecoveryProject(props.projectId, active.signal) }
+    if (props.workspace && typeof props.session.documentWriteReady === 'function') {
+      const ready = await props.session.documentWriteReady(active.signal).catch(() => false)
+      if (!active.signal.aborted && props.session.status === 'unlocked') documentWritable.value = ready
+    }
     if (opened.kind === 'empty') {
       if (!active.signal.aborted && props.session.status === 'unlocked') result.value = opened.metadata
       return
@@ -195,7 +310,8 @@ async function openRecovery(): Promise<void> {
       const remembered = hadRecovery ? priorSelection : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
         ? remembered! : value.games?.some(game=>game.event.header.stage_id===null) || value.progress?.some(progress => progress.stage_id === null) || value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
-      selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value) ? priorDocument : null
+      selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value)
+        ? priorDocument : props.section === 'texts' ? stageDocuments.value[0]?.id ?? null : null
       rememberStage()
       if (props.workspace && value.progress?.length) {
         const ready = await props.session.progressWriteReady(active.signal).catch(() => false)
@@ -211,6 +327,29 @@ async function openRecovery(): Promise<void> {
     if (props.session.status !== 'unlocked') { emit('invalidated'); return }
     error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError || cause instanceof BrowserReplayError ? cause.code : 'unsafe_history'
   } finally { if (controller === active) busy.value = false }
+}
+async function saveStage(): Promise<void> {
+  const value = stageDraft.value, signal = controller?.signal
+  if (!value || !value.name.trim() || !signal || signal.aborted || stageSaving.value || draft.value) return
+  stageSaving.value = true
+  stageSaveFailed.value = false
+  try {
+    const updated = await props.session.createStage(props.projectId, {
+      name: value.name, goal: typeof value.goal === 'number' ? value.goal : null, deadline: value.deadline || null,
+    }, signal)
+    if (signal.aborted) return
+    result.value = null
+    recovery.value = updated.project
+    stageDraft.value = null
+    stageRetryRequired.value = false
+    selectStage(updated.stageId)
+    emit('metadataChanged')
+  } catch {
+    if (!signal.aborted) {
+      stageSaveFailed.value = true
+      stageRetryRequired.value = props.session.stageCreatePending(props.projectId)
+    }
+  } finally { stageSaving.value = false }
 }
 async function tradeGame(command: GameShopCommand) {
   const signal = controller?.signal, head = recovery.value?.accountGameHead
@@ -239,9 +378,9 @@ async function saveProgress(progress: BrowserProgressView, action: { total: numb
     if (!signal.aborted) progressSaveFailed.value = true
   } finally { progressSaving.value = false }
 }
-onMounted(() => { if (props.autoOpenRecovery) void openRecovery(); else void open() })
+onMounted(() => { window.addEventListener('beforeunload', protectDocumentDraft); if (props.autoOpenRecovery) void openRecovery(); else void open() })
 watch(() => props.projectId, () => { if (props.autoOpenRecovery) void openRecovery() })
-onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null })
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocumentDraft); disposed = true; unsubscribe(); controller?.abort(); result.value = null; recovery.value = null; selectedDocument.value = null })
 </script>
 
 <template>
@@ -255,9 +394,10 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     <button v-if="workspace && error" class="nf-button nf-button--secondary" type="button" @click="openRecovery">{{ t('Повторить загрузку') }}</button>
     <article v-if="result" data-testid="cloud-project-metadata">
       <h3>{{ result.metadata.name }}</h3>
-      <button v-if="workspace && result.empty" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
+      <button v-if="workspace && result.empty" :disabled="!!draft" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
       <StatePanel v-if="result.empty" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
-      <p v-else>{{ words.partial }}</p>
+      <button v-if="result.empty && showTexts && mayEditDocument && !draft" class="nf-button nf-button--secondary" type="button" @click="editDocument">{{ t('Создать') }}</button>
+      <p v-if="!result.empty">{{ words.partial }}</p>
       <dl v-if="!result.empty">
         <dt>{{ t('Цель') }}</dt><dd>{{ result.metadata.goal ?? t('Без лимита') }}</dd>
         <dt>{{ t('Статус') }}</dt><dd>{{ result.metadata.status }}</dd>
@@ -266,18 +406,24 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     </article>
     <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
-      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" :disabled="gameSaving || progressSaving" @click="openRecovery">{{ t('Обновить') }}</button>
-      <p v-if="workspace && showProject && !progressWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
+      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" :disabled="gameSaving || progressSaving || !!draft || !!stageDraft" @click="openRecovery">{{ t('Обновить') }}</button>
+      <p v-if="workspace && showProject && !canAddStage && !progressWritable && !documentWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
       <nav v-if="section === 'game' && recovery.accountGame" class="cloud-reader__stages" :aria-label="t('Игра')" data-testid="cloud-game-navigation">
         <button v-for="view in gameViews" :key="view.key" class="nf-button nf-button--secondary" type="button"
           :data-game-view="view.key" :aria-pressed="selectedGameView === view.key" @click="gameView = view.key">{{ t(view.label) }}</button>
       </nav>
       <nav v-if="displayedStages.length && (section !== 'game' || selectedGameView === 'overview')" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
         <button v-if="section !== 'game' || gameScopes.has(null)" class="nf-button nf-button--secondary" type="button"
-          :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
+          :disabled="!!draft || stageSaving" :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in displayedStages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id"
-          :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
+          :disabled="!!draft || stageSaving" :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
+      <dl v-if="workspace && showProject && (selectedStage === null || selectedStageView?.settings)" data-testid="cloud-project-details">
+        <dt>{{ t('Название') }}</dt><dd>{{ selectedStageView?.name ?? recovery.project.name }}</dd>
+        <dt>{{ t('Цель') }}</dt><dd>{{ (selectedStageView?.settings ?? recovery.project).goal ?? t('Без лимита') }}</dd>
+        <dt>{{ t('Статус') }}</dt><dd>{{ t(selectedStageView?.settings?.status ?? recovery.project.status ?? '—') }}</dd>
+        <dt>{{ t('Дедлайн') }}</dt><dd>{{ (selectedStageView ? selectedStageView.settings?.deadline : recovery.project.payload?.deadline) ?? '—' }}</dd>
+      </dl>
       <template v-if="showGame">
         <p v-if="gameSaveFailed && section === 'game'" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
         <p v-else-if="section === 'game' && (gameSaving || gameSaved)" role="status">{{ t(gameSaving ? 'Сохранение…' : 'Сохранено') }}</p>
@@ -295,15 +441,29 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
           :writable="progressWritable && (value.stage_id !== null || !recovery.stages.length)" :busy="progressSaving"
           @save="saveProgress(value, $event)" />
       </template>
-      <section v-if="showTexts && (stageDocuments.length || section === 'texts')" class="cloud-reader__panel" data-testid="cloud-document-list">
+      <section v-if="showTexts && (stageDocuments.length || section === 'texts' || mayEditDocument || documentConflict)" class="cloud-reader__panel" data-testid="cloud-document-list">
         <h4>{{ section === 'texts' ? t('Тексты') : documentLabels[locale.language] }}</h4>
-        <StatePanel v-if="!stageDocuments.length" :title="t('Нет данных')" />
+        <template v-if="!stageDocuments.length">
+          <button v-if="mayEditDocument && !draft" class="nf-button nf-button--secondary" type="button" @click="editDocument">{{ t('Создать') }}</button>
+          <StatePanel v-else-if="!draft && !documentConflict" :title="t('Нет данных')" />
+        </template>
         <div v-else class="cloud-reader__stages">
-          <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :aria-pressed="selectedDocument === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
+          <button v-for="document in stageDocuments" :key="document.id" class="nf-button nf-button--secondary" type="button" :data-document-id="document.id" :disabled="!!draft" :aria-pressed="activeDocument?.id === document.id" @click="selectedDocument = document.id">{{ document.title }}</button>
         </div>
       </section>
-      <section v-if="showTexts && activeDocument" class="cloud-reader__panel" data-testid="cloud-document-read">
+      <section v-if="showTexts && documentConflict && !draft" class="cloud-reader__panel">
+        <h5>{{ t('Версии различаются') }}</h5>
+        <article v-for="version in documentConflict" :key="version.header.event_id">
+          <p>{{ new Date(version.header.updated_at).toLocaleString(locale.language.replace('_', '-')) }}</p>
+          <template v-if="version.document">
+            <NFDocumentEditor :initial-content="cloudDocumentForReading(version.document)" :translate="t" read-only />
+            <button v-if="documentWritable && version.header.stage_id === selectedStage" class="nf-button nf-button--secondary" type="button" @click="resolveDocument(version)">{{ t('Выбрать') }}</button>
+          </template>
+        </article>
+      </section>
+      <section v-if="showTexts && activeDocument && !draft" class="cloud-reader__panel" data-testid="cloud-document-read">
         <h5>{{ activeDocument.title }}</h5>
+        <button v-if="mayEditDocument" class="nf-button nf-button--secondary" type="button" data-testid="cloud-document-edit-action" @click="editDocument">{{ t('Изменить') }}</button>
         <NFDocumentEditor v-if="workspace && documentForReading" :key="activeDocument.id" :initial-content="documentForReading" :translate="t" read-only />
         <p v-else data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
       </section>
@@ -334,6 +494,34 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
         </section>
       </template>
     </article>
+    <section v-if="canAddStage && !draft" class="cloud-reader__panel">
+      <button v-if="!stageDraft" type="button" class="nf-button nf-button--secondary" data-testid="cloud-stage-create" @click="stageDraft = { name: '', goal: '', deadline: '' }; stageSaveFailed = false">{{ t('Добавить этап') }}</button>
+      <form v-else class="cloud-stage-form" data-testid="cloud-stage-create-form" @submit.prevent="saveStage">
+        <label>{{ t('Название') }} <input v-model="stageDraft.name" required maxlength="512" :disabled="stageSaving || stageRetryRequired" /></label>
+        <label>{{ t('Цель') }} <input v-model.number="stageDraft.goal" type="number" min="0" max="9007199254740991" step="any" :disabled="stageSaving || stageRetryRequired" /></label>
+        <label>{{ t('Дедлайн') }} <input v-model="stageDraft.deadline" type="date" :disabled="stageSaving || stageRetryRequired" /></label>
+        <button class="nf-button" type="submit" :disabled="stageSaving || !stageDraft.name.trim()">{{ t(stageSaving ? 'Сохранение…' : stageRetryRequired ? 'Повторить' : 'Создать этап') }}</button>
+        <button class="nf-button nf-button--secondary" type="button" :disabled="stageSaving || stageRetryRequired" @click="stageDraft = null">{{ t('Отмена') }}</button>
+        <p v-if="stageSaveFailed" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+      </form>
+    </section>
+    <section v-if="showTexts && draft" class="cloud-reader__panel" data-testid="cloud-document-edit">
+      <NFDocumentEditor :initial-content="draft.initial" :translate="t" inert-links :inert="documentSaving || documentRetryRequired"
+        @update="draft && !documentRetryRequired && (draft.content = $event)" />
+      <button v-if="!documentChanged" class="nf-button" type="button" :disabled="documentSaving" data-testid="cloud-document-save" @click="saveDocument">{{ t(documentRetryRequired ? 'Повторить' : draft.resolution ? 'Сохранить выбранный результат' : 'Сохранить текст') }}</button>
+      <button v-if="documentChanged && !comparisonLoaded" class="nf-button" type="button" :disabled="documentSaving" @click="compareDocument">{{ t('Обновить') }}</button>
+      <button class="nf-button nf-button--secondary" type="button" :disabled="documentSaving || documentRetryRequired" @click="cancelDocument">{{ t('Отмена') }}</button>
+      <p v-if="documentSaveFailed" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+      <template v-if="comparisonLoaded">
+        <p>{{ t('Версии различаются') }}</p>
+        <template v-if="!documentConflict">
+          <NFDocumentEditor v-if="comparisonDocument" :initial-content="cloudDocumentForReading(comparisonDocument)" :translate="t" read-only />
+          <p v-else>{{ t('Нет данных') }}</p>
+          <button class="nf-button nf-button--secondary" type="button" data-testid="cloud-document-keep-draft" @click="keepDocumentDraft">{{ t('Сохранить локальную версию как новое облачное изменение') }}</button>
+        </template>
+      </template>
+    </section>
+    <p v-if="showTexts && documentSaved" role="status">{{ t('Сохранено') }}</p>
   </section>
 </template>
 
@@ -345,6 +533,8 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
 .cloud-reader__notice { color: var(--nf-color-text-muted); }
 .cloud-reader__stages { display: flex; flex-wrap: wrap; gap: var(--nf-space-2); }
 .cloud-reader__stages [aria-pressed='true'] { border-color: var(--nf-color-primary); color: var(--nf-color-primary); }
+.cloud-stage-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--nf-space-3); }
+.cloud-stage-form label { display: grid; gap: var(--nf-space-1); }
 .cloud-reader__panel { display: grid; gap: var(--nf-space-3); min-width: 0; }
 .cloud-reader__notes { display: grid; gap: var(--nf-space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); }
 .cloud-reader__notes iframe { width: 100%; min-height: 12rem; border: 0; }

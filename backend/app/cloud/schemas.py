@@ -823,6 +823,10 @@ class DocumentReaderCapabilities(BaseModel):
             raise ValueError('Reader version must be an integer')
         return value
 
+class WebDocumentWriteGate(ContentNoteCapabilityGate):
+    web_document_version: Literal[1] = 1
+
+
 class WebProgressWriteGate(ContentNoteCapabilityGate):
     web_progress_version: Literal[1] = 1
 
