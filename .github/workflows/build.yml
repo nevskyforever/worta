@@ -66,6 +66,7 @@ jobs:
       contents: read
       attestations: read
     outputs:
+      macos_source: ${{ steps.inspect.outputs.macos_source }}
       windows_available: ${{ steps.inspect.outputs.windows_available }}
       windows_hash: ${{ steps.inspect.outputs.windows_hash }}
       windows_commit: ${{ steps.inspect.outputs.windows_commit }}
@@ -89,16 +90,36 @@ jobs:
             exit 1
           fi
           mkdir -p "$RUNNER_TEMP/host-inspection"
+          macos_source="$tag_sha"
+          if [[ "$version" == 5.3.20 ]]; then
+            # These archives were qualified before the release workflow repair.
+            macos_source=aa75ab7b8b92ca0a68f975215c9bc2cd45baeb01
+            [[ "$tag_sha" == "$GITHUB_SHA" ]]
+            git merge-base --is-ancestor "$macos_source" "$tag_sha"
+            git diff --exit-code --no-renames "$macos_source" "$tag_sha" -- . \
+              ':(exclude,top).github/workflows/build.yml' \
+              ':(exclude,top)AGENTS.md' \
+              ':(exclude,top)tests/test_f10_release_engineering.py'
+          fi
+          echo "macos_source=$macos_source" >> "$GITHUB_OUTPUT"
           for arch in arm intel; do
-            file="$RUNNER_TEMP/host-inspection/nfprogress-mac-${arch}-${version}.zip"
-            if ! curl --fail --location --retry 3 --silent --show-error \
-              "https://worta.ru/app/nfprogress-mac-${arch}-${version}.zip" -o "$file"; then
-              echo "Required macOS ${arch} ${version} build is unavailable; build it before dispatching the release." >&2
+            if ! curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
+              --silent --show-error --head \
+              "https://worta.ru/app/nfprogress-mac-${arch}-${version}.zip" >/dev/null; then
+              echo "Required macOS $arch $version build is unavailable." >&2
               exit 1
             fi
-            unzip -tq "$file"
-            python3 scripts/verify-tauri-artifact.py "$file" "$tag_sha"
           done
+          if [[ "$version" == 5.3.20 ]]; then
+            curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
+              --silent --show-error https://worta.ru/app/update_manifest.json |
+              jq -e '
+                .macos_arm.version == "5.3.20" and
+                .macos_arm.sha256 == "fadc8fcf467a66e1bdfb0b0f7691e8e82cd72b5175887b524b1c202cbcba46d8" and
+                .macos_intel.version == "5.3.20" and
+                .macos_intel.sha256 == "906a57accb935ad3ac699ce2e3242543f6b4ff4a47ef051a4cb2bc2a45c333b1"
+              ' >/dev/null
+          fi
           file="$RUNNER_TEMP/host-inspection/nfprogress-windows-x86_64-${version}-setup.exe"
           url="https://worta.ru/app/nfprogress-windows-x86_64-${version}-setup.exe"
           status=$(curl --location --retry 3 --silent --show-error --output "$file" --write-out '%{http_code}' "$url")
@@ -958,42 +979,51 @@ jobs:
           (cd release-assets && sha256sum "$file" "$file.sig" latest.json provenance.txt > SHA256SUMS.txt)
 
       # ------------------------------------------------------------
-      # Download macOS releases
+      # Transfer each qualified macOS archive once for the GitHub release.
       # ------------------------------------------------------------
 
-      - name: Download macOS release files from hosting
+      - name: Prepare authenticated access to release hosting
         shell: bash
-
         env:
-          APP_VERSION: ${{ needs.build_windows.outputs.version }}
-
+          SSH_UPLOAD_PRIVATE_KEY: ${{ secrets.SSH_UPLOAD_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/nfprogress_spaceweb"
+          printf '%s' "$SSH_UPLOAD_PRIVATE_KEY" > "$key_path"
+          test -s "$key_path"
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' '77.222.62.219 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA93iOFfoJM9tNH4brPbiKrwDeaRmBV0odjkM1zc+t/q' >> "$HOME/.ssh/known_hosts"
+          echo "SSH_UPLOAD_KEY_PATH=$key_path" >> "$GITHUB_ENV"
 
+      - name: Stage qualified macOS archives for GitHub
+        shell: bash
+        env:
+          MACOS_SOURCE: ${{ needs.inspect_host.outputs.macos_source }}
+          RELEASE_REVISION: ${{ steps.release_provenance.outputs.tag_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$MACOS_SOURCE" =~ ^[0-9a-f]{40}$ ]]
           mkdir -p release-assets
-
-          base_url="https://worta.ru/app"
-
+          printf 'macos_commit_sha=%s\nrelease_commit_sha=%s\nversion=%s\n' \
+            "$MACOS_SOURCE" "$RELEASE_REVISION" "$APP_VERSION" > release-assets/macos-provenance.txt
           for arch in arm intel; do
             file="nfprogress-mac-${arch}-${APP_VERSION}.zip"
-            asset_path="release-assets/${file}"
-
-            if curl \
-              --fail \
-              --location \
-              --retry 3 \
-              --output "$asset_path" \
-              "${base_url}/${file}"
-            then
-              unzip -t "$asset_path"
-              python3 scripts/verify-tauri-artifact.py "$asset_path" "${{ steps.release_provenance.outputs.tag_sha }}"
-            else
-              rm -f "$asset_path"
-              echo "Required macOS ${arch} build is unavailable." >&2
-              exit 1
+            scp -i "$SSH_UPLOAD_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30 \
+              "nevskyfore@77.222.62.219:/home/n/nevskyfore/worta/public_html/app/$file" "release-assets/$file"
+            unzip -tq "release-assets/$file"
+            python3 scripts/verify-tauri-artifact.py "release-assets/$file" "$MACOS_SOURCE"
+            digest=$(sha256sum "release-assets/$file" | cut -d ' ' -f 1)
+            if [[ "$APP_VERSION" == 5.3.20 ]]; then
+              case "$arch" in
+                arm) expected=fadc8fcf467a66e1bdfb0b0f7691e8e82cd72b5175887b524b1c202cbcba46d8 ;;
+                intel) expected=906a57accb935ad3ac699ce2e3242543f6b4ff4a47ef051a4cb2bc2a45c333b1 ;;
+              esac
+              [[ "$digest" == "$expected" ]] || { echo "Qualified macOS $arch checksum mismatch." >&2; exit 1; }
             fi
+            printf '%s_sha256=%s\n' "$arch" "$digest" >> release-assets/macos-provenance.txt
           done
-
 
       # ------------------------------------------------------------
       # Validate assets
@@ -1024,12 +1054,6 @@ jobs:
             '.version == $version and (.platforms["windows-x86_64"].signature | length > 0)' \
             release-assets/latest.json \
             >/dev/null
-
-          for arch in arm intel; do
-            mac_asset="release-assets/nfprogress-mac-${arch}-${APP_VERSION}.zip"
-            test -s "$mac_asset"
-            python3 scripts/verify-tauri-artifact.py "$mac_asset" "${{ steps.release_provenance.outputs.tag_sha }}"
-          done
 
           echo "Validated Windows x64, macOS ARM, and macOS Intel release builds."
 
@@ -1123,8 +1147,6 @@ jobs:
 
       - name: Publish GitHub release and updater manifest
         shell: bash
-        env:
-          SSH_UPLOAD_PRIVATE_KEY: ${{ secrets.SSH_UPLOAD_PRIVATE_KEY }}
         run: |
           set -euo pipefail
 
@@ -1159,14 +1181,6 @@ jobs:
               -print |
             sort
           )
-
-          key_path="$RUNNER_TEMP/nfprogress_spaceweb"
-          printf '%s' "$SSH_UPLOAD_PRIVATE_KEY" > "$key_path"
-          chmod 600 "$key_path"
-          export SSH_UPLOAD_KEY_PATH="$key_path"
-          mkdir -p "$HOME/.ssh"
-          chmod 700 "$HOME/.ssh"
-          printf '%s\n' '77.222.62.219 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA93iOFfoJM9tNH4brPbiKrwDeaRmBV0odjkM1zc+t/q' >> "$HOME/.ssh/known_hosts"
 
           curl --fail --location --retry 3 \
             --output release-assets/update_manifest_spaceweb.json \
@@ -1226,8 +1240,6 @@ jobs:
             release-assets/latest.json latest.json
           ./scripts/upload-release.sh \
             release-assets/update_manifest_worta.json update_manifest.json
-          # The verified macOS archives were downloaded from this same host;
-          # never overwrite a live release payload with an identical copy.
           python scripts/create-worta-releases-manifest.py \
             --version "$APP_VERSION" \
             --output release-assets/releases.json
@@ -1309,9 +1321,13 @@ jobs:
             curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
               --silent --show-error "$1" -o "$2"
           }
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           for name in "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe" "nfprogress-windows-x86_64-${APP_VERSION}-setup.exe.sig" "nfprogress-mac-arm-${APP_VERSION}.zip" "nfprogress-mac-intel-${APP_VERSION}.zip"; do
-            digest="sha256:$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)"
-            jq -e --arg name "$name" --arg digest "$digest" \
+            local_hash=$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)
+            hosted=$(ssh -i "$SSH_UPLOAD_KEY_PATH" -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=30 \
+              nevskyfore@77.222.62.219 "sha256sum '/home/n/nevskyfore/worta/public_html/app/$name'")
+            [[ "${hosted%% *}" == "$local_hash" ]] || { echo "Published file differs from the qualified file: $name" >&2; exit 1; }
+            jq -e --arg name "$name" --arg digest "sha256:$local_hash" \
               'any(.assets[]; .name == $name and .state == "uploaded" and .digest == $digest)' \
               "$verified/github.json" >/dev/null
             curl --fail --location --retry 3 --retry-connrefused --connect-timeout 15 \
