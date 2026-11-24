@@ -60,6 +60,12 @@ try {
     return card
   }
 
+  const screenshot = async (pageToUse, name) => {
+    assert.ok(await pageToUse.locator('#main-content').evaluate(main => main.scrollWidth <= main.clientWidth))
+    if (process.env.WORTA_WORKSPACE_SCREENSHOTS)
+      await pageToUse.screenshot({ path: `${process.env.WORTA_WORKSPACE_SCREENSHOTS}/${name}.png` })
+  }
+
   const open = async (card, projectId) => {
     await card.locator(`[data-cloud-project-id="${projectId}"]`).press('Enter')
     const panel = card.locator('[data-testid="cloud-project-read"]')
@@ -101,7 +107,7 @@ try {
     if (fixture.manuscript) {
       await chooseSection('texts')
       assert.equal(await panel.locator('.cloud-reader__notes').count(), 0)
-      await panel.locator('[data-document-id]').press('Enter')
+      assert.equal(await panel.getByTestId('cloud-document-read').count(), 1)
       const editor = panel.locator('.tiptap[contenteditable="false"]')
       await editor.locator('strong').getByText(fixture.manuscript, { exact: true }).waitFor()
       assert.equal(await editor.locator('a, img, iframe').count(), 0)
@@ -120,11 +126,50 @@ try {
     }
   }
 
-  if (fixture.documentRoundTrip) {
+  if (fixture.emptyOrder) {
+    const card = await unlock(page)
+    const panel = await open(card, fixture.projectId)
+    await panel.getByTestId('cloud-project-details').waitFor()
+    await panel.getByTestId('cloud-stage-create').waitFor()
+    const api = async (path, body, token, method = 'POST') => {
+      const response = await fetch(backend + path, { method, headers: { 'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) })
+      assert.ok(response.ok, `${path} · ${response.status}`)
+      return response.status === 204 ? null : response.json()
+    }
+    const login = await api('/api/v1/auth/login', { username: 'Arthur', password: 'correct horse battery staple' })
+    const token = login.access_token
+    // Test the ordinary Desktop registration and StageOrder paths against the already-open browser.
+    const bootstrap = `/api/v1/cloud/projects/${fixture.legacyProjectId}/bootstrap`
+    await api(bootstrap, { device_id: fixture.desktop, bootstrap_id: fixture.legacyBootstrap }, token)
+    await api(bootstrap + '/complete', { device_id: fixture.desktop, bootstrap_id: fixture.legacyBootstrap,
+      initial_event_count: 0, initial_max_server_sequence: 0 }, token)
+    const refresh = panel.getByTestId('cloud-project-refresh')
+    await refresh.click()
+    await panel.getByTestId('cloud-project-details').waitFor()
+    assert.equal(await panel.getByRole('alert').count(), 0)
+    await api('/api/v3/sync/encrypted/push', fixture.emptyOrder, token)
+    await refresh.click()
+    await panel.getByTestId('cloud-project-details').waitFor()
+    assert.equal(await panel.getByRole('alert').count(), 0)
+    await card.getByTestId('cloud-project-back').click()
+    await card.getByRole('button', { name: /^(Refresh list|Обновить список)$/ }).click()
+    await open(card, fixture.legacyProjectId)
+    await panel.locator('[data-read-code="metadata_missing"]').waitFor()
+    await card.getByTestId('cloud-project-back').click()
+    await open(card, fixture.projectId)
+    await panel.getByTestId('cloud-stage-create').waitFor()
+  } else if (fixture.documentRoundTrip) {
     let card = await unlock(page)
+    await card.locator('.project-card__status').first().waitFor()
+    await screenshot(page, 'projects')
     let panel = await open(card, fixture.projectId)
+    await panel.locator('.stage-card').first().waitFor()
+    await screenshot(page, 'project')
     const stage = panel.locator('[data-stage-id="S1"]')
     await stage.click()
+    await panel.getByTestId('cloud-project-details').getByRole('heading', { name: 'Stage S1' }).waitFor()
+    await screenshot(page, 'stage')
     await page.locator('#primary-navigation a[href="/cloud?section=texts"]').click()
     await panel.locator('.tiptap[contenteditable="false"] strong').filter({ hasText: 'Desktop manuscript' }).waitFor({ timeout: 10000 })
       .catch(async cause => { throw new Error(await panel.innerText(), { cause }) })
@@ -162,28 +207,31 @@ try {
     await panel.getByTestId('cloud-project-details').getByText('Web stage in Desktop project', { exact: true })
       .waitFor({timeout: 8000}).catch(async cause => { throw new Error(await panel.innerText(), { cause }) })
     await card.getByTestId('cloud-project-back').click()
+    await card.getByTestId('cloud-project-create-toggle').click()
     const form = card.getByTestId('cloud-project-create')
     await form.getByRole('textbox').fill('New Web manuscript project')
-    await form.getByRole('button').click()
+    await form.locator('button[type="submit"]').click()
     const tile = card.locator('[data-cloud-project-id]').filter({ hasText: 'New Web manuscript project' })
     await tile.waitFor()
     const createdId = await tile.getAttribute('data-cloud-project-id')
     assert.ok(createdId)
     panel = await open(card, createdId)
+    await panel.getByTestId('cloud-project-details').locator('a[href="/cloud?section=texts"]').click()
     const create = panel.getByRole('button', { name: /^(Создать|Create)$/ })
     await create.click()
     await panel.locator('.tiptap[contenteditable="true"]').fill('First project text')
     await panel.getByTestId('cloud-document-save').click()
     await panel.locator('.tiptap[contenteditable="false"]').getByText('First project text').waitFor()
+    await projectsLink.click()
+    panel = await open(card, createdId)
     await panel.getByTestId('cloud-stage-create').click()
     const newStage = panel.getByTestId('cloud-stage-create-form')
     await newStage.locator('input[required]').fill('First Web stage')
     await newStage.locator('button[type="submit"]').click()
     await panel.getByTestId('cloud-project-details').getByText('First Web stage', { exact: true })
       .waitFor({timeout: 8000}).catch(async cause => { throw new Error(await panel.innerText(), { cause }) })
-    const newStageTab = panel.locator('[data-stage-id]').getByText('First Web stage', { exact: true })
-    await newStageTab.waitFor()
-    await page.locator('#primary-navigation a[href="/cloud?section=texts"]').click()
+    await panel.getByTestId('cloud-project-details').locator('a[href="/cloud?section=texts"]').click()
+    await panel.locator('[data-stage-id]').getByText('First Web stage', { exact: true }).waitFor()
     await create.click()
     await panel.locator('.tiptap[contenteditable="true"]').fill('First stage text')
     await panel.getByTestId('cloud-document-save').click()
@@ -200,18 +248,20 @@ try {
   } else if (fixture.webCreate) {
     let card = await unlock(page, true)
     await card.getByTestId('cloud-sync-setup').click()
+    await card.getByTestId('cloud-project-create-toggle').click()
     const form = card.getByTestId('cloud-project-create')
     await form.locator('input').fill(fixture.expectedProjectName)
-    await form.locator('button').click()
-    const tile = card.locator('[data-cloud-project-id]').getByText(fixture.expectedProjectName, { exact: true })
+    await form.locator('button[type="submit"]').click()
+    const tile = card.locator('[data-cloud-project-id]').filter({ hasText: fixture.expectedProjectName })
     await tile.waitFor()
     const id = await tile.getAttribute('data-cloud-project-id')
     const secondName = 'Второй облачный черновик'
+    await card.getByTestId('cloud-project-create-toggle').click()
     await form.locator('input').fill(secondName)
-    await form.locator('button').click()
-    const secondTile = card.locator('[data-cloud-project-id]').getByText(secondName, { exact: true })
+    await form.locator('button[type="submit"]').click()
+    const secondTile = card.locator('[data-cloud-project-id]').filter({ hasText: secondName })
     await secondTile.waitFor().catch(async error => {
-      throw new Error(`Second project did not appear. Form: ${await form.innerText()}; catalog: ${await card.getByTestId('server-cloud-project-catalog').innerText()}`, { cause: error })
+      throw new Error(`Second project did not appear. Form: ${await form.count() ? await form.innerText() : ''}; catalog: ${await card.getByTestId('server-cloud-project-catalog').innerText()}`, { cause: error })
     })
     const secondId = await secondTile.getAttribute('data-cloud-project-id')
     const verifyEmpty = async () => {

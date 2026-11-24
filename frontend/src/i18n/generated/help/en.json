@@ -268,7 +268,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Cloud projects on the Web</h2>\n<p>In Projects, you can create projects within your account limit. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.</p>\n<p>In an open project, choose Add stage and enter its name, goal and deadline. The goal and deadline are optional. In Texts, open the manuscript for the selected project or stage. Once the server confirms a change, it is available to other devices when they sync.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Cloud projects on the Web</h2>\n<p>In Projects, choose New project to create a project within your account limit. Find a project using search, the status filter, or sorting by name. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.</p>\n<p>In an open project, choose Add stage and enter its name, goal and deadline. The goal and deadline are optional. In Texts, open the manuscript for the selected project or stage. Once the server confirms a change, it is available to other devices when they sync.</p>\n</body></html>",
     "key": "web_cloud_projects",
     "title": "Cloud projects on the Web"
   }

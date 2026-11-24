@@ -268,7 +268,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Cloudprojekte im Web</h2>\n<p>Unter Projekte kannst du Projekte bis zum Kontolimit erstellen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.</p>\n<p>Wähle im geöffneten Projekt Etappe hinzufügen und gib Name, Ziel und Termin ein. Ziel und Termin sind optional. Unter Texte öffnest du das Manuskript für das ausgewählte Projekt oder die Etappe. Nach der Serverbestätigung sind Änderungen bei der Synchronisierung auf anderen Geräten verfügbar.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Cloudprojekte im Web</h2>\n<p>Wähle unter Projekte die Schaltfläche Neues Projekt, um ein Projekt innerhalb des Kontolimits zu erstellen. Nutze die Suche, den Statusfilter oder die Sortierung nach Namen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.</p>\n<p>Wähle im geöffneten Projekt Etappe hinzufügen und gib Name, Ziel und Termin ein. Ziel und Termin sind optional. Unter Texte öffnest du das Manuskript für das ausgewählte Projekt oder die Etappe. Nach der Serverbestätigung sind Änderungen bei der Synchronisierung auf anderen Geräten verfügbar.</p>\n</body></html>",
     "key": "web_cloud_projects",
     "title": "Cloudprojekte im Web"
   }

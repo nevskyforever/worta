@@ -6693,22 +6693,42 @@ for _source, *_shop_translations in (
 _web_cloud_projects = next(section for section in HELP_SECTIONS if section['key'] == 'web_cloud_projects')
 for _language, (_heading, _edit, _stage) in {
     'en': ('Cloud projects on the Web',
-           'In Projects, you can create projects within your account limit. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.',
+           'In Projects, choose New project to create a project within your account limit. Find a project using search, the status filter, or sorting by name. Open a project and select Edit project to change its name, goal or deadline. Changes appear on other devices after syncing. Desktop imports the name from verified cloud history. Only older projects without cloud settings ask for a name.',
            'In an open project, choose Add stage and enter its name, goal and deadline. The goal and deadline are optional. In Texts, open the manuscript for the selected project or stage. Once the server confirms a change, it is available to other devices when they sync.'),
     'es': ('Proyectos en la nube en Web',
-           'En Proyectos puedes crear proyectos hasta el límite de tu cuenta. Abre un proyecto y selecciona Editar proyecto para cambiar el nombre, el objetivo o el plazo. Los cambios aparecen en otros dispositivos al sincronizar. Desktop importa el nombre del historial verificado. Solo los proyectos antiguos sin ajustes en la nube piden un nombre.',
+           'En Proyectos, selecciona Nuevo proyecto para crear un proyecto dentro del límite de tu cuenta. Puedes buscar, filtrar por estado u ordenar por nombre. Abre un proyecto y selecciona Editar proyecto para cambiar el nombre, el objetivo o el plazo. Los cambios aparecen en otros dispositivos al sincronizar. Desktop importa el nombre del historial verificado. Solo los proyectos antiguos sin ajustes en la nube piden un nombre.',
            'En un proyecto abierto, selecciona Añadir etapa e indica su nombre, objetivo y plazo. El objetivo y el plazo son opcionales. En Textos, abre el manuscrito del proyecto o etapa seleccionados. Cuando el servidor confirma el cambio, está disponible al sincronizar los demás dispositivos.'),
     'de': ('Cloudprojekte im Web',
-           'Unter Projekte kannst du Projekte bis zum Kontolimit erstellen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.',
+           'Wähle unter Projekte die Schaltfläche Neues Projekt, um ein Projekt innerhalb des Kontolimits zu erstellen. Nutze die Suche, den Statusfilter oder die Sortierung nach Namen. Öffne ein Projekt und wähle Projekt bearbeiten, um Name, Ziel oder Termin zu ändern. Die Änderungen erscheinen nach der Synchronisierung auf anderen Geräten. Desktop übernimmt den Namen aus dem geprüften Cloudverlauf. Nur ältere Projekte ohne Cloudeinstellungen fragen nach einem Namen.',
            'Wähle im geöffneten Projekt Etappe hinzufügen und gib Name, Ziel und Termin ein. Ziel und Termin sind optional. Unter Texte öffnest du das Manuskript für das ausgewählte Projekt oder die Etappe. Nach der Serverbestätigung sind Änderungen bei der Synchronisierung auf anderen Geräten verfügbar.'),
     'fr': ('Projets cloud sur le Web',
-           'Dans Projets, vous pouvez créer des projets dans la limite de votre compte. Ouvrez un projet et choisissez Modifier le projet pour changer le nom, l’objectif ou l’échéance. Les modifications apparaissent sur les autres appareils après synchronisation. Desktop importe le nom depuis l’historique cloud vérifié. Seuls les anciens projets dépourvus de paramètres cloud demandent un nom.',
+           'Dans Projets, choisissez Nouveau projet pour créer un projet dans la limite de votre compte. Utilisez la recherche, le filtre par statut ou le tri par nom. Ouvrez un projet et choisissez Modifier le projet pour changer le nom, l’objectif ou l’échéance. Les modifications apparaissent sur les autres appareils après synchronisation. Desktop importe le nom depuis l’historique cloud vérifié. Seuls les anciens projets dépourvus de paramètres cloud demandent un nom.',
            'Dans un projet ouvert, choisissez Ajouter une étape et saisissez son nom, son objectif et son échéance. L’objectif et l’échéance sont facultatifs. Dans Textes, ouvrez le manuscrit du projet ou de l’étape sélectionnée. Les changements confirmés par le serveur sont disponibles sur les autres appareils lors de la synchronisation.'),
     'pt_BR': ('Projetos na nuvem na Web',
-              'Em Projetos, você pode criar projetos até o limite da conta. Abra um projeto e selecione Editar projeto para mudar o nome, a meta ou o prazo. As alterações aparecem nos outros dispositivos após a sincronização. O Desktop importa o nome do histórico verificado da nuvem. Somente projetos antigos sem configurações na nuvem pedem um nome.',
+              'Em Projetos, escolha Novo projeto para criar um projeto dentro do limite da conta. Use a busca, o filtro por status ou a ordenação por nome. Abra um projeto e selecione Editar projeto para mudar o nome, a meta ou o prazo. As alterações aparecem nos outros dispositivos após a sincronização. O Desktop importa o nome do histórico verificado da nuvem. Somente projetos antigos sem configurações na nuvem pedem um nome.',
               'Em um projeto aberto, escolha Adicionar etapa e informe o nome, a meta e o prazo. A meta e o prazo são opcionais. Em Textos, abra o manuscrito do projeto ou da etapa selecionada. Depois da confirmação do servidor, as alterações ficam disponíveis nos outros dispositivos ao sincronizar.'),
 }.items():
     TRANSLATION_OVERRIDES[_language][_web_cloud_projects['title']] = _heading
     TRANSLATION_OVERRIDES[_language][_web_cloud_projects['content']] = (
         f'<html><body>\n<h2>{_heading}</h2>\n<p>{_edit}</p>\n<p>{_stage}</p>\n</body></html>'
     )
+
+for _language, _translation in zip(
+    ("en", "es", "de", "fr", "pt_BR"),
+    (
+        'The project settings are still missing from the cloud. Open the project in Desktop and sync it.',
+        'Los ajustes del proyecto aún no están en la nube. Abre el proyecto en Desktop y sincronízalo.',
+        'Die Projekteinstellungen fehlen noch in der Cloud. Öffne das Projekt in Desktop und synchronisiere es.',
+        'Les paramètres du projet ne sont pas encore dans le cloud. Ouvrez le projet dans Desktop et synchronisez-le.',
+        'As configurações do projeto ainda não estão na nuvem. Abra o projeto no Desktop e sincronize-o.',
+    ),
+    strict=True,
+):
+    TRANSLATION_OVERRIDES[_language]['Настройки проекта ещё не опубликованы в облаке. Откройте проект в Desktop и синхронизируйте его.'] = _translation
+
+for _language, _translation in zip(
+    ("en", "es", "de", "fr", "pt_BR"),
+    ("Texts", "Textos", "Texte", "Textes", "Textos"),
+    strict=True,
+):
+    TRANSLATION_OVERRIDES[_language]["Тексты"] = _translation

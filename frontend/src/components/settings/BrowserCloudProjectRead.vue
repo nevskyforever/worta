@@ -1,12 +1,18 @@
 <script setup lang="ts">
 import BrowserAccountGameRead, { type GameWorkspaceView } from './BrowserAccountGameRead.vue'
 import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
+import { RouterLink, routerKey } from 'vue-router'
+import { IonIcon } from '@ionic/vue'
+import { arrowBackOutline, documentTextOutline } from 'ionicons/icons'
+import StageWorkspace from '@/components/projects/StageWorkspace.vue'
+import BrowserCloudProjectOverview from './BrowserCloudProjectOverview.vue'
+import { cloudProjectPresentation } from '@/platform/web/cloudProjectPresentation'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
 import NoteCard from '@/components/notes/NoteCard.vue'
 import StatePanel from '@/components/ui/StatePanel.vue'
 import type { MindMapResponse, JsonObject } from '@/types/notes'
-import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, inject, nextTick, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import type { TiptapDocument } from '@/types/documents'
 import type { BrowserProgressView } from '@/platform/web/progressView'
@@ -19,8 +25,9 @@ import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
 const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean; section?: 'project' | 'texts' | 'notes' | 'game' }>()
-const emit = defineEmits<{ invalidated: []; metadataChanged: [] }>()
+const emit = defineEmits<{ invalidated: []; metadataChanged: []; projection: [value: { progress?: BrowserProgressView; stageCount: number } | null] }>()
 const locale = useLocaleStore(), t = locale.translate
+const router = inject(routerKey, null)
 const NFDocumentEditor = defineAsyncComponent(() => import('@/components/documents/editor/NFDocumentEditor.vue'))
 const copy: Record<SupportedLanguage, { open: string; partial: string; blocked: string; network: string; register: string }> = {
   ru: { open: 'Открыть облачный проект', partial: 'Проверенные настройки проекта с сервера. Тексты, этапы, заметки и другие данные ещё не открыты.', blocked: 'Чтение заблокировано', network: 'Не удалось подключиться к серверу. Повторите попытку.', register: 'Зарегистрировать браузер для доступа к облаку' },
@@ -77,16 +84,9 @@ const documentUnavailable: Record<SupportedLanguage, string> = {
   fr: 'Cet historique de documents n’est pas encore pris en charge sur le Web. L’historique n’a pas été ouvert.',
   pt_BR: 'Este histórico de documentos ainda não é compatível com a Web. O histórico não foi aberto.',
 }
+const metadataMissing = 'Настройки проекта ещё не опубликованы в облаке. Откройте проект в Desktop и синхронизируйте его.'
 const documentLabels: Record<SupportedLanguage, string> = {
   ru: 'Документы', en: 'Documents', es: 'Documentos', de: 'Dokumente', fr: 'Documents', pt_BR: 'Documentos',
-}
-const readOnlyLabels: Record<SupportedLanguage, string> = {
-  ru: 'Проект доступен для чтения. Редактирование в Web пока недоступно.',
-  en: 'You can read this project. Editing in Web is not yet available.',
-  es: 'Puedes leer este proyecto. La edición en la Web aún no está disponible.',
-  de: 'Du kannst dieses Projekt lesen. Die Bearbeitung im Web ist noch nicht verfügbar.',
-  fr: 'Vous pouvez consulter ce projet. La modification sur le Web est encore indisponible.',
-  pt_BR: 'Você pode ler este projeto. A edição na Web ainda não está disponível.',
 }
 // Only authenticated Tiptap text is presented. No source HTML, URLs or mark
 // attributes enter the DOM; Vue escapes even literal markup inside text nodes.
@@ -97,9 +97,9 @@ function documentText(node: Record<string, unknown>): string {
   return content + (['paragraph', 'heading', 'codeBlock'].includes(String(node.type)) ? '\n' : '')
 }
 const showProject = computed(() => !props.section || props.section === 'project')
-const showGame = computed(() => showProject.value || props.section === 'game')
-const showTexts = computed(() => showProject.value || props.section === 'texts')
-const showNotes = computed(() => showProject.value || props.section === 'notes')
+const showGame = computed(() => !props.workspace || props.section === 'game')
+const showTexts = computed(() => !props.workspace || !props.section || props.section === 'texts')
+const showNotes = computed(() => !props.workspace || !props.section || props.section === 'notes')
 const selectedDocument = ref<string | null>(null)
 const stageDocuments = computed(() => recovery.value?.documents?.filter(document => document.stage_id === selectedStage.value) ?? [])
 const selectedMap = computed(() => recovery.value?.maps?.find(map => map.project_id === props.projectId && map.stage_id === selectedStage.value))
@@ -133,7 +133,7 @@ function rememberStage(): void {
   catch { /* Reading remains available when optional browser preferences are blocked. */ }
 }
 function selectStage(id: string | null): void {
-  if (id === selectedStage.value || draft.value) return
+  if (id === selectedStage.value || draft.value || stageDraft.value) return
   selectedStage.value = id
   selectedDocument.value = props.section === 'texts' ? stageDocuments.value[0]?.id ?? null : null
   documentSaved.value = false
@@ -163,11 +163,32 @@ const displayedGameStage = computed(() => props.section !== 'game' || gameScopes
 
 const stageDraft = ref<{ name: string; goal: number | ''; deadline: string } | null>(null)
 const stageSaving = ref(false)
+const stageNameInput = ref<HTMLInputElement | null>(null)
+async function openStageDraft() {
+  if (draft.value || stageDraft.value) return
+  stageDraft.value = { name: '', goal: '', deadline: '' }
+  stageSaveFailed.value = false
+  await nextTick()
+  stageNameInput.value?.focus()
+}
 const stageSaveFailed = ref(false)
 const stageRetryRequired = ref(false)
-const selectedStageView = computed(() => recovery.value?.stages.find(stage => stage.id === selectedStage.value))
+const verifiedProgress = computed(() => recovery.value?.progress?.find(value => value.stage_id === selectedStage.value))
+const progressStageIds = computed(() => recovery.value?.progress?.flatMap(value => value.stage_id ? [value.stage_id] : []) ?? [])
+const projectOverview = computed(() => {
+  const project = recovery.value?.project, metadata = result.value?.metadata
+  if (!project && !metadata) return null
+  const settings = metadata ?? { ...project!, deadline: typeof project?.payload?.deadline === 'string' ? project.payload.deadline : null }
+  return cloudProjectPresentation(props.projectId, settings, recovery.value?.progress?.find(value => value.stage_id === null),
+    recovery.value?.stages.map(stage => cloudProjectPresentation(stage.id, { ...stage.settings, name: stage.name },
+      recovery.value?.progress?.find(value => value.stage_id === stage.id))))
+})
+const activeOverview = computed(() => projectOverview.value?.stages.find(stage => stage.id === selectedStage.value) ?? projectOverview.value)
+watch(recovery, latest => {
+  if (props.workspace) emit('projection', latest ? { stageCount: latest.stages.length, progress: latest.progress?.find(value => value.stage_id === null) } : null)
+})
 const canAddStage = computed(() => props.workspace && showProject.value
-  && (recovery.value?.project.status ?? result.value?.metadata.status) === 'активен'
+  && (recovery.value?.project.status ?? (result.value?.empty ? result.value.metadata.status : undefined)) === 'активен'
   && typeof props.session.createStage === 'function')
 const documentWritable = ref(false)
 const documentSaving = ref(false)
@@ -300,14 +321,20 @@ async function openRecovery(): Promise<void> {
       const ready = await props.session.documentWriteReady(active.signal).catch(() => false)
       if (!active.signal.aborted && props.session.status === 'unlocked') documentWritable.value = ready
     }
-    if (opened.kind === 'empty') {
-      if (!active.signal.aborted && props.session.status === 'unlocked') result.value = opened.metadata
+    if (opened.kind !== 'project') {
+      if (!active.signal.aborted && props.session.status === 'unlocked') {
+        result.value = opened.metadata
+        if (opened.kind === 'metadata') {
+          const { cause } = opened
+          error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError || cause instanceof BrowserReplayError ? cause.code : 'unsafe_history'
+        }
+      }
       return
     }
     const value = opened.project
     if (!active.signal.aborted && props.session.status === 'unlocked') {
       recovery.value = value
-      const remembered = hadRecovery ? priorSelection : rememberedStage()
+      const remembered = hadRecovery ? priorSelection : props.workspace && showProject.value ? null : rememberedStage()
       selectedStage.value = remembered === null || value.stages.some(stage => stage.id === remembered)
         ? remembered! : value.games?.some(game=>game.event.header.stage_id===null) || value.progress?.some(progress => progress.stage_id === null) || value.notes.some(note => note.stage_id === null) || value.documents?.some(document => document.stage_id === null) || value.maps?.some(map => map.project_id === props.projectId && map.stage_id === null) ? null : value.stages[0]?.id ?? null
       selectedDocument.value = value.documents?.some(document => document.id === priorDocument && document.stage_id === selectedStage.value)
@@ -390,40 +417,65 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
       <button data-testid="cloud-notes-open" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="openRecovery">{{ recoveryLabels[locale.language].open }}</button>
     </template>
     <StatePanel v-if="workspace && busy" :title="t('Загружаем с сервера…')" loading />
-    <p v-if="error" role="alert" :data-read-code="error">{{ error === 'connection_failed' ? words.network : error === 'document_recovery_unavailable' ? documentUnavailable[locale.language] : recoveryError ? recoveryLabels[locale.language].unavailable : `${words.blocked}: ${error}` }}</p>
-    <button v-if="workspace && error" class="nf-button nf-button--secondary" type="button" @click="openRecovery">{{ t('Повторить загрузку') }}</button>
+    <div v-if="error" class="cloud-reader__problem">
+      <p role="alert" :data-read-code="error">{{ error === 'metadata_missing' ? t(metadataMissing) : error === 'connection_failed' ? words.network : error === 'document_recovery_unavailable' ? documentUnavailable[locale.language] : recoveryError ? recoveryLabels[locale.language].unavailable : `${words.blocked} · ${error}` }}</p>
+      <button v-if="workspace" class="nf-button nf-button--secondary" type="button" @click="openRecovery">{{ t('Повторить загрузку') }}</button>
+    </div>
     <article v-if="result" data-testid="cloud-project-metadata">
-      <h3>{{ result.metadata.name }}</h3>
-      <button v-if="workspace && result.empty" :disabled="!!draft" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
-      <StatePanel v-if="result.empty" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
+      <BrowserCloudProjectOverview v-if="workspace && showProject && projectOverview" :project="projectOverview">
+        <div class="cloud-reader__stages">
+          <slot name="project-actions" />
+          <RouterLink v-if="router && result.empty" class="nf-button nf-button--secondary cloud-reader__text-link" :to="{ name: 'web-workspace', query: { section: 'texts' } }">
+            <IonIcon :icon="documentTextOutline" aria-hidden="true" />{{ t('Текст') }}
+          </RouterLink>
+        </div>
+      </BrowserCloudProjectOverview>
+      <h3 v-else>{{ result.metadata.name }}</h3>
+      <button v-if="workspace && result.empty" :disabled="!!draft || !!stageDraft" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
+      <StatePanel v-if="result.empty && !showProject" data-testid="cloud-project-empty" :title="emptyProject[locale.language]" />
+      <span v-else-if="result.empty && workspace" class="visually-hidden" data-testid="cloud-project-empty">{{ emptyProject[locale.language] }}</span>
       <button v-if="result.empty && showTexts && mayEditDocument && !draft" class="nf-button nf-button--secondary" type="button" @click="editDocument">{{ t('Создать') }}</button>
-      <p v-if="!result.empty">{{ words.partial }}</p>
-      <dl v-if="!result.empty">
+      <p v-if="!result.empty && !workspace">{{ words.partial }}</p>
+      <dl v-if="!result.empty && !workspace">
         <dt>{{ t('Цель') }}</dt><dd>{{ result.metadata.goal ?? t('Без лимита') }}</dd>
         <dt>{{ t('Статус') }}</dt><dd>{{ result.metadata.status }}</dd>
         <dt>{{ t('Дедлайн') }}</dt><dd>{{ result.metadata.deadline ?? '—' }}</dd>
       </dl>
     </article>
     <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
-      <h3>{{ recovery.project.name }}</h3>
-      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" :disabled="gameSaving || progressSaving || !!draft || !!stageDraft" @click="openRecovery">{{ t('Обновить') }}</button>
-      <p v-if="workspace && showProject && !canAddStage && !progressWritable && !documentWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
+      <template v-if="workspace && showProject && activeOverview">
+        <button v-if="selectedStage !== null" class="nf-button nf-button--quiet cloud-reader__refresh" type="button" @click="selectStage(null)">
+          <IonIcon :icon="arrowBackOutline" aria-hidden="true" />{{ t('Этапы') }}
+        </button>
+        <BrowserCloudProjectOverview :project="activeOverview" :progress="verifiedProgress"
+          :parent="selectedStage !== null ? recovery.project.name : undefined">
+          <div class="cloud-reader__stages">
+            <slot v-if="selectedStage === null" name="project-actions" />
+            <RouterLink v-if="router" class="nf-button nf-button--secondary" :to="{ name: 'web-workspace', query: { section: 'texts' } }">
+              <IonIcon :icon="documentTextOutline" aria-hidden="true" />{{ t('Текст') }}
+            </RouterLink>
+            <button class="nf-button nf-button--quiet" type="button" data-testid="cloud-project-refresh"
+              :disabled="progressSaving || !!draft || !!stageDraft" @click="openRecovery">{{ t('Обновить') }}</button>
+          </div>
+        </BrowserCloudProjectOverview>
+      </template>
+      <template v-else>
+        <h3>{{ recovery.project.name }}</h3>
+        <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" :disabled="gameSaving || progressSaving || !!draft || !!stageDraft" @click="openRecovery">{{ t('Обновить') }}</button>
+      </template>
       <nav v-if="section === 'game' && recovery.accountGame" class="cloud-reader__stages" :aria-label="t('Игра')" data-testid="cloud-game-navigation">
         <button v-for="view in gameViews" :key="view.key" class="nf-button nf-button--secondary" type="button"
           :data-game-view="view.key" :aria-pressed="selectedGameView === view.key" @click="gameView = view.key">{{ t(view.label) }}</button>
       </nav>
-      <nav v-if="displayedStages.length && (section !== 'game' || selectedGameView === 'overview')" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
+      <nav v-if="displayedStages.length && (!workspace || !showProject) && (section !== 'game' || selectedGameView === 'overview')" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
         <button v-if="section !== 'game' || gameScopes.has(null)" class="nf-button nf-button--secondary" type="button"
           :disabled="!!draft || stageSaving" :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
         <button v-for="stage in displayedStages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id"
           :disabled="!!draft || stageSaving" :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
       </nav>
-      <dl v-if="workspace && showProject && (selectedStage === null || selectedStageView?.settings)" data-testid="cloud-project-details">
-        <dt>{{ t('Название') }}</dt><dd>{{ selectedStageView?.name ?? recovery.project.name }}</dd>
-        <dt>{{ t('Цель') }}</dt><dd>{{ (selectedStageView?.settings ?? recovery.project).goal ?? t('Без лимита') }}</dd>
-        <dt>{{ t('Статус') }}</dt><dd>{{ t(selectedStageView?.settings?.status ?? recovery.project.status ?? '—') }}</dd>
-        <dt>{{ t('Дедлайн') }}</dt><dd>{{ (selectedStageView ? selectedStageView.settings?.deadline : recovery.project.payload?.deadline) ?? '—' }}</dd>
-      </dl>
+      <StageWorkspace v-if="workspace && showProject && selectedStage === null && projectOverview"
+        :project="projectOverview" cloud :can-add="canAddStage" :busy="stageSaving || !!draft || !!stageDraft"
+        :progress-stage-ids="progressStageIds" @open="selectStage($event.id)" @add="openStageDraft" />
       <template v-if="showGame">
         <p v-if="gameSaveFailed && section === 'game'" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
         <p v-else-if="section === 'game' && (gameSaving || gameSaved)" role="status">{{ t(gameSaving ? 'Сохранение…' : 'Сохранено') }}</p>
@@ -441,8 +493,8 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
           :writable="progressWritable && (value.stage_id !== null || !recovery.stages.length)" :busy="progressSaving"
           @save="saveProgress(value, $event)" />
       </template>
-      <section v-if="showTexts && (stageDocuments.length || section === 'texts' || mayEditDocument || documentConflict)" class="cloud-reader__panel" data-testid="cloud-document-list">
-        <h4>{{ section === 'texts' ? t('Тексты') : documentLabels[locale.language] }}</h4>
+      <section v-if="showTexts && (workspace && section === 'texts' ? stageDocuments.length !== 1 || documentConflict : stageDocuments.length || mayEditDocument || documentConflict)" class="cloud-reader__panel" data-testid="cloud-document-list">
+        <h4>{{ section === 'texts' ? t('Текст документа') : documentLabels[locale.language] }}</h4>
         <template v-if="!stageDocuments.length">
           <button v-if="mayEditDocument && !draft" class="nf-button nf-button--secondary" type="button" @click="editDocument">{{ t('Создать') }}</button>
           <StatePanel v-else-if="!draft && !documentConflict" :title="t('Нет данных')" />
@@ -462,8 +514,10 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
         </article>
       </section>
       <section v-if="showTexts && activeDocument && !draft" class="cloud-reader__panel" data-testid="cloud-document-read">
-        <h5>{{ activeDocument.title }}</h5>
-        <button v-if="mayEditDocument" class="nf-button nf-button--secondary" type="button" data-testid="cloud-document-edit-action" @click="editDocument">{{ t('Изменить') }}</button>
+        <header class="cloud-reader__document-heading">
+          <h4>{{ activeDocument.title }}</h4>
+          <button v-if="mayEditDocument" class="nf-button nf-button--secondary" type="button" data-testid="cloud-document-edit-action" @click="editDocument">{{ t('Изменить') }}</button>
+        </header>
         <NFDocumentEditor v-if="workspace && documentForReading" :key="activeDocument.id" :initial-content="documentForReading" :translate="t" read-only />
         <p v-else data-testid="cloud-document-text" style="white-space: pre-wrap">{{ documentText(activeDocument.content_json) }}</p>
       </section>
@@ -494,10 +548,11 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
         </section>
       </template>
     </article>
-    <section v-if="canAddStage && !draft" class="cloud-reader__panel">
-      <button v-if="!stageDraft" type="button" class="nf-button nf-button--secondary" data-testid="cloud-stage-create" @click="stageDraft = { name: '', goal: '', deadline: '' }; stageSaveFailed = false">{{ t('Добавить этап') }}</button>
-      <form v-else class="cloud-stage-form" data-testid="cloud-stage-create-form" @submit.prevent="saveStage">
-        <label>{{ t('Название') }} <input v-model="stageDraft.name" required maxlength="512" :disabled="stageSaving || stageRetryRequired" /></label>
+    <StageWorkspace v-if="result?.empty && workspace && showProject && projectOverview" :project="projectOverview"
+      cloud :can-add="canAddStage" :busy="stageSaving || !!draft || !!stageDraft" @add="openStageDraft" />
+    <section v-if="canAddStage && stageDraft && !draft" class="cloud-reader__panel">
+      <form class="cloud-stage-form" data-testid="cloud-stage-create-form" @submit.prevent="saveStage">
+        <label>{{ t('Название') }} <input ref="stageNameInput" v-model="stageDraft.name" required maxlength="512" :disabled="stageSaving || stageRetryRequired" /></label>
         <label>{{ t('Цель') }} <input v-model.number="stageDraft.goal" type="number" min="0" max="9007199254740991" step="any" :disabled="stageSaving || stageRetryRequired" /></label>
         <label>{{ t('Дедлайн') }} <input v-model="stageDraft.deadline" type="date" :disabled="stageSaving || stageRetryRequired" /></label>
         <button class="nf-button" type="submit" :disabled="stageSaving || !stageDraft.name.trim()">{{ t(stageSaving ? 'Сохранение…' : stageRetryRequired ? 'Повторить' : 'Создать этап') }}</button>
@@ -535,6 +590,11 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', protectDocume
 .cloud-reader__stages [aria-pressed='true'] { border-color: var(--nf-color-primary); color: var(--nf-color-primary); }
 .cloud-stage-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--nf-space-3); }
 .cloud-stage-form label { display: grid; gap: var(--nf-space-1); }
+.cloud-reader__problem { padding: var(--nf-space-4); margin-block-end: var(--nf-space-4); border-radius: var(--nf-radius-md); background: var(--nf-color-surface); border: 1px solid var(--nf-color-border); }
+.cloud-reader__problem p { margin: 0 0 var(--nf-space-3); }
+.cloud-reader__text-link { justify-self: start; }
+.cloud-reader__stages a { text-decoration: none; }
+.cloud-reader__document-heading { display: flex; gap: var(--nf-space-3); flex-wrap: wrap; align-items: center; justify-content: space-between; }
 .cloud-reader__panel { display: grid; gap: var(--nf-space-3); min-width: 0; }
 .cloud-reader__notes { display: grid; gap: var(--nf-space-3); grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); }
 .cloud-reader__notes iframe { width: 100%; min-height: 12rem; border: 0; }

@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { IonIcon } from '@ionic/vue'
+import { addOutline, arrowBackOutline, refreshOutline, searchOutline } from 'ionicons/icons'
+import ProjectCard from '@/components/projects/ProjectCard.vue'
+import { cloudProjectPresentation, cloudProjectStatus } from '@/platform/web/cloudProjectPresentation'
+import type { BrowserProgressView } from '@/platform/web/progressView'
 import { RouterLink } from 'vue-router'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { ApiError } from '@/api/client'
@@ -75,7 +80,28 @@ const cloudProjectMetadataError = ref<Record<string, string>>({})
 const selectedCloudProject = ref<string | null>(null)
 const projectBack = ref<HTMLButtonElement | null>(null)
 const projectReader = ref<{ canLeave: () => boolean } | null>(null)
-const projectTiles = new Map<string, HTMLButtonElement>()
+const projectTiles = new Map<string, HTMLElement>()
+const catalogSearch = ref('')
+const catalogStatus = ref('')
+const catalogSort = ref('manual')
+const catalogProjections = ref<Record<string, { progress?: BrowserProgressView; stageCount: number }>>({})
+const cloudCards = computed(() => {
+  const query = catalogSearch.value.trim().toLocaleLowerCase(locale.localeTag)
+  const cards = (cloudProjects.value?.cloud_project_ids ?? []).flatMap((id, index) => {
+    const settings = cloudProjectMetadata.value[id]?.metadata
+    const name = settings?.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}`
+    if (query && !name.toLocaleLowerCase(locale.localeTag).includes(query)) return []
+    if (catalogStatus.value && (!settings || cloudProjectStatus(settings.status) !== catalogStatus.value)) return []
+    const projection = catalogProjections.value[id]
+    const project = cloudProjectPresentation(id, settings ?? { name }, projection?.progress)
+    return [{ project, settings, projection }]
+  })
+  return catalogSort.value === 'name' ? cards.sort((left, right) => left.project.name.localeCompare(right.project.name, locale.localeTag)) : cards
+})
+function updateCatalogProjection(id: string, projection: { progress?: BrowserProgressView; stageCount: number } | null): void {
+  if (projection) catalogProjections.value[id] = projection
+  else delete catalogProjections.value[id]
+}
 
 const projectEdit = ref<{ name: string; goal: number | null; deadline: string | null } | null>(null)
 const projectChangeError = ref(false)
@@ -114,7 +140,7 @@ async function changeSelectedProject() {
 }
 
 function registerProjectTile(id: string, element: unknown): void {
-  if (element instanceof HTMLButtonElement) projectTiles.set(id, element)
+  if (element instanceof HTMLElement) projectTiles.set(id, element)
   else projectTiles.delete(id)
 }
 
@@ -129,7 +155,7 @@ async function showProjects(): Promise<void> {
   if (!id || !(projectReader.value?.canLeave() ?? true)) return
   selectedCloudProject.value = null
   await nextTick()
-  projectTiles.get(id)?.focus()
+  projectTiles.get(id)?.querySelector('button')?.focus()
 }
 function switchProject(event: Event) {
   const select = event.target as HTMLSelectElement
@@ -141,6 +167,15 @@ const cloudCatalogOpen = ref(false)
 const cloudCatalogBusy = ref(false)
 const cloudCatalogError = ref<string | null>(null)
 const cloudProjectName = ref('')
+const cloudCreateOpen = ref(false)
+const cloudCreateNameInput = ref<HTMLInputElement | null>(null)
+const cloudCreateButton = ref<HTMLButtonElement | null>(null)
+async function toggleCloudCreate(): Promise<void> {
+  cloudCreateOpen.value = !cloudCreateOpen.value
+  await nextTick()
+  if (cloudCreateOpen.value) cloudCreateNameInput.value?.focus()
+  else cloudCreateButton.value?.focus()
+}
 const cloudCreateBusy = ref(false)
 const cloudCreateSaved = ref(false)
 const cloudCreateError = ref<string | null>(null)
@@ -164,6 +199,9 @@ function clearCloudCatalog(): void {
   cloudCatalogController = null
   cloudProjects.value = null
   cloudProjectMetadata.value = {}
+  catalogProjections.value = {}
+  catalogSearch.value = catalogStatus.value = ''
+  catalogSort.value = 'manual'
   cloudProjectMetadataLoading.value = {}
   cloudProjectMetadataError.value = {}
   cloudCatalogError.value = null
@@ -203,6 +241,7 @@ function reloadSelectedMetadata(): void {
 
 async function loadCloudCatalog(): Promise<void> {
   selectedCloudProject.value = null
+  catalogProjections.value = {}
   cloudCatalogController?.abort()
   const controller = new AbortController(), generation = ++cloudCatalogGeneration
   cloudCatalogController = controller
@@ -265,6 +304,7 @@ function resetCloudCreate(): void {
   cloudCreateController?.abort()
   cloudCreateController = null
   cloudProjectName.value = ''
+  cloudCreateOpen.value = false
   cloudCreateBusy.value = false
   cloudCreateSaved.value = false
   cloudCreateError.value = null
@@ -286,6 +326,8 @@ async function createCloudProject(): Promise<void> {
     await session.createCloudProject(name, controller.signal)
     if (controller.signal.aborted || session.status !== 'unlocked') return
     cloudProjectName.value = ''
+    cloudCreateOpen.value = false
+    catalogSearch.value = catalogStatus.value = ''
     cloudCreateSaved.value = true
     cloudCatalogOpen.value = true
     await loadCloudCatalog()
@@ -458,9 +500,12 @@ watch(status, next => {
 <template>
   <section :class="workspacePage ? 'web-projects' : 'settings-card'" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
     <div :class="workspacePage ? 'page-header web-projects__header' : 'settings-card__heading'">
-      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? section === 'game' ? 'Игра' : section === 'texts' ? 'Тексты' : section === 'notes' ? 'Заметки' : 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
+      <h2 id="browser-cloud-account-title" :class="{ 'visually-hidden': workspacePage && selectedCloudProject && (!section || section === 'project') }">{{ t(workspacePage ? section === 'game' ? 'Игра' : section === 'texts' ? 'Тексты' : section === 'notes' ? 'Заметки' : 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
       <p v-if="!props.session">{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
       <div v-if="workspacePage" class="web-projects__actions">
+        <button v-if="(!section || section === 'project') && status === 'unlocked' && syncMode === 3 && !selectedCloudProject"
+          ref="cloudCreateButton" class="nf-button" type="button" data-testid="cloud-project-create-toggle"
+          :aria-expanded="cloudCreateOpen" @click="toggleCloudCreate"><IonIcon :icon="addOutline" aria-hidden="true" />{{ t('Новый проект') }}</button>
         <button class="nf-button nf-button--quiet" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
         <button class="nf-button nf-button--quiet" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
       </div>
@@ -495,6 +540,7 @@ watch(status, next => {
       <button class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="logout">{{ t('Выйти из аккаунта') }}</button>
     </div>
     <div v-else class="browser-cloud-account__inputs">
+      <p v-if="workspacePage && cloudCreateSaved && !cloudCreateOpen" class="web-projects__count" role="status">{{ createWords.saved }}</p>
       <p v-if="!props.session" class="browser-cloud-account__online-policy">{{ words.onlineOnly }}</p>
       <button v-if="!props.session" class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
@@ -506,17 +552,18 @@ watch(status, next => {
         <button v-if="!syncBusy" class="nf-button" type="button" :disabled="busy" data-testid="cloud-sync-setup"
           @click="checkSyncMode(syncMode !== null)">{{ syncMode === null ? t('Повторить') : setupWords.action }}</button>
       </div>
-      <form v-if="(!section || section === 'project') && status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
+      <form v-if="(!section || section === 'project') && status === 'unlocked' && (!props.session || syncMode === 3) && (!workspacePage || (!selectedCloudProject && cloudCreateOpen))" class="browser-cloud-account__inputs browser-cloud-account__create" :class="{ 'web-projects__form': workspacePage }"
         data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
-        <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
+        <label>{{ createWords.name }} <input ref="cloudCreateNameInput" v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
         <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || projectAtLimit || !cloudProjectName.trim()">{{ createWords.title }}</button>
+        <button v-if="workspacePage" class="nf-button nf-button--secondary" type="button" :disabled="cloudCreateBusy" @click="toggleCloudCreate">{{ t('Отмена') }}</button>
         <p v-if="cloudCreateBusy" role="status">{{ createWords.saving }}</p>
         <p v-else-if="cloudCreateSaved" role="status">{{ createWords.saved }}</p>
         <p v-if="cloudCreateError || projectAtLimit" role="alert">{{ cloudCreateError ?? createWords.limit }}</p>
       </form>
       <section v-if="workspacePage && selectedCloudProject" class="web-projects__detail">
         <div class="web-projects__actions">
-          <button ref="projectBack" type="button" class="nf-button nf-button--secondary" data-testid="cloud-project-back" @click="showProjects">{{ t('Назад') }}</button>
+          <button ref="projectBack" type="button" class="nf-button nf-button--quiet" data-testid="cloud-project-back" @click="showProjects"><IonIcon :icon="arrowBackOutline" aria-hidden="true" />{{ t('Все проекты') }}</button>
           <select v-if="cloudProjects && cloudProjects.cloud_project_ids.length > 1" data-testid="cloud-project-switch" :value="selectedCloudProject" :aria-label="t('Выберите проект')"
             @change="switchProject">
             <option v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id" :value="id">
@@ -524,34 +571,50 @@ watch(status, next => {
             </option>
           </select>
         </div>
-        <template v-if="(!section || section === 'project') && cloudProjectMetadata[selectedCloudProject]?.metadataHead">
-          <div v-if="!projectEdit" class="web-projects__actions">
-            <button class="nf-button nf-button--secondary" type="button" @click="editSelectedProject">{{ t('Редактировать проект') }}</button>
-          </div>
-          <form v-if="projectEdit" class="browser-cloud-account__inputs" @submit.prevent="changeSelectedProject()">
-            <label>{{ createWords.name }} <input v-model="projectEdit.name" required /></label>
-            <label>{{ t('Цель') }} <input v-model.number="projectEdit.goal" type="number" min="0" step="any" /></label>
-            <label>{{ t('Дедлайн') }} <input v-model="projectEdit.deadline" type="date" /></label>
-            <button class="nf-button" type="submit" :disabled="projectChangeBusy">{{ t('Сохранить') }}</button>
-            <button class="nf-button nf-button--secondary" type="button" :disabled="projectChangeBusy" @click="projectEdit = null">{{ t('Отмена') }}</button>
-          </form>
-          <p v-if="projectChangeError" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
-        </template>
-        <BrowserCloudProjectRead ref="projectReader" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @metadata-changed="reloadSelectedMetadata" @invalidated="refresh(); clearCloudCatalog()" />
+        <BrowserCloudProjectRead ref="projectReader" :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @projection="updateCatalogProjection(selectedCloudProject, $event)" @metadata-changed="reloadSelectedMetadata" @invalidated="refresh(); clearCloudCatalog()">
+          <template v-if="cloudProjectMetadata[selectedCloudProject]?.metadataHead" #project-actions>
+            <div v-if="!projectEdit" class="web-projects__actions">
+              <button class="nf-button nf-button--secondary" type="button" @click="editSelectedProject">{{ t('Редактировать проект') }}</button>
+            </div>
+            <form v-if="projectEdit" class="browser-cloud-account__inputs" @submit.prevent="changeSelectedProject()">
+              <label>{{ createWords.name }} <input v-model="projectEdit.name" required /></label>
+              <label>{{ t('Цель') }} <input v-model.number="projectEdit.goal" type="number" min="0" step="any" /></label>
+              <label>{{ t('Дедлайн') }} <input v-model="projectEdit.deadline" type="date" /></label>
+              <button class="nf-button" type="submit" :disabled="projectChangeBusy">{{ t('Сохранить') }}</button>
+              <button class="nf-button nf-button--secondary" type="button" :disabled="projectChangeBusy" @click="projectEdit = null">{{ t('Отмена') }}</button>
+            </form>
+            <p v-if="projectChangeError" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+          </template>
+        </BrowserCloudProjectRead>
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
-        <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
+        <div v-if="cloudProjects?.cloud_project_count || cloudCatalogError" class="web-projects__filter">
+          <label v-if="cloudProjects?.cloud_project_count" class="web-projects__search">
+            <IonIcon :icon="searchOutline" aria-hidden="true" />
+            <input v-model="catalogSearch" type="search" :aria-label="t('Поиск по проектам и источникам')" :placeholder="t('Поиск по проектам и источникам')" />
+          </label>
+          <label v-if="cloudProjects?.cloud_project_count">{{ t('Статус') }}
+            <select v-model="catalogStatus"><option value="">{{ t('Все проекты') }}</option><option value="активен">{{ t('Активен') }}</option><option value="в архиве">{{ t('В архиве') }}</option><option value="завершен">{{ t('Завершён') }}</option></select>
+          </label>
+          <label v-if="cloudProjects?.cloud_project_count">{{ t('Сортировка') }}
+            <select v-model="catalogSort"><option value="manual">{{ t('Свободный порядок') }}</option><option value="name">{{ t('По названию') }}</option></select>
+          </label>
+          <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" :aria-label="words.refreshProjects" :title="words.refreshProjects" @click="loadCloudCatalog">
+            <IonIcon :icon="refreshOutline" aria-hidden="true" />
+          </button>
+        </div>
         <StatePanel v-if="cloudCatalogBusy" :title="t('Загружаем с сервера…')" loading />
         <p v-else-if="cloudCatalogError" role="alert">{{ cloudCatalogError }}</p>
         <StatePanel v-else-if="cloudProjects?.cloud_project_count === 0" :title="words.noCloudProjects" />
-        <ul v-else-if="cloudProjects" class="web-projects__grid">
-          <li v-for="(id, index) in cloudProjects.cloud_project_ids" :key="id">
-            <button :ref="element => registerProjectTile(id, element)"
-              type="button" class="web-projects__tile" :data-cloud-project-id="id" @click="openProject(id)">
-              {{ cloudProjectMetadata[id]?.metadata.name ?? `${t('Проект')} ${locale.formatNumber(index + 1, 0)}` }}
-            </button>
-          </li>
-        </ul>
+        <template v-else-if="cloudProjects">
+          <p class="web-projects__count" aria-live="polite">{{ t('Найдено проектов: {count}', { count: cloudCards.length }) }}</p>
+          <ul class="web-projects__grid">
+            <li v-for="{ project, settings, projection } in cloudCards" :key="project.id" :ref="element => registerProjectTile(project.id, element)">
+              <ProjectCard :project="project" cloud :progress-unavailable="!projection?.progress" :stage-count-unavailable="!projection" :stage-count="projection?.stageCount"
+                :status-unavailable="!settings" @open="openProject(project.id)" />
+            </li>
+          </ul>
+        </template>
       </section>
       <section v-else-if="!props.session && cloudCatalogOpen" class="browser-cloud-account__catalog" :aria-label="words.cloudProjects" data-testid="server-cloud-project-catalog">
         <div class="browser-cloud-account__catalog-heading">
@@ -618,13 +681,20 @@ watch(status, next => {
 .browser-cloud-account__catalog-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .browser-cloud-account__catalog h3, .browser-cloud-account__catalog p { margin: 0; }
 .web-projects { display: grid; gap: var(--nf-space-4); }
-.web-projects__header h2 { margin: 0; font: clamp(1.8rem, 5vw, 3rem) var(--nf-font-serif); }
+.web-projects__header { position: relative; display: flex; justify-content: space-between; gap: var(--nf-space-4); align-items: center; flex-wrap: wrap; }
+.web-projects__header > .web-projects__actions { margin-inline-start: auto; }
+.web-projects__header h2 { margin: 0; font-size: clamp(1.9rem, 5vw, 2.75rem); font-weight: 750; }
 .web-projects__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--nf-space-2); min-width: 0; }
 .web-projects__actions select { max-width: 100%; }
-.web-projects__catalog, .web-projects__detail { flex-basis: 100%; display: grid; justify-items: start; gap: var(--nf-space-4); }
+.web-projects__catalog, .web-projects__detail { flex-basis: 100%; min-width: 0; display: grid; justify-items: start; gap: var(--nf-space-4); }
 .web-projects__detail :deep([data-testid="cloud-project-read"]) { width: 100%; }
-.web-projects__grid { width: 100%; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--nf-space-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr)); }
-.web-projects__tile { width: 100%; min-height: 7rem; padding: var(--nf-space-4); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-lg); background: var(--nf-color-surface); color: var(--nf-color-text); font: 1.3rem var(--nf-font-serif); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
-.web-projects__tile:hover, .web-projects__tile:focus-visible { border-color: var(--nf-color-primary); }
+.web-projects__grid { width: 100%; list-style: none; margin: 0; padding: 0; display: grid; gap: var(--nf-space-4); grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr)); }
+.web-projects__filter, .web-projects__form { width: 100%; display: flex; align-items: end; flex-wrap: wrap; gap: var(--nf-space-3); padding: var(--nf-space-3); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-md); background: var(--nf-color-surface); }
+.web-projects__filter label { min-width: 0; font-size: .8rem; font-weight: 650; color: var(--nf-color-text-muted); }
+.web-projects__filter label select { min-height: 2.75rem; width: 100%; padding-inline: .45rem; color: var(--nf-color-text); background: var(--nf-color-surface); border: 1px solid var(--nf-color-border); border-radius: var(--nf-radius-sm); }
+.web-projects__filter .web-projects__search { display: flex; align-items: center; flex: 1 1 16rem; padding-inline: var(--nf-space-3); min-height: 2.75rem; border-radius: var(--nf-radius-sm); background: var(--nf-color-surface-muted); }
+.web-projects__search input { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--nf-color-text); font: inherit; font-size: .95rem; }
+.web-projects__count { margin: 0; color: var(--nf-color-text-muted); font-size: .85rem; }
+@media (max-width: 37.5rem) { .web-projects__filter .web-projects__search { flex-basis: 100%; } }
 [role="alert"] { color: var(--ion-color-danger); }
 </style>

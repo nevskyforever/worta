@@ -942,15 +942,30 @@ class BrowserReplayStorage {
   /** Atomically stage one bounded authenticated recovery extension; owner proofs remain pending. */
   async stageRecoveryExtension(input: ReplaySnapshot, nextAnchor: ReplayAnchor, raw: string, server: () => Promise<void>): Promise<ReplaySnapshot> {
     const expected = structuredClone(input), prior = expected.manifest, anchor = replayAnchor(nextAnchor.registry, nextAnchor.transport)
-    if (!prior || prior.contract_version !== 6 || anchor.registry.current_cursor <= prior.anchor.registry.current_cursor
-      || prior.receive_cursor > prior.anchor.registry.current_cursor
+    if (!prior || prior.contract_version !== 6 || anchor.registry.current_cursor < prior.anchor.registry.current_cursor
+      || replaySame(prior.anchor, anchor) || prior.receive_cursor > prior.anchor.registry.current_cursor
       || !recoveryRegistryExtends(prior.anchor, anchor)
       || prior.revision === Number.MAX_SAFE_INTEGER) throw new BrowserPersistenceError('stale_authority')
     const { page, bytes } = prepareReplayPage(raw, prior.receive_cursor, this.scope, anchor)
-    if (page.next_cursor > anchor.registry.current_cursor || !page.items.length
+    const registryOnly = page.items.length === 0 && prior.phase === 'received'
+      && page.next_cursor === prior.anchor.registry.current_cursor && page.next_cursor === anchor.registry.current_cursor
+    if (page.next_cursor > anchor.registry.current_cursor || !page.items.length && !registryOnly
       || prior.ciphertext_bytes + bytes > REPLAY_LIMITS.ciphertextBytes) throw new BrowserPersistenceError('source_limit')
     const nextManifest = { ...prior, anchor, receive_cursor: page.next_cursor, ciphertext_bytes: prior.ciphertext_bytes + bytes,
       phase: page.has_more ? 'receiving' as const : 'received' as const, revision: prior.revision + 1 }
+    if (registryOnly) {
+      await server()
+      this.check()
+      await this.run('readwrite', (tx, result, abort) => this.load(tx, before => {
+        try {
+          this.check()
+          if (!replaySame(before, expected)) throw new BrowserPersistenceError('stale_authority')
+          tx.objectStore('replayManifest').put(nextManifest)
+          result(undefined)
+        } catch (error) { abort(error) }
+      }, abort))
+      return this.read()
+    }
     const transaction: BrowserSyncTransaction = async (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope) || mode !== 'readwrite') fail()
       await server(); this.check()

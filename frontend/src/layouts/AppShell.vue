@@ -311,6 +311,10 @@ async function selectTheme(event: Event): Promise<void> {
   const requestedTheme = select.value
   if (!isThemePreference(requestedTheme) || requestedTheme === theme.preference) return
 
+  if (props.cloudWorkspace) {
+    theme.setPreference(requestedTheme)
+    return
+  }
   savingPreference.value = true
   preferenceError.value = null
   try {
@@ -334,6 +338,10 @@ async function selectLanguage(event: Event): Promise<void> {
   const requestedLanguage = select.value as SupportedLanguage
   if (!isSupportedLanguage(requestedLanguage) || requestedLanguage === locale.language) return
 
+  if (props.cloudWorkspace) {
+    await locale.setLanguage(requestedLanguage)
+    return
+  }
   savingPreference.value = true
   preferenceError.value = null
   try {
@@ -417,9 +425,9 @@ watchEffect(() => {
         </RouterLink>
       </nav>
 
-      <div v-if="!cloudWorkspace" class="sidebar-controls">
+      <div class="sidebar-controls">
         <button
-          v-if="developerAvailable"
+          v-if="!cloudWorkspace && developerAvailable"
           class="nf-button nf-button--quiet"
           type="button"
           @click="developerDialogOpen = true"

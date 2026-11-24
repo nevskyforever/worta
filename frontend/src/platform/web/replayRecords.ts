@@ -42,8 +42,8 @@ export function recoveryRegistryExtends(previous: ReplayAnchor, next: ReplayAnch
   const old = previous.registry.projects
   return old.every(project => next.registry.projects.some(value => replaySame(value, project)))
     && next.registry.projects.every(project => old.some(value => value.project_id === project.project_id)
-      || project.state === 'active' && project.initial_event_count === 1
-      && project.initial_max_server_sequence! > previous.registry.current_cursor)
+      || project.state === 'active' && (project.initial_event_count === 0 && project.initial_max_server_sequence === 0
+        || project.initial_event_count === 1 && project.initial_max_server_sequence! > previous.registry.current_cursor))
 }
 
 export function validateReplayManifest(value: unknown, scope: BrowserSyncScope, version: 1 | 2 | 3 | 4 | 5 | 6 = 6): ReplayManifest {

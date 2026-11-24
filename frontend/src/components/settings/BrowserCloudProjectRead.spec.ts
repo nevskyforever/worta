@@ -228,7 +228,7 @@ it('keeps the previous total until the server-confirmed Progress projection arri
     progressWriteReady: vi.fn().mockResolvedValue(true), saveProgress: save,
   } as unknown as BrowserCloudAccountSession
   const wrapper = mount(BrowserCloudProjectRead, { props: { session, projectId: 'project', autoOpenRecovery: true, workspace: true },
-    global: { plugins: [createPinia()] } })
+    global: { plugins: [createPinia()], stubs: { RouterLink: true } } })
   await flushPromises()
   const pane = () => wrapper.get('[data-testid="cloud-progress-read"]')
   await pane().get('input').setValue('120')
@@ -261,7 +261,7 @@ it('keeps an edit after a failed save and shows the confirmed version after retr
     autoOpenRecovery: true, section: 'texts' }, global: { plugins: [pinia], stubs: { NFDocumentEditor: editor } } })
   await flushPromises()
   await wrapper.get('[data-stage-id="stage"]').trigger('click')
-  await wrapper.get('[data-document-id="doc"]').trigger('click')
+  expect(wrapper.get('[data-testid="cloud-document-read"]').text()).toContain('Stage text')
   await wrapper.get('[data-testid="cloud-document-edit-action"]').trigger('click')
   await flushPromises()
   await wrapper.get('[data-testid="change-document"]').trigger('click')
@@ -313,5 +313,26 @@ it('compares the latest cloud text before explicitly saving an outdated draft', 
   expect(saveDocument.mock.calls.map(call => call.slice(0, 4))).toEqual([
     ['project', null, 'base', edited], ['project', null, 'cloud', edited],
   ])
+  wrapper.unmount()
+})
+
+
+it('shows verified project settings when content recovery fails', async () => {
+  const session = {
+    status: 'unlocked', onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockRejectedValueOnce(new BrowserReplayError('unsupported_history'))
+      .mockResolvedValueOnce({ metadata: { name: 'Verified settings', goal: 500, unit: 'symbols', status: 'активен' } }),
+    readRecoveryProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history_family')),
+    createStage: vi.fn(),
+  } as unknown as BrowserCloudAccountSession
+  const wrapper = mount(BrowserCloudProjectRead, {
+    props: { session, projectId: 'fallback', autoOpenRecovery: true, workspace: true, section: 'project' },
+    global: { plugins: [createPinia()] },
+  })
+  await flushPromises()
+  expect(wrapper.get('[data-testid="cloud-project-details"]').get('h3').text()).toBe('Verified settings')
+  expect(wrapper.get('[role="alert"]').attributes('data-read-code')).toBe('unsupported_history_family')
+  expect(wrapper.find('[data-testid="cloud-stage-create"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="cloud-progress-read"]').exists()).toBe(false)
   wrapper.unmount()
 })

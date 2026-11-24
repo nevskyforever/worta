@@ -268,7 +268,7 @@
   },
   {
     "children": [],
-    "content": "<html><body>\n<h2>Proyectos en la nube en Web</h2>\n<p>En Proyectos puedes crear proyectos hasta el límite de tu cuenta. Abre un proyecto y selecciona Editar proyecto para cambiar el nombre, el objetivo o el plazo. Los cambios aparecen en otros dispositivos al sincronizar. Desktop importa el nombre del historial verificado. Solo los proyectos antiguos sin ajustes en la nube piden un nombre.</p>\n<p>En un proyecto abierto, selecciona Añadir etapa e indica su nombre, objetivo y plazo. El objetivo y el plazo son opcionales. En Textos, abre el manuscrito del proyecto o etapa seleccionados. Cuando el servidor confirma el cambio, está disponible al sincronizar los demás dispositivos.</p>\n</body></html>",
+    "content": "<html><body>\n<h2>Proyectos en la nube en Web</h2>\n<p>En Proyectos, selecciona Nuevo proyecto para crear un proyecto dentro del límite de tu cuenta. Puedes buscar, filtrar por estado u ordenar por nombre. Abre un proyecto y selecciona Editar proyecto para cambiar el nombre, el objetivo o el plazo. Los cambios aparecen en otros dispositivos al sincronizar. Desktop importa el nombre del historial verificado. Solo los proyectos antiguos sin ajustes en la nube piden un nombre.</p>\n<p>En un proyecto abierto, selecciona Añadir etapa e indica su nombre, objetivo y plazo. El objetivo y el plazo son opcionales. En Textos, abre el manuscrito del proyecto o etapa seleccionados. Cuando el servidor confirma el cambio, está disponible al sincronizar los demás dispositivos.</p>\n</body></html>",
     "key": "web_cloud_projects",
     "title": "Proyectos en la nube en Web"
   }

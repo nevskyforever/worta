@@ -16,6 +16,9 @@ export type StageSort = 'manual' | 'progress' | 'updated' | 'deadline' | 'name'
 const props = withDefaults(defineProps<{
   project: Project
   busy: boolean
+  cloud?: boolean
+  canAdd?: boolean
+  progressStageIds?: string[]
   sharing?: boolean
   streaksEnabled?: boolean
   stageSort?: StageSort
@@ -37,6 +40,7 @@ const emit = defineEmits<{
 const locale = useLocaleStore()
 const t = locale.translate
 const readOnly = computed(() => props.project.status === 'завершен')
+const addAllowed = computed(() => !readOnly.value && (!props.cloud || props.canAdd))
 const sharedProject = computed(() => props.project.name === 'Общий проект')
 const sort = ref<StageSort>(props.stageSort)
 const stageOrderEditing = ref(false)
@@ -237,20 +241,20 @@ onBeforeUnmount(() => {
 <template>
   <section ref="stagesSection" class="stages-section" aria-labelledby="stages-heading">
     <div class="section-heading stage-section-heading">
-      <div><p>{{ t('Структура рукописи') }}</p><h2 id="stages-heading">{{ t(sharedProject ? 'Источники' : 'Этапы') }}</h2></div>
+      <div><p v-if="!cloud">{{ t('Структура рукописи') }}</p><h2 id="stages-heading">{{ t(sharedProject ? 'Источники' : 'Этапы') }}</h2></div>
       <div class="stage-heading-actions">
-        <label class="stage-sort" for="stage-sort">
+        <label v-if="project.stages.length || !cloud" class="stage-sort" for="stage-sort">
           <span class="visually-hidden">{{ t('Сортировка') }}</span>
           <select id="stage-sort" v-model="sort" :disabled="busy || stageOrderEditing">
             <option value="manual">{{ t('Свободный порядок') }}</option>
-            <option value="progress">{{ t('По прогрессу') }}</option>
-            <option value="updated">{{ t('Недавно изменённые') }}</option>
+            <option v-if="!cloud || progressStageIds?.length === project.stages.length" value="progress">{{ t('По прогрессу') }}</option>
+            <option v-if="!cloud" value="updated">{{ t('Недавно изменённые') }}</option>
             <option value="deadline">{{ t('По сроку') }}</option>
             <option value="name">{{ t('По названию') }}</option>
           </select>
         </label>
         <button
-          v-if="sort === 'manual' && !readOnly"
+          v-if="!cloud && sort === 'manual' && !readOnly"
           class="stage-order-toggle"
           type="button"
           :disabled="busy"
@@ -260,7 +264,7 @@ onBeforeUnmount(() => {
           <span v-if="!stageOrderEditing" aria-hidden="true">✎</span>
           {{ stageOrderEditing ? t('Сохранить') : t('Изменить') }}
         </button>
-        <button v-if="!readOnly" class="nf-button nf-button--secondary" type="button" :disabled="busy || stageOrderEditing" @click="emit('add')">
+        <button v-if="addAllowed" class="nf-button nf-button--secondary" type="button" :data-testid="cloud ? 'cloud-stage-create' : undefined" :disabled="busy || stageOrderEditing" @click="emit('add')">
           <IonIcon :icon="addOutline" aria-hidden="true" />{{ addButtonLabel }}
         </button>
       </div>
@@ -278,27 +282,28 @@ onBeforeUnmount(() => {
         :key="stage.id"
         class="stage-card"
         :class="{ 'stage-card--sortable': !busy && !readOnly && sort === 'manual' && stageOrderEditing }"
-        :data-stage-id="stage.id"
+        :data-stage-id="cloud ? undefined : stage.id"
         draggable="false"
         @dragstart="startDrag($event, stage)"
         @dragend="draggedStageId = null"
         @dragover.prevent
         @drop.prevent="dropStage($event, stage)"
-        @contextmenu.prevent="openContext($event, stage)"
+        @contextmenu="!cloud && ($event.preventDefault(), openContext($event, stage))"
       >
-        <button class="stage-open-button" type="button" :aria-label="`${t(sharedProject ? 'Источники' : 'Этапы')}: ${stage.name}`" @click="emit('open', stage)">
+        <button class="stage-open-button" type="button" :data-stage-id="cloud ? stage.id : undefined" :disabled="cloud && busy" :aria-label="`${t(sharedProject ? 'Источники' : 'Этапы')}: ${stage.name}`" @click="emit('open', stage)">
           <span class="stage-index" aria-hidden="true">{{ index + 1 }}</span>
           <div class="stage-title-row">
             <div>
               <h3>{{ stage.name }}</h3>
               <span v-if="stage.status === 'завершен'" class="stage-completed">{{ t('Завершён') }}</span>
-              <p><AnimatedNumber :value="stage.total" :digits="fractionDigits" /> / <template v-if="stage.infinite || stage.goal === null">{{ t('Без лимита') }}</template><AnimatedNumber v-else :value="stage.goal" :digits="fractionDigits" /></p>
+              <p v-if="!cloud || progressStageIds?.includes(stage.id)"><AnimatedNumber :value="stage.total" :digits="fractionDigits" /> / <template v-if="stage.infinite || stage.goal === null">{{ t('Без лимита') }}</template><AnimatedNumber v-else :value="stage.goal" :digits="fractionDigits" /></p>
+              <p v-else>{{ stage.infinite ? t('Без лимита') : stage.goal === null ? '—' : `${t('Цель')} · ${locale.formatNumber(stage.goal, fractionDigits)}` }}</p>
               <StreakBadge v-if="showStageStreak(stage)" class="stage-streak" :length="stage.streak_length" :status="stage.streak_status" scope="stage" compact />
             </div>
-            <ProgressRing :value="sharedProject && stage.infinite ? 100 : stageProgress(stage)" :infinite="stage.infinite" :full="sharedProject && stage.infinite" :label="`${t(sharedProject ? 'Прогресс источника' : 'Прогресс этапа')} ${stage.name}`" />
+            <ProgressRing v-if="!cloud || progressStageIds?.includes(stage.id)" :value="sharedProject && stage.infinite ? 100 : stageProgress(stage)" :infinite="stage.infinite" :full="sharedProject && stage.infinite" :label="`${t(sharedProject ? 'Прогресс источника' : 'Прогресс этапа')} ${stage.name}`" />
           </div>
         </button>
-        <div class="stage-actions">
+        <div v-if="!cloud" class="stage-actions">
           <button
             v-if="stageOrderEditing"
             class="stage-drag-handle"
@@ -318,10 +323,10 @@ onBeforeUnmount(() => {
 
     <div v-else class="stages-empty">
       <p>{{ sharedProject ? t('Подключите первый источник синхронизации.') : t('Разбейте рукопись на главы или другие рабочие этапы.') }}</p>
-      <button v-if="!readOnly" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="emit('add')"><IonIcon :icon="addOutline" aria-hidden="true" />{{ emptyActionLabel }}</button>
+      <button v-if="!cloud && !readOnly" class="nf-button nf-button--secondary" type="button" :disabled="busy" @click="emit('add')"><IonIcon :icon="addOutline" aria-hidden="true" />{{ emptyActionLabel }}</button>
     </div>
 
-    <ContextActionMenu :open="contextStage !== null" :x="contextPosition.x" :y="contextPosition.y" :label="contextStage ? `${t(sharedProject ? 'Действия источника' : 'Действия этапа')}: ${contextStage.name}` : ''" :actions="contextActions" @close="contextStage = null" @select="selectContextAction" />
+    <ContextActionMenu v-if="!cloud" :open="contextStage !== null" :x="contextPosition.x" :y="contextPosition.y" :label="contextStage ? `${t(sharedProject ? 'Действия источника' : 'Действия этапа')}: ${contextStage.name}` : ''" :actions="contextActions" @close="contextStage = null" @select="selectContextAction" />
   </section>
 </template>
 

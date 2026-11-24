@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
 import { IonIcon } from '@ionic/vue'
 import { calendarClearOutline, layersOutline } from 'ionicons/icons'
 
@@ -13,6 +14,11 @@ import type { Project } from '@/types/api'
 
 const props = withDefaults(defineProps<{
   project: Project
+  cloud?: boolean
+  progressUnavailable?: boolean
+  stageCountUnavailable?: boolean
+  stageCount?: number
+  statusUnavailable?: boolean
   streaksEnabled?: boolean
   draggable?: boolean
   showDragHandle?: boolean
@@ -22,6 +28,7 @@ const props = withDefaults(defineProps<{
   showDragHandle: false,
 })
 const emit = defineEmits<{
+  open: []
   context: [event: MouseEvent, project: Project]
   dragstart: [event: DragEvent, project: Project]
   dragend: []
@@ -32,7 +39,7 @@ const t = locale.translate
 const presentation = useProjectPresentation(() => props.project)
 
 const stageCountLabel = computed(() => {
-  const count = props.project.stages.length
+  const count = props.stageCount ?? props.project.stages.length
   return `${t(props.project.name === 'Общий проект' ? 'Источников' : 'Этапов')}: ${locale.formatNumber(count, 0)}`
 })
 
@@ -64,14 +71,18 @@ const progressAriaLabel = computed(() =>
     ]"
     :data-project-id="project.id"
     :draggable="draggable"
-    @contextmenu.prevent="emit('context', $event, project)"
+    @contextmenu="!cloud && ($event.preventDefault(), emit('context', $event, project))"
     @dragstart="emit('dragstart', $event, project)"
     @dragend="emit('dragend')"
   >
-    <RouterLink
+    <component
+      :is="cloud ? 'button' : RouterLink"
+      :type="cloud ? 'button' : undefined"
+      :data-cloud-project-id="cloud ? project.id : undefined"
+      @click="cloud && emit('open')"
       class="project-card__link"
       :class="{ 'project-card__link--with-cover': project.cover_image }"
-      :to="{ name: 'project-detail', params: { projectId: project.id } }"
+      :to="cloud ? undefined : { name: 'project-detail', params: { projectId: project.id } }"
       :aria-label="`${t('Открыть проект')}: ${project.name}`"
     >
       <img
@@ -82,13 +93,13 @@ const progressAriaLabel = computed(() =>
       />
       <div class="project-card__content">
         <div class="project-card__header">
-          <span class="project-card__status">{{ presentation.statusLabel }}</span>
-          <span v-if="project.infinite" class="project-card__kind">∞ {{ t('Без лимита') }}</span>
+          <span v-if="!statusUnavailable" class="project-card__status">{{ presentation.statusLabel }}</span>
+          <span v-if="!statusUnavailable && project.infinite" class="project-card__kind">∞ {{ t('Без лимита') }}</span>
         </div>
 
         <div class="project-card__body">
           <ProgressRing
-            v-if="!project.cover_image"
+            v-if="!project.cover_image && !progressUnavailable"
             :value="presentation.progress"
             :infinite="project.infinite"
             :full="project.name === 'Общий проект'"
@@ -98,7 +109,7 @@ const progressAriaLabel = computed(() =>
             <div class="project-card__title-row">
               <h2>{{ project.name }}</h2>
             </div>
-            <div class="project-card__progress-copy">
+            <div v-if="!progressUnavailable" class="project-card__progress-copy">
               <strong><AnimatedNumber :value="project.total" :digits="project.unit === 'symbols' ? 0 : 2" /> {{ locale.formatUnit(project.unit, project.total) }}</strong>
               <span>
                 /
@@ -107,7 +118,7 @@ const progressAriaLabel = computed(() =>
               </span>
             </div>
             <ProgressBar
-              v-if="project.cover_image"
+              v-if="project.cover_image && !progressUnavailable"
               class="project-card__cover-progress"
               :value="presentation.progress"
               :label="progressAriaLabel"
@@ -124,19 +135,19 @@ const progressAriaLabel = computed(() =>
           compact
         />
 
-        <footer class="project-card__meta">
+        <footer v-if="!statusUnavailable" class="project-card__meta">
           <span :class="{ 'project-card__deadline--overdue': isOverdue }">
             <IonIcon :icon="calendarClearOutline" aria-hidden="true" />
             <span>{{ locale.formatDate(project.deadline) }}</span>
             <span v-if="isOverdue" class="visually-hidden"> — {{ t('срок прошёл') }}</span>
           </span>
-          <span v-if="project.stages_enabled">
+          <span v-if="project.stages_enabled && !stageCountUnavailable">
             <IonIcon :icon="layersOutline" aria-hidden="true" />
             {{ stageCountLabel }}
           </span>
         </footer>
       </div>
-    </RouterLink>
+    </component>
     <button
       v-if="showDragHandle"
       class="project-card__drag-handle"
@@ -153,6 +164,8 @@ const progressAriaLabel = computed(() =>
 </template>
 
 <style scoped>
+button.project-card__link { width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+
 .project-card {
   align-self: start;
   position: relative;

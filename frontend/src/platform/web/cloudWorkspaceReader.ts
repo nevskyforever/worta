@@ -2,6 +2,7 @@ import type { PortableDocument } from '@/cloud/documentCodec'
 import type { TiptapDocument } from '@/types/documents'
 import type { ProjectNote } from '@/types/notes'
 import type { BrowserCloudAccountSession } from './cloudAccountSession'
+import { BrowserCloudReadError } from './cloudRead'
 import type { NativeLegacyNote } from './localAuthorityRecords'
 
 type CloudReader = Pick<BrowserCloudAccountSession, 'readCloudProject' | 'readRecoveryProject'>
@@ -10,8 +11,19 @@ export async function readCloudWorkspaceProject(reader: CloudReader, projectId: 
   const metadata = await reader.readCloudProject(projectId, signal, 'recovery').catch(() => null)
   signal.throwIfAborted()
   if (metadata?.empty) return { kind: 'empty' as const, metadata }
-  const project = await reader.readRecoveryProject(projectId, signal)
-  return { kind: 'project' as const, project }
+  try {
+    const project = await reader.readRecoveryProject(projectId, signal)
+    return { kind: 'project' as const, project }
+  } catch (cause) {
+    signal.throwIfAborted()
+    const fallback = await reader.readCloudProject(projectId, signal, 'recovery', true).catch(error => {
+      if (error instanceof BrowserCloudReadError && error.code === 'metadata_missing') throw error
+      return null
+    })
+    signal.throwIfAborted()
+    if (!fallback) throw cause
+    return { kind: 'metadata' as const, metadata: fallback, cause }
+  }
 }
 
 export function cloudNoteCard(note: NativeLegacyNote): ProjectNote {

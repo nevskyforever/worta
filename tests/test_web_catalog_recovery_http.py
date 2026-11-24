@@ -155,3 +155,43 @@ def run_browser(client, tmp_path, fixture):
         server.should_exit = True
         thread.join(timeout=15)
         api_socket.close()
+
+
+def test_web_project_opens_after_desktop_publishes_empty_order_and_registers_another_project(cloud_client, tmp_path):
+    from uuid import uuid4
+
+    client, engine = cloud_client
+    user = str(create_user(engine))
+    token = login(client).json()["access_token"]
+    headers = _headers(token)
+    db, identity = provision(tmp_path, "empty-order", user, True)
+    with sqlite3.connect(db) as connection:
+        register_remote_apply_authorization_guard(connection)
+        connection.execute("UPDATE projects SET status='активен' WHERE id=?", (PROJECT_ID,))
+    desktop = identity['device_id']
+    assert client.put(f"/api/v1/sync/devices/{desktop}", headers=headers).status_code == 200
+    boot = bootstrap(tmp_path, db, identity, 'bootstrap_prepare')['bootstrap_id']
+    route = f'/api/v1/cloud/projects/{PROJECT_ID}/bootstrap'
+    assert client.post(route, headers=headers, json={'bootstrap_id': boot, 'device_id': desktop}).status_code == 200
+    bootstrap(tmp_path, db, identity, 'bootstrap_prepare_capture', bootstrap_id=boot, remote_high_water=0)
+    assert client.post(route + '/complete', headers=headers, json={
+        'bootstrap_id': boot, 'device_id': desktop, 'initial_event_count': 0, 'initial_max_server_sequence': 0,
+    }).status_code == 200
+    bootstrap(tmp_path, db, identity, 'bootstrap_confirm_active', bootstrap_id=boot, remote_high_water=0)
+    assert client.post('/api/v2/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 0}).status_code == 200
+    assert client.post('/api/v3/sync/encrypted/reader-ready', headers=headers, json={
+        'device_id': desktop, 'reader_transport_version': 3,
+    }).status_code == 204
+    assert client.post('/api/v3/sync/encrypted/cutover', headers=headers, json={'expected_cutover_epoch': 1}).status_code == 200
+    amk = list(os.urandom(32))
+    native(tmp_path, db, identity, user, 'begin')
+    metadata, _ = publish(client, tmp_path, token, db, identity, user, amk)
+    empty_order = event(identity, user, boot, metadata['header']['event_id'], order=[], heads={})
+    sealed = _crypto_bridge(tmp_path, {'action': 'structural_seal', 'amk': amk, 'payload': empty_order})
+    header = empty_order['header']
+    descriptor = {key: header[key] for key in ('event_id', 'project_id', 'entity_id', 'entity_type', 'revision', 'updated_at')}
+    descriptor.update(operation='upsert', deleted_at=None)
+    run_browser(client, tmp_path, {'projectId': PROJECT_ID, 'amk': amk, 'desktop': desktop,
+        'legacyProjectId': 'registered-without-metadata', 'legacyBootstrap': str(uuid4()),
+        'emptyOrder': {'protocol_version': 3, 'encrypted_sync_version': 3, 'device_id': desktop,
+                       'items': [{'event': descriptor, 'object': sealed['object']}]}})
