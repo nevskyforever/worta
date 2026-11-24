@@ -6597,3 +6597,95 @@ for _language, _article in {'en': '<html><body>\n'
           'Desktop.</p>\n'
           '</body></html>'}.items():
     TRANSLATION_OVERRIDES[_language][_cloud_progress_help] = _article
+
+
+_web_game_help = _help_article_source('cloud_game_sync')
+TRANSLATION_OVERRIDES['en'][_web_game_help] = (
+    '<html><body>\n'
+    '<h2>Synchronizing game progress</h2><p>Sign in on the Web, unlock your key, open Game, and choose a cloud project. Overview shows character stats, streaks, and rewards. Open Inventory to see your items. Shop appears when the server allows trading. Click Refresh to get changes from Desktop.</p>\n'
+    '<p>When Buy and Sell are available, buy items from the shop or sell them from your inventory. The balance and item counts update after the server confirms the trade. If the outcome is unknown, retry the same action with the same quantity. Desktop receives confirmed changes during sync.</p>\n'
+    '<p>In the cloud settings, click “Publish game progress”. Publication is explicit: logging in, opening a game, and background syncing do not automatically carry over to the previous state. All registered devices must support game history. Previous rewards, balances and items are transferred without repayment; local projects are not connected automatically.</p>\n'
+    '<p>Supported new game actions are saved along with project and account history. Gaining progress does not in itself provide a reward. Resubmitting and restarting does not create a new award. While waiting for the original history, the data remains saved. Unsupported add-ons and developer mode changes block publishing and are saved locally.</p>\n'
+    '<p>If the game stories are different, select the saved story. All branches will remain in history; If new changes occur, the selection must be repeated. Restoring the game projection uses the verified history, but does not remove other migration restrictions. Deleting a progress record does not automatically remove the reward. To explicitly cancel, select the reward and confirm the individual action; the original reward will remain.</p>\n'
+    '</body></html>'
+)
+TRANSLATION_OVERRIDES['es'][_web_game_help] = (
+    '<html><body>\n'
+    '<h2>Sincronizando el progreso del juego</h2><p>En Web, inicia sesión, desbloquea la clave, abre Juego y elige un proyecto en la nube. La vista general muestra el estado del personaje, las rachas y las recompensas. Abre Inventario para ver tus objetos. La tienda aparece cuando el servidor permite comerciar. Pulsa Actualizar para recibir cambios de Desktop.</p>\n'
+    '<p>Cuando estén disponibles Comprar y Vender, compra en la tienda o vende artículos del inventario. El saldo y las cantidades se actualizan tras la confirmación del servidor. Si no conoces el resultado, repite la misma acción con la misma cantidad. Desktop recibe los cambios confirmados durante la sincronización.</p>\n'
+    '<p>En la configuración de la nube, haz clic en "Publicar el progreso del juego". La publicación es explícita: iniciar sesión, abrir un juego y la sincronización en segundo plano no se trasladan automáticamente al estado anterior. Todos los dispositivos registrados deben admitir el historial de juegos. Las recompensas, saldos y artículos anteriores se transfieren sin reembolso; Los proyectos locales no se conectan automáticamente.</p>\n'
+    '<p>Las nuevas acciones de juego admitidas se guardan junto con el historial de cuentas y proyectos. Progresar no proporciona en sí mismo una recompensa. Volver a enviar y reiniciar no crea un nuevo premio. Mientras se espera el historial original, los datos permanecen guardados. Los complementos no compatibles y los cambios en el modo de desarrollador bloquean la publicación y se guardan localmente.</p>\n'
+    '<p>Si las historias del juego son diferentes, selecciona la historia guardada. Todas las ramas quedarán en la historia; Si se producen nuevos cambios, se debe repetir la selección. La restauración de la proyección del juego utiliza el historial verificado, pero no elimina otras restricciones de migración. Eliminar un registro de progreso no elimina automáticamente la recompensa. Para cancelar explícitamente, seleccione la recompensa y confirme la acción individual; la recompensa original permanecerá.</p>\n'
+    '</body></html>'
+)
+TRANSLATION_OVERRIDES['de'][_web_game_help] = (
+    '<html><body>\n'
+    '<h2>Spielfortschritt synchronisieren</h2><p>Melde dich im Web an, entsperre den Schlüssel, öffne Spiel und wähle ein Cloudprojekt. Die Übersicht zeigt Charakterwerte, Serien und Belohnungen. Öffne das Inventar, um deine Gegenstände zu sehen. Der Shop erscheint, wenn der Server den Handel erlaubt. Klicke auf Aktualisieren, um Änderungen von Desktop abzurufen.</p>\n'
+    '<p>Wenn Kaufen und Verkaufen verfügbar sind, kaufe Gegenstände im Shop oder verkaufe sie aus dem Inventar. Kontostand und Anzahl ändern sich nach der Serverbestätigung. Bei unbekanntem Ergebnis wiederhole dieselbe Aktion mit derselben Menge. Desktop erhält bestätigte Änderungen bei der Synchronisierung.</p>\n'
+    '<p>Klicken Sie in den Cloud-Einstellungen auf „Spielfortschritt veröffentlichen“. Die Veröffentlichung ist explizit: Das Anmelden, das Öffnen eines Spiels und die Hintergrundsynchronisierung werden nicht automatisch in den vorherigen Zustand übernommen. Alle registrierten Geräte müssen den Spielverlauf unterstützen. Bisherige Prämien, Guthaben und Gegenstände werden ohne Rückzahlung übertragen; Lokale Projekte werden nicht automatisch verbunden.</p>\n'
+    '<p>Unterstützte neue Spielaktionen werden zusammen mit dem Projekt- und Kontoverlauf gespeichert. Fortschritte zu erzielen ist an sich noch keine Belohnung. Durch eine erneute Einreichung und einen Neustart entsteht keine neue Auszeichnung. Während auf den Originalverlauf gewartet wird, bleiben die Daten gespeichert. Nicht unterstützte Add-ons und Entwicklermodusänderungen blockieren die Veröffentlichung und werden lokal gespeichert.</p>\n'
+    '<p>Wenn die Spielgeschichten unterschiedlich sind, wählen Sie die gespeicherte Geschichte aus. Alle Zweige bleiben in der Geschichte; Treten neue Änderungen auf, muss die Auswahl wiederholt werden. Beim Wiederherstellen der Spielprojektion wird der verifizierte Verlauf verwendet, andere Migrationseinschränkungen werden jedoch nicht entfernt. Durch das Löschen eines Fortschrittsdatensatzes wird die Belohnung nicht automatisch entfernt. Um explizit zu stornieren, wählen Sie die Prämie aus und bestätigen Sie die einzelne Aktion; die ursprüngliche Belohnung bleibt bestehen.</p>\n'
+    '</body></html>'
+)
+TRANSLATION_OVERRIDES['fr'][_web_game_help] = (
+    '<html><body>\n'
+    '<h2>Synchronisation de la progression du jeu</h2><p>Connectez-vous sur le Web, déverrouillez la clé, ouvrez Jeu et choisissez un projet cloud. La vue d’ensemble affiche les caractéristiques du personnage, les séries et les récompenses. Ouvrez Inventaire pour voir vos objets. La boutique apparaît lorsque le serveur autorise les échanges. Cliquez sur Actualiser pour récupérer les changements de Desktop.</p>\n'
+    '<p>Lorsque Acheter et Vendre sont disponibles, achetez dans la boutique ou vendez depuis votre inventaire. Le solde et les quantités changent après la confirmation du serveur. Si le résultat est inconnu, répétez la même action avec la même quantité. Desktop reçoit les changements confirmés lors de la synchronisation.</p>\n'
+    "<p>Dans les paramètres cloud, cliquez sur «\xa0Publier la progression du jeu\xa0». La publication est explicite\xa0: la connexion, l'ouverture d'un jeu et la synchronisation en arrière-plan ne sont pas automatiquement reportées à l'état précédent. Tous les appareils enregistrés doivent prendre en charge l'historique du jeu. Les récompenses, soldes et objets précédents sont transférés sans remboursement\xa0; les projets locaux ne sont pas connectés automatiquement.</p>\n"
+    "<p>Les nouvelles actions de jeu prises en charge sont enregistrées avec l'historique du projet et du compte. Progresser n’est pas en soi une récompense. La nouvelle soumission et le redémarrage ne créent pas une nouvelle récompense. En attendant l'historique d'origine, les données restent sauvegardées. Les modules complémentaires non pris en charge et les modifications du mode développeur bloquent la publication et sont enregistrés localement.</p>\n"
+    "<p>Si les histoires du jeu sont différentes, sélectionnez l'histoire enregistrée. Toutes les branches resteront dans l’histoire ; Si de nouveaux changements surviennent, la sélection doit être répétée. La restauration de la projection du jeu utilise l'historique vérifié, mais ne supprime pas les autres restrictions de migration. La suppression d'un enregistrement de progression ne supprime pas automatiquement la récompense. Pour annuler explicitement, sélectionnez la récompense et confirmez l'action individuelle\xa0; la récompense originale restera.</p>\n"
+    '</body></html>'
+)
+TRANSLATION_OVERRIDES['pt_BR'][_web_game_help] = (
+    '<html><body>\n'
+    '<h2>Sincronizando o progresso do jogo</h2><p>Na Web, entre na conta, desbloqueie a chave, abra Jogo e escolha um projeto na nuvem. A visão geral mostra os atributos do personagem, as sequências e as recompensas. Abra o inventário para ver seus itens. A loja aparece quando o servidor permite negociar. Clique em Atualizar para receber as alterações do Desktop.</p>\n'
+    '<p>Quando Comprar e Vender estiverem disponíveis, compre na loja ou venda itens do inventário. O saldo e as quantidades mudam após a confirmação do servidor. Se o resultado for desconhecido, repita a mesma ação com a mesma quantidade. O Desktop recebe as alterações confirmadas durante a sincronização.</p>\n'
+    '<p>Nas configurações da nuvem, clique em “Publicar o progresso do jogo”. A publicação é explícita: fazer login, abrir um jogo e sincronizar em segundo plano não são transferidos automaticamente para o estado anterior. Todos os dispositivos registrados devem suportar histórico de jogo. Recompensas, saldos e itens anteriores são transferidos sem reembolso; projetos locais não são conectados automaticamente.</p>\n'
+    '<p>As novas ações de jogo suportadas são salvas junto com o histórico do projeto e da conta. Obter progresso por si só não proporciona uma recompensa. Reenviar e reiniciar não cria um novo prêmio. Enquanto aguarda o histórico original, os dados permanecem salvos. Complementos não suportados e alterações no modo de desenvolvedor bloqueiam a publicação e são salvos localmente.</p>\n'
+    '<p>Se as histórias do jogo forem diferentes, selecione a história salva. Todas as filiais permanecerão na história; Caso ocorram novas alterações, a seleção deverá ser repetida. A restauração da projeção do jogo utiliza o histórico verificado, mas não remove outras restrições de migração. Excluir um registro de progresso não remove automaticamente a recompensa. Para cancelar explicitamente, selecione a recompensa e confirme a ação individual; a recompensa original permanecerá.</p>\n'
+    '</body></html>'
+)
+
+
+# Canonical shop display text is shared by the Web and native catalog.
+for _source, *_shop_translations in (
+    (
+        "Восстанавливает 25 вдохновения",
+        "Restores 25 inspiration", "Restaura 25 puntos de inspiración", "Stellt 25 Inspiration wieder her",
+        "Restaure 25 points d’inspiration", "Restaura 25 pontos de inspiração",
+    ),
+    (
+        "Добавляет 2 опыта мастерства выбранной специализации",
+        "Adds 2 mastery XP to the selected specialization", "Añade 2 puntos de experiencia de dominio a la especialización elegida",
+        "Gibt der gewählten Spezialisierung 2 Meisterschafts-EP", "Ajoute 2 XP de maîtrise à la spécialisation choisie",
+        "Adiciona 2 XP de domínio à especialização escolhida",
+    ),
+    (
+        "Постоянно увеличивает коэффициент монет на 1.",
+        "Permanently increases the coin multiplier by 1.", "Aumenta permanentemente el multiplicador de monedas en 1.",
+        "Erhöht den Münzmultiplikator dauerhaft um 1.", "Augmente définitivement le multiplicateur de pièces de 1.",
+        "Aumenta permanentemente o multiplicador de moedas em 1.",
+    ),
+    (
+        "Увеличивает награду за следующие рубежи рукописи на 25%",
+        "Increases rewards for the next manuscript milestones by 25%", "Aumenta un 25 % la recompensa de los próximos hitos del manuscrito",
+        "Erhöht die Belohnung für die nächsten Manuskript-Meilensteine um 25 %", "Augmente de 25 % les récompenses des prochains jalons du manuscrit",
+        "Aumenta em 25% as recompensas dos próximos marcos do manuscrito",
+    ),
+    (
+        "Увеличивает награду за следующую успешную сессию на 25%",
+        "Increases the reward for the next successful session by 25%", "Aumenta un 25 % la recompensa de la próxima sesión exitosa",
+        "Erhöht die Belohnung für die nächste erfolgreiche Sitzung um 25 %", "Augmente de 25 % la récompense de la prochaine session réussie",
+        "Aumenta em 25% a recompensa da próxima sessão bem-sucedida",
+    ),
+    (
+        "Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностей.",
+        "Fine tobacco, spiced vanilla, cocoa, and dried fruit create a luxurious amber fragrance. Its warm trail evokes wealth, power, and endless possibilities.",
+        "El tabaco fino, la vainilla especiada, el cacao y los frutos secos crean una fragancia ambarada y lujosa. Su estela cálida evoca riqueza, poder y posibilidades infinitas.",
+        "Edler Tabak, würzige Vanille, Kakao und Trockenfrüchte ergeben einen luxuriösen Amberduft. Seine warme Duftspur erinnert an Reichtum, Macht und grenzenlose Möglichkeiten.",
+        "Le tabac noble, la vanille épicée, le cacao et les fruits séchés composent un luxueux parfum ambré. Son sillage chaud évoque la richesse, le pouvoir et des possibilités infinies.",
+        "Tabaco nobre, baunilha especiada, cacau e frutas secas compõem uma fragrância ambarada luxuosa. Seu rastro quente evoca riqueza, poder e possibilidades infinitas.",
+    ),
+):
+    for _language, _translation in zip(("en", "es", "de", "fr", "pt_BR"), _shop_translations, strict=True):
+        TRANSLATION_OVERRIDES[_language][_source] = _translation

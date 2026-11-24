@@ -827,6 +827,10 @@ class WebProgressWriteGate(ContentNoteCapabilityGate):
     web_progress_version: Literal[1] = 1
 
 
+class WebGameWriteGate(ContentNoteCapabilityGate):
+    web_game_version: Literal[1] = 1
+
+
 class ProgressReaderCapabilities(BaseModel):
     """Independent project-object reader evidence under the accepted SyncDevice model."""
     model_config = ConfigDict(extra='forbid')

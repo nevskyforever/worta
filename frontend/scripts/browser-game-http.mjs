@@ -14,7 +14,7 @@ try {
   vite = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: true } }); await vite.listen()
   const origin = `http://127.0.0.1:${vite.httpServer.address().port}`
   const launch = async (profilePath = profile) => {
-    context = await chromium.launchPersistentContext(profilePath, { headless: true })
+    context = await chromium.launchPersistentContext(profilePath, { headless: true, locale: 'ru-RU' })
     await context.route(url => url.pathname.startsWith('/api/'), async route => {
       const request = route.request(), url = new URL(request.url())
       if (request.method() === 'PUT' && url.pathname.includes('capabilities') || url.pathname.endsWith('/ack') || url.pathname.startsWith('/api/v1/sync/devices/')) {
@@ -157,12 +157,81 @@ try {
   await read(panel,update.expected);assert.deepEqual(await snapshot(page),accepted)
   await context.close();page=await launch();panel=await loginAndOpen(page);await read(panel,update.expected)
   assert.deepEqual(await snapshot(page),accepted)
+
+  const openGameWorkspace = async (viewport) => {
+    await context.close()
+    page = await launch()
+    if (viewport) await page.setViewportSize(viewport)
+    await page.goto(origin + '/login')
+    await page.evaluate(async () => {
+      const { BrowserCloudAccountSession } = await import('/src/platform/web/cloudAccountSession.ts')
+      const save = BrowserCloudAccountSession.prototype.saveGameShop
+      BrowserCloudAccountSession.prototype.saveGameShop = async function (...args) {
+        try { return await save.apply(this, args) }
+        catch (error) { window.gameTradeError = error.stack; throw error }
+      }
+    })
+    const card = page.getByTestId('browser-cloud-account')
+    await card.locator('input[autocomplete="username"]').fill('Arthur')
+    await card.locator('input[autocomplete="current-password"]').fill('correct horse battery staple')
+    await card.locator('form button[type="submit"]').click()
+    await card.locator('input[autocomplete="off"]').fill('document-test-passphrase')
+    await card.locator('form button[type="submit"]').click()
+    await page.waitForURL('**/cloud')
+    await page.locator('a[href="/cloud?section=game"]:visible').first().click()
+    await card.locator(`[data-cloud-project-id="${fixture.project}"]`).click()
+    const game = card.getByTestId('cloud-account-game')
+    await card.locator('[data-game-view="shop"]').waitFor().catch(async error => {
+      throw Error(String(error) + '\n' + (await card.innerText()).slice(-1600))
+    })
+    assert.deepEqual(await card.locator('[data-game-view]').evaluateAll(views => views.map(view => view.dataset.gameView)), ['overview', 'inventory', 'shop'])
+    assert.equal(await card.getByTestId('cloud-project-create').count(), 0)
+    assert.equal(await game.getByTestId('cloud-game-inventory').count(), 0)
+    return game
+  }
+  let workspace = await openGameWorkspace()
+  const coins = Number(update.expected.projections.account.coins)
+  const waitForCoins = async value => {
+    const formatted = await page.evaluate(async value => {
+      const { useLocaleStore } = await import('/src/stores/locale.ts')
+      return useLocaleStore().formatNumber(value, 2)
+    }, value)
+    await Promise.race([
+      page.waitForFunction(expected => document.querySelector('[data-testid="cloud-game-coins"]')?.textContent === expected, formatted),
+      page.getByTestId('cloud-project-read').getByRole('alert').waitFor().then(async () => {
+        throw Error('Web Game publication refused: ' + await page.evaluate(() => window.gameTradeError))
+      }),
+    ])
+  }
+  const item = 'Микро зелье здоровья'
+  await page.locator('[data-game-view="shop"]').click()
+  const shop = workspace.getByRole('region', { name: 'Магазин', exact: true })
+  await shop.locator('.item-card').filter({ hasText: item }).getByRole('button', { name: 'Купить', exact: true }).click()
+  await waitForCoins(coins - 29)
+  workspace = await openGameWorkspace({ width: 390, height: 844 })
+  await waitForCoins(coins - 29)
+  await page.locator('[data-game-view="inventory"]').click()
+  const inventory = workspace.getByTestId('cloud-game-inventory')
+  await inventory.locator('select').selectOption('Зелья')
+  await inventory.locator('.item-card').filter({ hasText: item }).getByRole('button', { name: /Продать/ }).click()
+  await waitForCoins(coins - 7.2)
+  const sold = await snapshot(page)
+  assert.equal(sold.outbox.length, 2)
+  for (const row of sold.outbox) {
+    assert.equal(row.state, 'accepted')
+    assert.equal(sold.inbox.find(value => value.event_id === row.event_id).state, 'game_proven')
+  }
+  assert.equal(sold.cursors[0].ack_cursor, 0)
+  workspace = await openGameWorkspace()
+  await waitForCoins(coins - 7.2)
+  assert.deepEqual(await snapshot(page),sold)
   await page.evaluate(async()=>{
     const q=indexedDB.open('worta-web-replay'),db=await new Promise((ok,no)=>{q.onsuccess=()=>ok(q.result);q.onerror=no})
     await new Promise((ok,no)=>{const tx=db.transaction('inbox','readwrite'),s=tx.objectStore('inbox'),r=s.getAll();r.onsuccess=()=>{const row=r.result.find(r=>r.state==='game_proven'&&JSON.parse(r.wire_item).event.scope==='account');row.game_proof.ledger_digest='0'.repeat(64);s.put(row)};tx.oncomplete=ok;tx.onabort=no});db.close()
   })
-  await panel.locator('[data-testid="cloud-notes-open"]').click();await panel.locator('[role="alert"]').waitFor()
+  panel=page.getByTestId('cloud-project-read')
+  await panel.getByTestId('cloud-project-refresh').click();await panel.locator('[role="alert"]').waitFor()
   assert.equal(await panel.locator('[data-testid="cloud-project-game"]').count(),0);assert.equal(await panel.locator('[data-testid="cloud-account-game"]').count(),0)
   assert.deepEqual(forbidden,[]);assert.ok(recovery.length>0)
-  console.log(JSON.stringify({pass:true,accountRead:true,inventoryBuySell:true,accountFirst:fixture.accountFirst,gameRead:true,gameUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true}))
+  console.log(JSON.stringify({pass:true,accountRead:true,inventoryBuySell:true,webTrade:true,accountFirst:fixture.accountFirst,gameRead:true,gameUpdate:true,reopen:true,rollback:true,corruption:true,nativeProjectionEqual:true}))
 } finally { await context?.close();await vite?.close() }

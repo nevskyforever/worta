@@ -1,5 +1,5 @@
+import json
 from pathlib import Path
-import re
 
 import game_data
 
@@ -8,6 +8,7 @@ ROOT = Path(__file__).parents[1]
 GAME_RS = ROOT / 'frontend' / 'src-tauri' / 'src' / 'game.rs'
 TAURI_RS = ROOT / 'frontend' / 'src-tauri' / 'src' / 'lib.rs'
 GAME_TS = ROOT / 'frontend' / 'src' / 'api' / 'game.ts'
+GAME_CATALOG = ROOT / 'frontend' / 'src' / 'cloud' / 'gameShopCatalog.json'
 
 
 def test_desktop_game_uses_explicit_typed_native_commands():
@@ -37,14 +38,14 @@ def test_native_game_boundary_is_sqlite_only_and_strict():
     assert 'data.pkl' not in source
 
 
-def test_rust_catalog_matches_legacy_buyable_game_catalog():
-    source = GAME_RS.read_text()
-    catalog_source = source.split('const CATALOG:', 1)[1].split('fn game_object', 1)[0]
-    rust_keys = sorted(re.findall(r'key: "([^"]+)"', catalog_source))
+def test_shared_catalog_matches_legacy_buyable_game_catalog():
+    assert 'include_str!("../../src/cloud/gameShopCatalog.json")' in GAME_RS.read_text()
+    catalog = json.loads(GAME_CATALOG.read_text())
+    shared_keys = sorted((item['category'], item['key']) for item in catalog if item['buyable'])
     legacy_keys = sorted(
-        key
+        (category, key)
         for category in ('Зелья', 'Предметы', 'Парфюм')
         for key, item in game_data.ITEM_REGISTRY[category].items()
         if getattr(item, 'Buy', True)
     )
-    assert rust_keys == legacy_keys
+    assert shared_keys == legacy_keys

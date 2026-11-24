@@ -49,7 +49,7 @@ const t = locale.translate
 const words = computed(() => copy[locale.language])
 const createWords = computed(() => creationCopy[locale.language])
 const setupWords = computed(() => setupCopy[locale.language])
-const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean; section?: 'project' | 'texts' | 'notes' }>()
+const props = defineProps<{ session?: BrowserCloudAccountSession; workspacePage?: boolean; section?: 'project' | 'texts' | 'notes' | 'game' }>()
 const emit = defineEmits<{ statusChange: [status: BrowserCloudAccountSession['status']] }>()
 const session = props.session ?? new BrowserCloudAccountSession()
 const status = ref(session.status)
@@ -411,7 +411,7 @@ watch(status, next => {
 <template>
   <section :class="workspacePage ? 'web-projects' : 'settings-card'" aria-labelledby="browser-cloud-account-title" data-testid="browser-cloud-account">
     <div :class="workspacePage ? 'page-header web-projects__header' : 'settings-card__heading'">
-      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
+      <h2 id="browser-cloud-account-title">{{ t(workspacePage ? section === 'game' ? 'Игра' : 'Проекты' : 'Зашифрованное рабочее пространство') }}</h2>
       <p v-if="!props.session">{{ t('Веб-приложение') }} · {{ words.cloudProjects }}</p>
       <div v-if="workspacePage" class="web-projects__actions">
         <button class="nf-button nf-button--quiet" type="button" data-testid="cloud-account-lock" :disabled="busy" @click="lock">{{ t('Заблокировать ключ') }}</button>
@@ -452,14 +452,14 @@ watch(status, next => {
       <button v-if="!props.session" class="nf-button nf-button--secondary" type="button" :disabled="busy || cloudCatalogBusy" data-testid="cloud-catalog-toggle" @click="toggleCloudCatalog">
         {{ cloudCatalogOpen ? t('Скрыть') : words.cloudProjects }}
       </button>
-      <div v-if="props.session && status === 'unlocked' && syncMode !== 3 && !selectedCloudProject" class="browser-cloud-account__create">
+      <div v-if="section !== 'game' && props.session && status === 'unlocked' && syncMode !== 3 && !selectedCloudProject" class="browser-cloud-account__create">
         <p v-if="syncBusy" role="status">{{ setupWords.busy }}</p>
         <p v-else-if="syncError" role="alert">{{ syncError }}</p>
         <p v-else-if="syncMode !== null">{{ setupWords.hint }}</p>
         <button v-if="!syncBusy" class="nf-button" type="button" :disabled="busy" data-testid="cloud-sync-setup"
           @click="checkSyncMode(syncMode !== null)">{{ syncMode === null ? t('Повторить') : setupWords.action }}</button>
       </div>
-      <form v-if="status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
+      <form v-if="section !== 'game' && status === 'unlocked' && (!props.session || syncMode === 3) && !(workspacePage && selectedCloudProject)" class="browser-cloud-account__inputs browser-cloud-account__create"
         data-testid="cloud-project-create" :aria-label="createWords.title" @submit.prevent="createCloudProject">
         <label>{{ createWords.name }} <input v-model="cloudProjectName" required :disabled="cloudCreateBusy || busy" /></label>
         <button class="nf-button" type="submit" :disabled="cloudCreateBusy || busy || !cloudProjectName.trim()">{{ createWords.title }}</button>
@@ -480,7 +480,7 @@ watch(status, next => {
         <BrowserCloudProjectRead :key="selectedCloudProject" :project-id="selectedCloudProject" :session="session" auto-open-recovery workspace :section="section" @invalidated="refresh(); clearCloudCatalog()" />
       </section>
       <section v-else-if="workspacePage && cloudCatalogOpen" class="web-projects__catalog" :aria-label="t('Проекты')" data-testid="server-cloud-project-catalog">
-        <h2 v-if="section && section !== 'project'">{{ t(section === 'texts' ? 'Тексты' : 'Заметки') }}</h2>
+        <h2 v-if="section === 'texts' || section === 'notes'">{{ t(section === 'texts' ? 'Тексты' : 'Заметки') }}</h2>
         <button class="nf-button nf-button--secondary" type="button" :disabled="cloudCatalogBusy" @click="loadCloudCatalog">{{ words.refreshProjects }}</button>
         <StatePanel v-if="cloudCatalogBusy" :title="t('Загружаем с сервера…')" loading />
         <p v-else-if="cloudCatalogError" role="alert">{{ cloudCatalogError }}</p>

@@ -131,7 +131,7 @@ export class BrowserV10Recovery {
      const wire=JSON.parse(row.wire_item),e=wire.event
      const own=e.device_id===s.deviceId
      if(['project_game','account_game'].includes(e.entity_type)){
-      if(!this.gameOwner||own||hasResolution(v)){block('unsupported_route');break}
+      if(!this.gameOwner||(own&&e.entity_type!=='account_game')||hasResolution(v)){block('unsupported_route');break}
       // A dependency-closed Game window is one atomic owner operation; the
       // budget cannot expose a reward without its later genuine source proof.
       const outcome=await step(this.gameOwner.apply(row.server_sequence))

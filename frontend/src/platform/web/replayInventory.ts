@@ -1,4 +1,5 @@
 import { joinGameRecords, type GameLedger, type GameProjection } from './gameRecords'
+import { assertAccountGameEcho } from './gameOutbound'
 import { joinProgressRecords } from './progressRecords'
 import { joinMapRecords } from './mapRecords'
 import { joinDocumentRecords } from './documentRecords'
@@ -403,27 +404,32 @@ export function scheduleReplaySnapshot(tx: IDBTransaction, s: BrowserSyncScope, 
       const authored=authority.candidates.sort((a,b)=>a.header.revision-b.header.revision),authorMutations=authored.length+authority.intents.filter(i=>i.record_version===2).length
       const progressOut = authority.out.filter(row => JSON.parse(row.raw_body).items[0].event.entity_type === 'progress')
       const progressIds = new Set(progressOut.map(row => row.event_id))
+      const gameOut = authority.out.filter(row => JSON.parse(row.raw_body).items[0].event.entity_type === 'account_game')
+      const gameIds = new Set(gameOut.map(row => row.event_id))
       for (const row of rows) {
         const descriptor = JSON.parse(row.wire_item).event
+        if (descriptor.entity_type === 'account_game' && descriptor.device_id === s.deviceId) {
+          assertAccountGameEcho(s, { manifest, rows, bindings: imported, owners: heads, author }, row)
+        }
         if (descriptor.entity_type !== 'progress' || descriptor.device_id !== s.deviceId) continue
         const outbound = progressOut.find(value => value.event_id === row.event_id)
         const receipt = author.receipts.find((value: {event_id: string}) => value.event_id === row.event_id)
         const evidence = validateBrowserRetainedHistory(s, descriptor, outbound, receipt, row)
         if (!evidence.outbox || !evidence.receipt || !evidence.inbox) fail()
       }
-      const resolutionsOut=authority.out.filter(o=>!progressIds.has(o.event_id)&&!authored.some(c=>c.event_id===o.event_id))
-      if (progressOut.length) {
+      const resolutionsOut=authority.out.filter(o=>!progressIds.has(o.event_id)&&!gameIds.has(o.event_id)&&!authored.some(c=>c.event_id===o.event_id))
+      if (progressOut.length || gameOut.length) {
         const allocated = [...authority.out, ...authority.intents].sort((a, b) => a.local_ordinal - b.local_ordinal)
         if (allocated.some((row, index) => row.local_ordinal !== index + 1)
           || checkpoint.next_local_ordinal !== allocated.length + 1) fail()
       }
-      const noteAuthorActive = authority.out.length !== progressOut.length || author.intents.length > 0
+      const noteAuthorActive = authority.out.length !== progressOut.length + gameOut.length || author.intents.length > 0
       for(const o of resolutionsOut){const e=JSON.parse(o.raw_body).items[0].event,root=resolutions.find(r=>r.event_id===o.event_id),group=future.find(g=>g.record_kind==='group'&&g.project_id===e.project_id&&g.note_id===e.entity_id&&e.revision===g.tip_revision+1)
         if(o.protocol_version!==3||e.entity_type!=='note'||e.operation!=='event'||!group||!root&&future.some(t=>t.record_kind==='group_transition'&&t.group_id===(group as any).group_id)||root&&root.source_device_id!==s.deviceId)fail()
         const row=rows.find(r=>r.event_id===o.event_id)
         if(row){const w=JSON.parse(row.wire_item),{device_id,server_sequence,...event}=w.event,receipt=author.receipts.find((r:any)=>r.event_id===o.event_id) as any;if(device_id!==s.deviceId||!receipt||receipt.record_version!==1||receipt.server_sequence!==server_sequence||!replaySame({event,object:w.object},JSON.parse(o.raw_body).items[0]))fail()}
       }
-      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length+progressOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
+      if(authorActive&&(version!==6||authority.out.length!==authored.length+resolutionsOut.length+progressOut.length+gameOut.length||!closed&&(authored.length||author.intents.length)||authority.intents.some(i=>i.record_version!==2)||authored.some(c=>!closed||c.header.revision<=closed.header.revision||c.project_id!==closed.project_id||c.note_id!==closed.note_id||c.bootstrap_id!==closed.bootstrap_id)))fail()
 
 
       const successors = closed ? rows.filter(r => r.server_sequence > closed.server_sequence) : []

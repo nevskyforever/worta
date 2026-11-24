@@ -70,12 +70,25 @@ interface ProgressEventSealRequest{action:'progress_event_seal';payload:import('
 interface ProgressSealRequest{action:'progress_seal';frame:number[];amk:number[]}
 interface ProgressOpenRequest{action:'progress_open';canonical_user_id:string;amk:number[];item:OpenRequest['item']}
 interface GameSealRequest{action:'game_seal';scope:'project'|'account';frame:number[];amk:number[]}
+interface GameShopRequest {
+  action: 'game_shop'; amk: number[]; scope: import('@/platform/web/syncDurability').BrowserSyncScope
+  head: import('./gameCodec').AccountGameEvent; base: import('./gameCodec').AccountGameBase
+  command: import('./gameShop').GameShopCommand; now: string; event_id: string
+}
 interface GameOpenRequest{action:'game_open';scope:'project'|'account';canonical_user_id:string;amk:number[];item:{event:{event_id:string;device_id:string;project_id?:string;canonical_user_id?:string;entity_id:string;entity_type:string};object:OpenRequest['item']['object']}}
 interface CoverSealRequest {action:'cover_seal';amk:number[];identity:{userId:string;projectId:string;blobId:string};jpeg:number[]}
 interface CoverOpenRequest {action:'cover_open';amk:number[];identity:{userId:string;projectId:string;blobId:string};reference:ProjectCoverReference;object:OpenRequest['item']['object']}
-type BridgeRequest = CoverSealRequest | CoverOpenRequest | GameSealRequest | GameOpenRequest | ProgressEventSealRequest | ProgressSealRequest | ProgressOpenRequest | DocumentEventSealRequest | DocumentSealRequest | DocumentOpenRequest | MapEventSealRequest | MapSealRequest | MapOpenRequest | ContentSealRequest | ContentOpenRequest | CatalogSealRequest | CatalogOpenRequest | StructuralSealRequest | StructuralOpenRequest | MetadataSealRequest | MetadataOpenRequest | SealRequest | OpenRequest | ResolutionEncodeRequest | ResolutionSealRequest | ResolutionOpenRequest | SealIntentRequest
+type BridgeRequest = CoverSealRequest | CoverOpenRequest | GameSealRequest | GameOpenRequest | GameShopRequest | ProgressEventSealRequest | ProgressSealRequest | ProgressOpenRequest | DocumentEventSealRequest | DocumentSealRequest | DocumentOpenRequest | MapEventSealRequest | MapSealRequest | MapOpenRequest | ContentSealRequest | ContentOpenRequest | CatalogSealRequest | CatalogOpenRequest | StructuralSealRequest | StructuralOpenRequest | MetadataSealRequest | MetadataOpenRequest | SealRequest | OpenRequest | ResolutionEncodeRequest | ResolutionSealRequest | ResolutionOpenRequest | SealIntentRequest
 
 async function execute(request: BridgeRequest): Promise<Record<string, unknown>> {
+  if (request.action === 'game_shop') {
+    const { prepareGameShopAction } = await import('./gameShop')
+    const { sealAccountGame } = await import('@/platform/web/gameOutbound')
+    const event = prepareGameShopAction(request.base, request.head, request.scope.deviceId,
+      request.command, request.now, request.event_id)
+    const raw_body = await sealAccountGame(request.scope, event, asAccountMasterKey(Uint8Array.from(request.amk)))
+    return { raw_body }
+  }
   if(request.action==='cover_seal'){
     const amk=asAccountMasterKey(Uint8Array.from(request.amk)),jpeg=Uint8Array.from(request.jpeg)
     const e=await encryptProjectCover(amk,request.identity,jpeg),reference=await createCoverReference(amk,request.identity,jpeg,e)

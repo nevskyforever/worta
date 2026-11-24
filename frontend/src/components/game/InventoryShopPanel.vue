@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
 
 import { useLocaleStore } from '@/stores/locale'
 import type { GameInventory, GameItem, InventoryCommand, ShopCatalog } from '@/types/game'
@@ -10,6 +10,8 @@ const props = defineProps<{
   shop: ShopCatalog
   busy: boolean
   readOnly?: boolean
+  tradeOnly?: boolean
+  canTrade?: (operation: 'buy' | 'sell', command: InventoryCommand) => boolean
   view: 'inventory' | 'shop'
   canOpenCredit: boolean
   initialInventoryCategory?: string
@@ -28,6 +30,7 @@ const locale = useLocaleStore()
 const t = locale.translate
 const category = ref('')
 const count = ref(1)
+const headingId = props.tradeOnly ? useId() : 'inventory-title'
 
 const categories = computed(() =>
   props.view === 'inventory'
@@ -90,7 +93,7 @@ function payload(item: GameItem): InventoryCommand {
 
 function buy(item: GameItem, event: MouseEvent): void {
   const quantity = payload(item).count
-  if (event.shiftKey) {
+  if (event.shiftKey && !props.tradeOnly) {
     emit('addToCart', item, quantity)
     return
   }
@@ -106,6 +109,7 @@ function isUsable(item: GameItem): boolean {
 }
 
 function canPurchase(item: GameItem): boolean {
+  if (props.canTrade) return props.canTrade('buy', payload(item))
   if (cartCapacity(item, props.inventory) === 0) return false
   if (item.can_buy) return true
   if (!props.canOpenCredit || item.credit_allowed === false || !item.available_for_level) return false
@@ -114,11 +118,11 @@ function canPurchase(item: GameItem): boolean {
 </script>
 
 <template>
-  <section class="game-panel" :aria-labelledby="'inventory-title'">
+  <section class="game-panel" :aria-labelledby="headingId">
     <header class="panel-heading">
       <div>
         <p>{{ t('Предметы и эффекты') }}</p>
-        <h2 id="inventory-title">{{ view === 'inventory' ? t('Инвентарь') : t('Магазин') }}</h2>
+        <h2 :id="headingId">{{ view === 'inventory' ? t('Инвентарь') : t('Магазин') }}</h2>
       </div>
     </header>
 
@@ -168,7 +172,7 @@ function canPurchase(item: GameItem): boolean {
             {{ t('Купить') }}
           </button>
           <button
-            v-if="view === 'inventory' && isUsable(item) && !isFreeze(item)"
+            v-if="view === 'inventory' && !tradeOnly && isUsable(item) && !isFreeze(item)"
             class="nf-button"
             type="button"
             :disabled="busy || count > item.count"
@@ -177,7 +181,7 @@ function canPurchase(item: GameItem): boolean {
             {{ t('Использовать') }}
           </button>
           <button
-            v-if="view === 'inventory' && isFreeze(item)"
+            v-if="view === 'inventory' && !tradeOnly && isFreeze(item)"
             class="nf-button"
             type="button"
             :disabled="busy || item.count < 1"
@@ -189,7 +193,7 @@ function canPurchase(item: GameItem): boolean {
             v-if="view === 'inventory' && item.sellable"
             class="nf-button nf-button--secondary"
             type="button"
-            :disabled="busy || count > item.count"
+            :disabled="busy || (canTrade ? !canTrade('sell', payload(item)) : count > item.count)"
             @click="emit('sell', payload(item))"
           >
             {{ t('Продать') }}

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import BrowserAccountGameRead from './BrowserAccountGameRead.vue'
+import BrowserAccountGameRead, { type GameWorkspaceView } from './BrowserAccountGameRead.vue'
 import BrowserProjectGameRead from './BrowserProjectGameRead.vue'
 import BrowserProgressRead from './BrowserProgressRead.vue'
 import MindMapEditor from '@/components/notes/MindMapEditor.vue'
@@ -9,13 +9,14 @@ import type { MindMapResponse, JsonObject } from '@/types/notes'
 import { onBeforeUnmount, onMounted, ref, computed, defineAsyncComponent, watch } from 'vue'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import type { BrowserProgressView } from '@/platform/web/progressView'
+import type { GameShopCommand } from '@/cloud/gameShop'
 import { cloudDocumentForReading, cloudNoteCard, readCloudWorkspaceProject } from '@/platform/web/cloudWorkspaceReader'
 import { BrowserCloudReadError, type BrowserCloudProjectRead } from '@/platform/web/cloudRead'
 import { BrowserPersistenceError } from '@/platform/web/persistence'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import { useLocaleStore } from '@/stores/locale'
 import type { SupportedLanguage } from '@/types/api'
-const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean; section?: 'project' | 'texts' | 'notes' }>()
+const props = defineProps<{ session: BrowserCloudAccountSession; projectId: string; autoOpenRecovery?: boolean; workspace?: boolean; section?: 'project' | 'texts' | 'notes' | 'game' }>()
 const emit = defineEmits<{ invalidated: [] }>()
 const locale = useLocaleStore(), t = locale.translate
 const NFDocumentEditor = defineAsyncComponent(() => import('@/components/documents/editor/NFDocumentEditor.vue'))
@@ -94,6 +95,7 @@ function documentText(node: Record<string, unknown>): string {
   return content + (['paragraph', 'heading', 'codeBlock'].includes(String(node.type)) ? '\n' : '')
 }
 const showProject = computed(() => !props.section || props.section === 'project')
+const showGame = computed(() => showProject.value || props.section === 'game')
 const showTexts = computed(() => showProject.value || props.section === 'texts')
 const showNotes = computed(() => showProject.value || props.section === 'notes')
 const selectedDocument = ref<string | null>(null)
@@ -136,6 +138,22 @@ const recovery = ref<Awaited<ReturnType<BrowserCloudAccountSession['readRecovery
 const progressWritable = ref(false)
 const progressSaving = ref(false)
 const progressSaveFailed = ref(false)
+const gameWritable = ref(false), gameSaving = ref(false), gameSaveFailed = ref(false)
+const gameSaved = ref(false)
+const gameView = ref<GameWorkspaceView>('overview')
+const gameViews = computed(() => [
+  { key: 'overview' as const, label: 'Обзор' },
+  { key: 'inventory' as const, label: 'Инвентарь' },
+  ...(gameWritable.value ? [{ key: 'shop' as const, label: 'Магазин' }] : []),
+])
+const selectedGameView = computed(() => gameViews.value.some(view => view.key === gameView.value) ? gameView.value : 'overview')
+const gameScopes = computed(() => new Set(recovery.value?.games?.map(game => game.event.header.stage_id)))
+const displayedStages = computed(() => props.section === 'game'
+  ? recovery.value?.stages.filter(stage => gameScopes.value.has(stage.id)) ?? []
+  : recovery.value?.stages ?? [])
+const displayedGameStage = computed(() => props.section !== 'game' || gameScopes.value.has(selectedStage.value)
+  ? selectedStage.value
+  : gameScopes.value.has(null) ? null : displayedStages.value[0]?.id)
 let controller: AbortController | null = null
 let disposed = false
 const unsubscribe = props.session.onRevoked(() => {
@@ -162,6 +180,7 @@ async function openRecovery(): Promise<void> {
   controller?.abort(); const active = new AbortController(); controller = active
   result.value = null; recovery.value = null; selectedDocument.value = null; error.value = null; recoveryError.value = true; busy.value = true
   progressWritable.value = false; progressSaveFailed.value = false
+  gameWritable.value = false; gameSaveFailed.value = false; gameSaved.value = false
   try {
     const opened = props.workspace
       ? await readCloudWorkspaceProject(props.session, props.projectId, active.signal)
@@ -182,6 +201,10 @@ async function openRecovery(): Promise<void> {
         const ready = await props.session.progressWriteReady(active.signal).catch(() => false)
         if (!active.signal.aborted && props.session.status === 'unlocked') progressWritable.value = ready
       }
+      if (props.workspace && value.accountGameHead) {
+        const ready = await props.session.gameWriteReady(active.signal).catch(() => false)
+        if (!active.signal.aborted && props.session.status === 'unlocked') gameWritable.value = ready
+      }
     }
   } catch (cause) {
     if (active.signal.aborted) return
@@ -189,8 +212,24 @@ async function openRecovery(): Promise<void> {
     error.value = cause instanceof BrowserCloudReadError || cause instanceof BrowserPersistenceError || cause instanceof BrowserReplayError ? cause.code : 'unsafe_history'
   } finally { if (controller === active) busy.value = false }
 }
+async function tradeGame(command: GameShopCommand) {
+  const signal = controller?.signal, head = recovery.value?.accountGameHead
+  if (!signal || signal.aborted || !head || !gameWritable.value || gameSaving.value || progressSaving.value) return
+  gameSaving.value = true
+  gameSaveFailed.value = false
+  gameSaved.value = false
+  try {
+    const updated = await props.session.saveGameShop(props.projectId, head, command, signal)
+    if (!signal.aborted) {
+      recovery.value = updated
+      gameSaved.value = true
+    }
+  } catch {
+    if (!signal.aborted) gameSaveFailed.value = true
+  } finally { gameSaving.value = false }
+}
 async function saveProgress(progress: BrowserProgressView, action: { total: number } | { remove: string }) {
-  if (!controller || controller.signal.aborted || progressSaving.value || !progressWritable.value) return
+  if (!controller || controller.signal.aborted || progressSaving.value || gameSaving.value || !progressWritable.value) return
   const signal = controller.signal
   progressSaving.value = true; progressSaveFailed.value = false
   try {
@@ -227,15 +266,30 @@ onBeforeUnmount(() => { disposed = true; unsubscribe(); controller?.abort(); res
     </article>
     <article v-if="recovery" :class="{ 'cloud-reader': workspace }" data-testid="cloud-project-notes">
       <h3>{{ recovery.project.name }}</h3>
-      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" @click="openRecovery">{{ t('Обновить') }}</button>
-      <p v-if="workspace && !progressWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
-      <nav v-if="recovery.stages.length" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
-        <button class="nf-button nf-button--secondary" type="button" :aria-pressed="selectedStage === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
-        <button v-for="stage in recovery.stages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id" :aria-pressed="selectedStage === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
+      <button v-if="workspace" class="nf-button nf-button--secondary cloud-reader__refresh" type="button" data-testid="cloud-project-refresh" :disabled="gameSaving || progressSaving" @click="openRecovery">{{ t('Обновить') }}</button>
+      <p v-if="workspace && showProject && !progressWritable" class="cloud-reader__notice">{{ readOnlyLabels[locale.language] }}</p>
+      <nav v-if="section === 'game' && recovery.accountGame" class="cloud-reader__stages" :aria-label="t('Игра')" data-testid="cloud-game-navigation">
+        <button v-for="view in gameViews" :key="view.key" class="nf-button nf-button--secondary" type="button"
+          :data-game-view="view.key" :aria-pressed="selectedGameView === view.key" @click="gameView = view.key">{{ t(view.label) }}</button>
       </nav>
+      <nav v-if="displayedStages.length && (section !== 'game' || selectedGameView === 'overview')" class="cloud-reader__stages" :aria-label="stageLabels[locale.language].stages" data-testid="cloud-stage-list">
+        <button v-if="section !== 'game' || gameScopes.has(null)" class="nf-button nf-button--secondary" type="button"
+          :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === null" data-testid="cloud-project-notes-select" @click="selectStage(null)">{{ stageLabels[locale.language].project }}</button>
+        <button v-for="stage in displayedStages" :key="stage.id" class="nf-button nf-button--secondary" type="button" :data-stage-id="stage.id"
+          :aria-pressed="(section === 'game' ? displayedGameStage : selectedStage) === stage.id" @click="selectStage(stage.id)">{{ stage.name }}</button>
+      </nav>
+      <template v-if="showGame">
+        <p v-if="gameSaveFailed && section === 'game'" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
+        <p v-else-if="section === 'game' && (gameSaving || gameSaved)" role="status">{{ t(gameSaving ? 'Сохранение…' : 'Сохранено') }}</p>
+        <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame"
+          :view="section === 'game' ? selectedGameView : undefined"
+          :writable="section === 'game' && gameWritable" :busy="gameSaving || progressSaving" @trade="tradeGame" />
+        <template v-if="section !== 'game' || selectedGameView === 'overview'">
+          <BrowserProjectGameRead v-for="value in recovery.games?.filter(value => value.event.header.stage_id === displayedGameStage)" :key="value.event.header.event_id" :value="value" />
+        </template>
+        <StatePanel v-if="section === 'game' && !recovery.accountGame && !recovery.games?.length" :title="t('Нет данных')" />
+      </template>
       <template v-if="showProject">
-        <BrowserAccountGameRead v-if="recovery.accountGame" :value="recovery.accountGame" />
-        <BrowserProjectGameRead v-for="value in recovery.games?.filter(value=>value.event.header.stage_id===selectedStage)" :key="value.event.header.event_id" :value="value" />
         <p v-if="progressSaveFailed" role="alert">{{ t('Не удалось сохранить изменения.') }}</p>
         <BrowserProgressRead v-for="value in recovery.progress?.filter(value => value.stage_id === selectedStage)" :key="value.event_id" :value="value"
           :writable="progressWritable && (value.stage_id !== null || !recovery.stages.length)" :busy="progressSaving"

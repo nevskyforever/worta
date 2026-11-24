@@ -17,7 +17,7 @@ from .schemas import (CompressionReaderCapability, CompressionWriterRequest,Proj
                       V3EncryptedSyncPushResponse, V3EncryptedSyncPullItem,
                       V3EncryptedSyncPullResponse, V3EncryptedSyncAckRequest,
                       DocumentReaderCapabilities,
-    GameReaderCapabilities, ProgressReaderCapabilities, WebProgressWriteGate, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
+    GameReaderCapabilities, ProgressReaderCapabilities, WebGameWriteGate, WebProgressWriteGate, MapReaderCapabilities, ContentNoteReaderCapabilities, ContentNoteCapabilityGate, V3ReaderReadyRequest, V3CutoverRequest, V3CutoverResponse, V3SyncPullEvent,
                       encode_canonical_base64url, AccountEncryptedPushRequest, AccountSyncPullEvent)
 from .services import SyncProtocolError, SyncService
 from .models import AuthSession, SyncUserState, User
@@ -233,8 +233,17 @@ def ack(request: V3EncryptedSyncAckRequest,
     'requestBody': {'required': True, 'content': {'application/json': {'schema': _ACCOUNT_PUSH_SCHEMA}}},
 })
 async def account_push(http_request: Request,
+                       web_game_version: int | None = Query(default=None),
+                       expected_cursor: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
+                       expected_epoch: int | None = Query(default=None, ge=0, le=9_007_199_254_740_991),
+                       game_parent: UUID | None = Query(default=None),
                        current: AuthenticatedUser = Depends(get_current_accepted_user),
                        session: Session = Depends(get_cloud_session)) -> V3EncryptedSyncPushResponse:
+    web_game = None
+    if any(value is not None for value in (web_game_version, expected_cursor, expected_epoch, game_parent)):
+        if web_game_version != 1 or expected_cursor is None or expected_epoch is None or game_parent is None:
+            raise _error(SyncProtocolError('web_game_parameters_invalid', 'Invalid Web Game parameters.', 422))
+        web_game = (expected_cursor, expected_epoch, game_parent)
     body = await _read_encrypted_push_body(http_request)
     try:
         request = AccountEncryptedPushRequest.model_validate_json(body)
@@ -242,7 +251,7 @@ async def account_push(http_request: Request,
         raise RequestValidationError(error.errors()) from None
     try:
         results, cursor = await run_in_threadpool(SyncService().push_encrypted, session,
-            current.user.id, request.device_id, request.items, transport_version=3)
+            current.user.id, request.device_id, request.items, transport_version=3, web_game=web_game)
     except SyncProtocolError as error:
         raise _error(error) from None
     return V3EncryptedSyncPushResponse(results=[SyncPushResult(event_id=row.event_id,
@@ -331,10 +340,15 @@ def game_reader_capabilities(request: GameReaderCapabilities,
         raise _error(error) from None
 
 
-@router.get('/game-reader-capabilities', response_model=ContentNoteCapabilityGate)
-def game_reader_gate(current: AuthenticatedUser = Depends(get_current_accepted_user),
+@router.get('/game-reader-capabilities', response_model=WebGameWriteGate | ContentNoteCapabilityGate)
+def game_reader_gate(web_game_version: int | None = Query(default=None),
+                     current: AuthenticatedUser = Depends(get_current_accepted_user),
                      session: Session = Depends(get_cloud_session)) -> ContentNoteCapabilityGate:
+    if web_game_version not in (None, 1):
+        raise _error(SyncProtocolError('web_game_parameters_invalid', 'Invalid Web Game parameters.', 422))
     ready, missing = SyncService().game_gate(session, current.user.id)
+    if web_game_version == 1:
+        return WebGameWriteGate(ready=ready, missing_devices=missing)
     return ContentNoteCapabilityGate(ready=ready, missing_devices=missing)
 
 

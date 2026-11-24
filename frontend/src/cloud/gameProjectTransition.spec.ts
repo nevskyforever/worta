@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest'
 import golden from './__fixtures__/gameCodecV1.json'
 import type { ProjectGameEvent, AccountGameEvent, AccountGameBase } from './gameCodec'
-import { transitionGame, verifyProjectReward, gameOwner, gameActionId, type ProjectGameState } from './gameProjectTransition'
+import { transitionGame, verifyProjectReward, verifyGlobalStreakGrowth, gameOwner, gameActionId, type ProjectGameState } from './gameProjectTransition'
 const event=(name:string)=>structuredClone(golden.examples.find(e=>e.name===name)!.event)
 it('retains Native project streak/capture and validates writing reward without granting account resources',()=>{
  const genesis=event('project-genesis') as ProjectGameEvent,before=structuredClone(genesis)
@@ -78,4 +78,21 @@ it('applies Native standalone streak loss once, including health and resurrectio
  const low={...structuredClone(base),health:'3.000000',inventory:[{category:'Зелья',item_id:'Зелье воскрешения',count:1}]}
  const revived=transitionGame(loss,low) as AccountGameBase
  expect(revived.health).toBe(low.max_health);expect(revived.inventory).toEqual([])
+})
+
+it('recomputes streak growth from the recorded progress and the authenticated goal', () => {
+ const account=transitionGame(event('account-genesis') as AccountGameEvent) as AccountGameBase
+ const source=event('progress-reward-source') as ProjectGameEvent
+ if(source.action.kind!=='writing')throw Error('fixture')
+ const streak={...account.global_streak,history:[],maximum:0,freezes:0,enabled:true,last_reward_day:null,lost_day:null,lost_length:0}
+ account.global_streak=streak
+ const day=source.action.fact.writing_day
+ const project={goal:1000,unit:'symbols' as const,infinite:false,status:'active',personal_goal:100,deadline:null,streak_enabled:true,stages_enabled:false}
+ const progress={base_total:'0.000000',entries:[source.action.fact]}
+ const action={kind:'global_streak' as const,writing_day:day,project_action_ids:[source.header.event_id],before:streak,
+  after:{...streak,history:[{day,frozen:false}],maximum:1,last_reward_day:day},reward:{coins:'50.000000',experience:'0.000000'}}
+ const state={streak,completion_claimed:false}
+ expect(()=>verifyGlobalStreakGrowth(action,account,source,state,progress,project)).not.toThrow()
+ expect(()=>verifyGlobalStreakGrowth(action,account,source,state,progress,{...project,personal_goal:1000})).toThrow('game_invalid_rule')
+ expect(()=>verifyGlobalStreakGrowth({...action,reward:{...action.reward,coins:'500.000000'}},account,source,state,progress,project)).toThrow('game_invalid_rule')
 })

@@ -10,7 +10,7 @@ const router = useRouter()
 const session = webAccountSession()
 const section = computed(() => {
   const value = route.query.section
-  return value === 'texts' || value === 'notes' ? value : 'project'
+  return value === 'texts' || value === 'notes' || value === 'game' ? value : 'project'
 })
 const accountCard = ref<InstanceType<typeof BrowserCloudAccountCard> | null>(null)
 

@@ -294,7 +294,8 @@ function assertOwnEcho(outbound: BrowserOutboxRecord, incoming: WireItem): void 
     const metadataGenesis = project.entity_type === 'project_metadata'
       && project.operation === 'upsert' && project.revision === 1
     const progressEvent = project.entity_type === 'progress' && project.operation === 'event'
-    return outbound.protocol_version === 3 && project.deleted_at === null && (metadataGenesis || progressEvent)
+    const accountGameEvent = (event as {entity_type?: string}).entity_type === 'account_game' && project.operation === 'upsert'
+    return outbound.protocol_version === 3 && project.deleted_at === null && (metadataGenesis || progressEvent || accountGameEvent)
       ? { ...event, updated_at: canonicalizeSyncTimestamp(project.updated_at!) }
       : event
   }

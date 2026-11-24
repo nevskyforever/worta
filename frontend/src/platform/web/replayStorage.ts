@@ -3,6 +3,9 @@ import { ApiError } from '@/api/client'
 import { openBrowserCanonicalObject } from './canonicalReaders'
 import { commitGameBatch, authenticateReplayGames } from './gameApply'
 import { prepareGameBatch } from './gamePrepare'
+import { prepareGameShopAction, type GameShopCommand } from '@/cloud/gameShop'
+import type { AccountGameBase, AccountGameEvent } from '@/cloud/gameCodec'
+import { sealAccountGame } from './gameOutbound'
 import { commitProgressEvent, authenticateReplayProgress, progressPreparationInventory } from './progressApply'
 import { prepareProgressEvent, inspectPreparedProgressEvent } from './progressPrepare'
 import { sealProgressForOutbox } from './progressOutbound'
@@ -40,7 +43,7 @@ import { REPLAY_LIMITS, prepareReplayPage, replayAnchor, replaySame, replayUuid,
 import type { ReplaySourceSeedReference } from './replayRecords'
 
 export const REPLAY_DATABASE_NAME = 'worta-web-replay'
-export const REPLAY_DATABASE_VERSION = 11
+export const REPLAY_DATABASE_VERSION = 12
 type Schema = readonly [string, string | string[], ReadonlyArray<readonly [string, string | string[], boolean]>]
 const previousSchema: readonly Schema[] = [
   ['identities', 'canonical_user_id', [['local_account_id', 'local_account_id', true], ['device_id', 'device_id', true]]],
@@ -109,8 +112,8 @@ function openDatabase(signal: AbortSignal, current: () => boolean): Promise<IDBD
     request.onerror = () => stop(request.error)
     request.onupgradeneeded = event => {
       try {
-        if (failed || signal.aborted || !current() || ![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(event.oldVersion)) throw new BrowserPersistenceError('unsupported_version')
-        if (event.oldVersion === 10) {
+        if (failed || signal.aborted || !current() || event.oldVersion < 0 || event.oldVersion >= REPLAY_DATABASE_VERSION) throw new BrowserPersistenceError('unsupported_version')
+        if (event.oldVersion === 10 || event.oldVersion === 11) {
           validateSchema(request.result, request.transaction!)
           migrateReplay(request.transaction!, names, () => {
             if (signal.aborted || !current()) throw new BrowserPersistenceError('closed')
@@ -175,6 +178,75 @@ class BrowserReplayStorage {
   }
   read(): Promise<ReplaySnapshot> { return this.run('readonly', (tx, result, abort) => this.load(tx, result, abort)) }
 
+  async publishGameShop(auth: NormalUserAuthRuntime, keys: RuntimeKeyContext,
+    command: GameShopCommand, parentId: string, retryOnly = false): Promise<string | null> {
+    command = structuredClone(command)
+    const context = auth.requireContext(), lease = keys.leaseForAccount(this.scope.accountId)
+    const current = () => !this.signal.aborted && auth.isCurrent(context) && !!lease?.isCurrent()
+    if (!lease || context.userId !== this.scope.canonicalUserId || !current()) throw new BrowserPersistenceError('closed')
+    const expected = await this.read(), manifest = expected.manifest
+    if (!manifest || manifest.phase !== 'received' || manifest.applied_cursor !== manifest.receive_cursor) {
+      if (retryOnly && !(expected.author?.out.length)) return null
+      throw new BrowserPersistenceError('stale_authority')
+    }
+    const proven = new Set(expected.rows.filter(row => row.state === 'game_proven').map(row => row.event_id))
+    const unresolved = (expected.author?.out as BrowserOutboxRecord[] | undefined)?.filter(item =>
+      !proven.has(item.event_id) && JSON.parse(item.raw_body).items[0].event.entity_type === 'account_game') ?? []
+    if (unresolved.length > 1) throw new BrowserPersistenceError('conflicting_record')
+    let item = unresolved[0]
+    if (item) {
+      const wire = JSON.parse(item.raw_body).items[0]
+      await lease.use(async amk => {
+        const nonce = decodeBase64Url(wire.object.nonce), ciphertext = decodeBase64Url(wire.object.ciphertext)
+        try {
+          const event = await openBrowserCanonicalObject(amk, { accountId: this.scope.canonicalUserId, projectId: null,
+            entityId: wire.event.entity_id, entityType: 'account_game', eventId: item!.event_id },
+          { ...wire.object, nonce, ciphertext }) as AccountGameEvent
+          const { action, header } = event
+          if (header.device_id !== this.scope.deviceId || header.updated_at !== wire.event.updated_at
+            || header.revision !== wire.event.revision || header.parents[0] !== parentId
+            || action.kind !== 'inventory' || action.operation !== command.operation || action.category !== command.category
+            || action.item_id !== command.item_id || action.count !== command.count) {
+            throw new BrowserPersistenceError('stale_authority')
+          }
+        } finally { nonce.fill(0); ciphertext.fill(0) }
+      })
+      if (item.state === 'accepted') return item.event_id
+    } else if (retryOnly) return null
+    const gate = await auth.authorized(token => encryptedSyncV3Api.webGameWriteReady(token, this.signal))
+    if (!current() || !gate.value) throw new BrowserPersistenceError('unsupported_local_source')
+    if (!item) {
+      const raw = await lease.use(async amk => {
+        const owner = (await authenticateReplayGames(this.scope, expected, amk, current))
+          .find(value => value.event.header.scope === 'account')
+        if (!owner || owner.event.header.event_id !== parentId) throw new BrowserPersistenceError('stale_authority')
+        const event = prepareGameShopAction(owner.state as AccountGameBase, owner.event as AccountGameEvent,
+          this.scope.deviceId, command, new Date().toISOString(), crypto.randomUUID())
+        return sealAccountGame(this.scope, event, amk)
+      })
+      const [queued] = await new BrowserSyncDurability(this.authorTransaction(expected, current)).enqueue(this.scope, [raw])
+      item = queued?.item
+      if (!item) throw new BrowserPersistenceError('closed')
+    }
+    const staged = await this.read()
+    if (!current() || !staged.author?.out.some(value => replaySame(value, item)) || !replaySame(staged.manifest?.anchor, manifest.anchor)) {
+      throw new BrowserPersistenceError('stale_authority')
+    }
+    const pending = item
+    const response = await auth.authorized(token => encryptedSyncV3Api.pushSealedAccountGame(token, pending.event_id, pending.raw_body,
+      this.signal, { cursor: manifest.anchor.registry.current_cursor, epoch: manifest.anchor.transport.cutover_epoch, parentId }))
+      .catch(async error => {
+        if (current() && error instanceof ApiError && error.status === 409
+          && ['web_game_snapshot_changed', 'web_game_parent_changed'].includes(error.code)) {
+          await this.discardRejectedPublication(staged, pending, current)
+        }
+        throw error
+      })
+    if (!current()) throw new BrowserPersistenceError('closed')
+    await new BrowserSyncDurability(this.authorTransaction(staged, current)).commitUploadAcceptance(this.scope, pending, response.value)
+    return pending.event_id
+  }
+
   /** A live save only. The retained body supports idempotency, never a background upload. */
   async publishProgress(auth: NormalUserAuthRuntime, keys: RuntimeKeyContext, expected: ReplaySnapshot, event: ProgressEvent) {
     event = structuredClone(event)
@@ -203,7 +275,7 @@ class BrowserReplayStorage {
       transitionProgress(event, plan.projection)
       return sealProgressForOutbox(this.scope, event, amk)
     })
-    const [queued] = await new BrowserSyncDurability(this.progressAuthorTransaction(expected, current)).enqueue(this.scope, [raw])
+    const [queued] = await new BrowserSyncDurability(this.authorTransaction(expected, current)).enqueue(this.scope, [raw])
     if (!queued || !current()) throw new BrowserPersistenceError('closed')
     return this.sendProgress(auth, await this.read(), queued.item, parent.event_id, current)
   }
@@ -247,15 +319,15 @@ class BrowserReplayStorage {
       .catch(async error => {
         if (current() && error instanceof ApiError && error.status === 409
           && ['web_progress_snapshot_changed', 'web_progress_parent_changed'].includes(error.code))
-          await this.discardRejectedProgress(staged, item, current)
+          await this.discardRejectedPublication(staged, item, current)
         throw error
       })
     if (!current()) throw new BrowserPersistenceError('closed')
-    await new BrowserSyncDurability(this.progressAuthorTransaction(staged, current)).commitUploadAcceptance(this.scope, item, response.value)
+    await new BrowserSyncDurability(this.authorTransaction(staged, current)).commitUploadAcceptance(this.scope, item, response.value)
     return item.event_id
   }
 
-  private async discardRejectedProgress(staged: ReplaySnapshot, item: BrowserOutboxRecord, current: () => boolean) {
+  private async discardRejectedPublication(staged: ReplaySnapshot, item: BrowserOutboxRecord, current: () => boolean) {
     // The scoped API returns these conflicts only before inserting an event.
     // An unknown network outcome must keep the sealed body for exact retry.
     await this.run<void>('readwrite', (tx, result, abort) => this.load(tx, before => {
@@ -286,7 +358,7 @@ class BrowserReplayStorage {
     }, abort))
   }
 
-  private progressAuthorTransaction(base: ReplaySnapshot, current: () => boolean): BrowserSyncTransaction {
+  private authorTransaction(base: ReplaySnapshot, current: () => boolean): BrowserSyncTransaction {
     return (scope, _stores, mode, schedule) => {
       if (!replaySame(scope, this.scope) || mode !== 'readwrite' || !current()) fail()
       return this.run(mode, (tx, result, abort) => this.load(tx, before => {
@@ -891,7 +963,7 @@ class BrowserReplayStorage {
   }
 }
 
-export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateGames' | 'authenticateProgress' | 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'|'publishProgress'|'retryProgress'>
+export type ReplayStorage = Pick<BrowserReplayStorage, 'authenticateGames' | 'authenticateProgress' | 'authenticateMaps' | 'authenticateDocuments' | 'applyDocumentGenesis' | 'importRecoveryProject' | 'recoverV10' | 'start' | 'read' | 'stageRecoveryExtension' | 'commitPage' | 'finish' | 'close' | 'applyMetadata' | 'applyStructure' | 'seedNoteSource' | 'applyInitialNotes' | 'applyContentUpdate' | 'applyOrderedContentUpdate' | 'inspectNoteReaderReadiness'|'contentAuthorOwner'|'receiveContentAuthorEcho'|'publishProgress'|'retryProgress'|'publishGameShop'>
 
 export async function openBrowserReplayStorage(input: BrowserSyncScope, signal: AbortSignal, current: () => boolean): Promise<ReplayStorage> {
   const scope = snapshotBrowserSyncScope(input)

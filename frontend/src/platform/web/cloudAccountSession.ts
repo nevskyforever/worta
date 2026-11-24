@@ -1,5 +1,6 @@
 import type { BrowserProjectGame } from './gameApply'
 import type { AccountGameBase, ProjectGameEvent } from '@/cloud/gameCodec'
+import type { GameShopCommand } from '@/cloud/gameShop'
 import type { ProjectGameState } from '@/cloud/gameProjectTransition'
 import { presentProgress, type BrowserProgressView, type ProgressSettings } from './progressView'
 import type { BrowserProjectMap } from './mapApply'
@@ -156,7 +157,7 @@ export class BrowserCloudAccountSession {
   }
 
   /** Online, bounded read-only recovery. No writer capability or ACK is granted. */
-  async readRecoveryProject(projectId: string, signal: AbortSignal): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
+  async readRecoveryProject(projectId: string, signal: AbortSignal, confirmedGameEventId?: string): Promise<{ project: NativeLocalProject; notes: NativeLegacyNote[]; stages: ReplayStageView[]; documents: PortableDocument[]; maps: BrowserProjectMap[]; progress: BrowserProgressView[]; accountGame: AccountGameBase | null; accountGameHead?: string; games: {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]}[] }> {
     this.assertWebRuntime()
     const identity = this.identity, context = this.auth.requireContext(), generation = this.generation
     const keys = this.keys, bindings = this.bindings, lease = identity && keys?.leaseForAccount(identity.local_account_id)
@@ -187,7 +188,11 @@ export class BrowserCloudAccountSession {
       const progressChains = (await storage.authenticateProgress(this.auth, bindings, keys)).filter(value => value.project_id === projectId)
       if (progressChains.some(chain => chain.migration || chain.conflicted)) throw new BrowserCloudReadError('unsupported_history')
       const gameOwners = await storage.authenticateGames(this.auth,bindings,keys)
-      const accountGame = gameOwners.find(value=>value.event.header.scope==='account')?.state as AccountGameBase | undefined
+      const accountGameOwner = gameOwners.find(value=>value.event.header.scope==='account')
+      if (confirmedGameEventId && !accountGameOwner?.history.some(event => event.header.event_id === confirmedGameEventId)) {
+        throw new BrowserCloudReadError('unsupported_history')
+      }
+      const accountGame = accountGameOwner?.state as AccountGameBase | undefined
       const games = gameOwners.filter(value => value.event.header.scope === 'project' && value.event.header.project_id === projectId) as (BrowserProjectGame & {event:ProjectGameEvent;state:ProjectGameState;history:ProjectGameEvent[]})[]
       const maps = (await storage.authenticateMaps(this.auth, bindings, keys)).filter(map => map.project_id === projectId)
       const documents = (await storage.authenticateDocuments(this.auth, bindings, keys)).filter(document => document.project_id === projectId)
@@ -204,7 +209,8 @@ export class BrowserCloudAccountSession {
           }, 0) : undefined
           return presentProgress(chain, settings as unknown as ProgressSettings, day, total)
         }),
-        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps, games, accountGame: accountGame ? structuredClone(accountGame) : null,
+        project: structuredClone(value.project), notes: value.notes.filter(note => note.state === 'live').map(note => structuredClone(note.note)), stages, documents, maps, games,
+        accountGame: accountGame ? structuredClone(accountGame) : null, accountGameHead: accountGameOwner?.event.header.event_id,
       }))
       if (games.some(value => value.event.header.stage_id !== null && !stages.some(stage=>stage.id===value.event.header.stage_id))) throw new BrowserCloudReadError('unsupported_history')
       if (maps.some(map => map.stage_id !== null && !stages.some(stage => stage.id === map.stage_id))) throw new BrowserCloudReadError('unsupported_history')
@@ -241,6 +247,26 @@ export class BrowserCloudAccountSession {
   async progressWriteReady(signal: AbortSignal): Promise<boolean> {
     const operation = this.unlockedSync(signal)
     return operation.request(token => encryptedSyncV3Api.webProgressWriteReady(token, operation.signal))
+  }
+
+  async gameWriteReady(signal: AbortSignal): Promise<boolean> {
+    const operation = this.unlockedSync(signal)
+    return operation.request(token => encryptedSyncV3Api.webGameWriteReady(token, operation.signal))
+  }
+
+  async saveGameShop(projectId: string, parentId: string, command: GameShopCommand, signal: AbortSignal) {
+    const operation = this.unlockedSync(signal), keys = this.keys!
+    const current = () => { try { operation.check(); return true } catch { return false } }
+    command = structuredClone(command)
+    const replay = await openBrowserReplayStorage(operation.scope, operation.signal, current)
+    let retry: string | null
+    try { retry = await replay.publishGameShop(this.auth, keys, command, parentId, true) }
+    finally { await replay.close() }
+    const eventId = retry ?? await withReceivedBrowserAccountHistory({
+      auth: this.auth, lease: operation.lease, scope: operation.scope, delivery: 'recovery', signal: operation.signal, current,
+    }, async storage => storage.publishGameShop(this.auth, keys, command, parentId))
+    if (!eventId) throw new BrowserCloudReadError('unsupported_history')
+    return this.readRecoveryProject(projectId, operation.signal, eventId)
   }
 
   /** Compose the same append/tombstone event as Desktop from verified current history. */

@@ -622,7 +622,7 @@ pub fn process_pending_events(
     Ok(summary)
 }
 
-#[derive(Clone, Copy)]
+#[derive(serde::Deserialize)]
 struct CatalogItem {
     category: &'static str,
     key: &'static str,
@@ -634,444 +634,16 @@ struct CatalogItem {
     sellable: bool,
     credit_allowed: bool,
     apply_inflation: bool,
+    name: &'static str,
+    description: String,
+    effect: Option<&'static str>,
 }
 
-// Catalog keys are save-format data. Display metadata may evolve, while this
-// list intentionally remains a Rust-owned, immutable catalog during F4.
-const CATALOG: &[CatalogItem] = &[
-    CatalogItem {
-        category: "Зелья",
-        key: "Микро зелье здоровья",
-        price: 29.0,
-        level: 1,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Малое зелье здоровья",
-        price: 58.0,
-        level: 1,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Среднее зелье здоровья",
-        price: 145.0,
-        level: 1,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Большое зелье здоровья",
-        price: 290.0,
-        level: 1,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Зелье воскрешения",
-        price: 580.0,
-        level: 3,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Зелье вдохновения",
-        price: 217.5,
-        level: 2,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Искра вдохновения",
-        price: 101.5,
-        level: 1,
-        maximum: Some(10),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Большое зелье вдохновения",
-        price: 507.5,
-        level: 5,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Эликсир вдохновения",
-        price: 942.5,
-        level: 8,
-        maximum: Some(3),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Часовое зелье познания",
-        price: 290.0,
-        level: 2,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Суточное зелье познания",
-        price: 3480.0,
-        level: 4,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Недельное зелье познания",
-        price: 15660.0,
-        level: 6,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Часовое зелье доходности",
-        price: 3185.7,
-        level: 2,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Суточное зелье доходности",
-        price: 4411.0,
-        level: 4,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Недельное зелье доходности",
-        price: 29759.1,
-        level: 6,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Часовое зелье просвещения",
-        price: 2900.0,
-        level: 8,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Суточное зелье просвещения",
-        price: 34800.0,
-        level: 10,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Недельное зелье просвещения",
-        price: 156600.0,
-        level: 12,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Часовое зелье супердоходности",
-        price: 63713.2,
-        level: 15,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Суточное зелье супердоходности",
-        price: 88218.3,
-        level: 18,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Зелья",
-        key: "Недельное зелье супердоходности",
-        price: 595180.3,
-        level: 21,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Заморозка",
-        price: 85074.3,
-        level: 3,
-        maximum: Some(2),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Чернильница потока",
-        price: 435.0,
-        level: 3,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Компас рукописи",
-        price: 652.5,
-        level: 4,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Учебник мастерства",
-        price: 696.0,
-        level: 4,
-        maximum: Some(5),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Жетон новой цели",
-        price: 261.0,
-        level: 2,
-        maximum: Some(3),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Нить ритуала",
-        price: 522.0,
-        level: 3,
-        maximum: Some(3),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Медаль качества",
-        price: 754.0,
-        level: 5,
-        maximum: Some(2),
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Лотерейный билет",
-        price: 29.0,
-        level: 3,
-        maximum: None,
-        usable: true,
-        buyable: true,
-        sellable: true,
-        credit_allowed: false,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Печатная машинка Хемингуэя",
-        price: 14500.0,
-        level: 5,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Ноутбук Роалинг",
-        price: 72500.0,
-        level: 10,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Литературный раб",
-        price: 145000.0,
-        level: 20,
-        maximum: None,
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Предметы",
-        key: "Амулет восстановления",
-        price: 29000.0,
-        level: 10,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: false,
-    },
-    CatalogItem {
-        category: "Парфюм",
-        key: "First Cherry",
-        price: 50000.0,
-        level: 1,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: true,
-    },
-    CatalogItem {
-        category: "Парфюм",
-        key: "My Dance",
-        price: 75000.0,
-        level: 1,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: true,
-    },
-    CatalogItem {
-        category: "Парфюм",
-        key: "Marocco&Bejuin",
-        price: 125000.0,
-        level: 1,
-        maximum: Some(1),
-        usable: false,
-        buyable: true,
-        sellable: true,
-        credit_allowed: true,
-        apply_inflation: true,
-    },
-];
+// Catalog keys are save-format data. The Web and native shop use this same source.
+static CATALOG: std::sync::LazyLock<Vec<CatalogItem>> = std::sync::LazyLock::new(|| {
+    serde_json::from_str(include_str!("../../src/cloud/gameShopCatalog.json"))
+        .expect("the bundled game shop catalog is valid")
+});
 
 fn game_object(value: &mut Value) -> GameResult<&mut Map<String, Value>> {
     value
@@ -1981,14 +1553,13 @@ fn buffs_projection(gamer: &Map<String, Value>, now: &str) -> Value {
     })
 }
 
-fn catalog_item(category: &str, key: &str) -> Option<CatalogItem> {
+fn catalog_item(category: &str, key: &str) -> Option<&'static CatalogItem> {
     CATALOG
         .iter()
-        .copied()
         .find(|item| item.category == category && item.key == key)
 }
 
-fn catalog_item_json(gamer: &Map<String, Value>, item: CatalogItem, include_count: bool) -> Value {
+fn catalog_item_json(gamer: &Map<String, Value>, item: &CatalogItem, include_count: bool) -> Value {
     let count = item_count(gamer, item.category, item.key);
     let (name, description, effect) = catalog_metadata(item.key);
     let price = if item.apply_inflation {
@@ -2015,47 +1586,6 @@ fn catalog_item_json(gamer: &Map<String, Value>, item: CatalogItem, include_coun
     }
     result
 }
-
-// These are the canonical native display definitions copied from the legacy
-// ITEM_REGISTRY. Save keys remain the emoji-free Russian keys used by Gamer.
-const ITEM_METADATA: &[(&str, &str, &str, Option<&str>)] = &[
-    ("Микро зелье здоровья", "🧪  Микро зелье здоровья", "🧪  Восстанавливает здоровье на 5 единиц", Some("Восстанавливает здоровье")),
-    ("Малое зелье здоровья", "🧪  Малое зелье здоровья", "🧪  Восстанавливает здоровье на 10 единиц", Some("Восстанавливает здоровье")),
-    ("Среднее зелье здоровья", "🧪  Среднее зелье здоровья", "🧪  Восстанавливает здоровье на 25 единиц", Some("Восстанавливает здоровье")),
-    ("Большое зелье здоровья", "🧪  Большое зелье здоровья", "🧪  Восстанавливает здоровье на 50 единиц", Some("Восстанавливает здоровье")),
-    ("Зелье воскрешения", "🧪  Зелье воскрешения", "🧪  Полностью восстанавливает здоровье", Some("Восстанавливает здоровье")),
-    ("Зелье вдохновения", "✨ Зелье вдохновения", "Восстанавливает 25 вдохновения.", Some("Восстанавливает 25 вдохновения")),
-    ("Искра вдохновения", "💫 Искра вдохновения", "Восстанавливает 10 вдохновения.", Some("Восстанавливает 25 вдохновения")),
-    ("Большое зелье вдохновения", "🌟 Большое зелье вдохновения", "Восстанавливает 50 вдохновения.", Some("Восстанавливает 25 вдохновения")),
-    ("Эликсир вдохновения", "🌌 Эликсир вдохновения", "Полностью восстанавливает вдохновение.", Some("Восстанавливает 25 вдохновения")),
-    ("Часовое зелье познания", "🧪⚡️  Часовое зелье познания", "Увеличивает коэффициент опыта на 1 на один час", None),
-    ("Суточное зелье познания", "🧪⚡️  Суточное зелье познания", "Увеличивает коэффициент опыта на 1 на один день", None),
-    ("Недельное зелье познания", "🧪⚡️  Недельное зелье познания", "Увеличивает коэффициент опыта на 1 на одну неделю", None),
-    ("Часовое зелье доходности", "🧪⚡️  Часовое зелье доходности", "Увеличивает коэффициент монет на 0.5 на один час", None),
-    ("Суточное зелье доходности", "🧪⚡️  Суточное зелье доходности", "Увеличивает коэффициент монет на 0.5 на один день", None),
-    ("Недельное зелье доходности", "🧪⚡️  Недельное зелье доходности", "Увеличивает коэффициент монет на 0.5 на одну неделю", None),
-    ("Часовое зелье просвещения", "🧪⚡️  Часовое зелье просвещения", "Увеличивает коэффициент опыта на 10 на один час", None),
-    ("Суточное зелье просвещения", "🧪⚡️  Суточное зелье просвещения", "Увеличивает коэффициент опыта на 10 на один день", None),
-    ("Недельное зелье просвещения", "🧪⚡️  Недельное зелье просвещения", "Увеличивает коэффициент опыта на 10 на одну неделю", None),
-    ("Часовое зелье супердоходности", "🧪⚡️  Часовое зелье супердоходности", "Увеличивает коэффициент монет на 10 на один час", None),
-    ("Суточное зелье супердоходности", "🧪⚡️  Суточное зелье супердоходности", "Увеличивает коэффициент монет на 10 на один день", None),
-    ("Недельное зелье супердоходности", "🧪⚡️  Недельное зелье супердоходности", "Увеличивает коэффициент монет на 10 на одну неделю", None),
-    ("Заморозка", "❄️ Заморозка", "Заморозка позволяет пропустить один день стрика в проекте с дедлайном и активным стриком️\n⚠️ Важно: чем больше заморозок вы используете, тем дороже они становятся.\nМожно иметь не более 2 заморозок в инвентаре и купить до 2 за раз.", None),
-    ("Чернильница потока", "🖋️ Чернильница потока", "Увеличивает награду за следующую успешную писательскую сессию на 25%.", Some("Увеличивает награду за следующую успешную сессию на 25%")),
-    ("Компас рукописи", "🧭 Компас рукописи", "Увеличивает награду за следующие достигнутые рубежи одной рукописи на 25%.", Some("Увеличивает награду за следующие рубежи рукописи на 25%")),
-    ("Учебник мастерства", "📘 Учебник мастерства", "Добавляет 2 опыта мастерства выбранной специализации.", Some("Добавляет 2 опыта мастерства выбранной специализации")),
-    ("Жетон новой цели", "🎲 Жетон новой цели", "Бесплатно меняет текущую цель дня на другой вариант.", Some("Бесплатно меняет текущую цель дня на следующий вариант")),
-    ("Нить ритуала", "🧵 Нить ритуала", "Один раз защищает серию успешных сессий при неудаче.", Some("Один раз сохраняет серию при неудачной сессии (максимум 3)")),
-    ("Медаль качества", "🏅 Медаль качества", "Повышает результат следующей успешной сессии на одну ступень.", Some("Повышает результат следующей успешной сессии на одну ступень")),
-    ("Лотерейный билет", "🎟️ Лотерейный билет", "Лотерейный билет \"5 из 30\". Угадайте числа и сорвите джекпот!", Some("Разыграйте 5 чисел из 30 и получите приз за 2 или больше совпадений")),
-    ("Печатная машинка Хемингуэя", "📠  Печатная машинка Хемингуэя", "Постоянно увеличивает коэффициент опыта на 0,5.", None),
-    ("Ноутбук Роалинг", "💻  Ноутбук Роалинг", "Постоянно увеличивает коэффициент опыта на 1.", None),
-    ("Литературный раб", "📃  Литературный раб", "Постоянно увеличивает коэффициенты опыта и монет на 0,25 за экземпляр.", None),
-    ("Амулет восстановления", "❤️  Амулет восстановления", "Постоянно увеличивает коэффициент восстановления здоровья на 1.", None),
-    ("First Cherry", "First Cherry", "Сочная чёрная вишня, терпкий миндаль и тёплая ваниль сливаются в соблазнительную композицию. Аромат смелых решений, незабываемых приключений и бесценного опыта.", Some("Постоянно увеличивает коэффициент опыта на 1.")),
-    ("My Dance", "My Dance", "Нежность розы, сладость спелой груши и сливочные оттенки сандала окутывают мягким теплом. Словно объятие после долгого дня, этот аромат возвращает силы и дарит ощущение гармонии.", Some("Постоянно увеличивает коэффициент восстановления здоровья на 1.")),
-    ("Marocco&Bejuin", "Marocco&Bejuin", "Благородный табак, пряная ваниль, какао и сухофрукты создают роскошный восточный аромат. Его тёплый шлейф напоминает о богатстве, власти и бесконечных возможностей.", Some("Постоянно увеличивает коэффициент монет на 1.")),
-];
 
 const REWARD_METADATA: &[(&str, &str, &str)] = &[
     ("👑  Корона Первой Эпохи", "👑  Корона Первой Эпохи", "Корона выдается игрокам, которые прошли первую экономическую реформу в игре"),
@@ -2106,11 +1636,11 @@ const REWARD_METADATA: &[(&str, &str, &str)] = &[
 ];
 
 fn catalog_metadata(key: &str) -> (&'static str, &'static str, Option<&'static str>) {
-    if let Some((_, name, description, effect)) = ITEM_METADATA
+    if let Some(item) = CATALOG
         .iter()
-        .find(|(item_key, _, _, _)| item_identifier_matches(key, item_key))
+        .find(|item| item_identifier_matches(key, item.key))
     {
-        return (*name, *description, *effect);
+        return (item.name, item.description.as_str(), item.effect);
     }
     REWARD_METADATA
         .iter()
@@ -2160,7 +1690,7 @@ fn catalog_state(gamer: &Map<String, Value>, include_count: bool) -> Value {
         let items: Vec<Value> = CATALOG
             .iter()
             .filter(|item| item.category == category)
-            .map(|item| catalog_item_json(gamer, *item, include_count))
+            .map(|item| catalog_item_json(gamer, item, include_count))
             .collect();
         categories.push(json!({"key": category, "name": category, "items": items}));
     }
@@ -3092,7 +2622,7 @@ impl GameApplicationService {
                     Ok((
                         Some(format!("Куплено: {} x{}.", item.key, count)),
                         Some(
-                            json!({"category":category,"item_key":item.key,"count":count,"unit_price":item.price,"total_price":total}),
+                            json!({"category":category,"item_key":item.key,"count":count,"unit_price":item_price,"total_price":total}),
                         ),
                     ))
                 }
@@ -3133,7 +2663,7 @@ impl GameApplicationService {
 
     fn use_item_mutation<R: GameRng>(
         gamer: &mut Map<String, Value>,
-        item: CatalogItem,
+        item: &CatalogItem,
         count: i64,
         rng: &mut R,
         now: &str,
@@ -5519,9 +5049,7 @@ mod tests {
         assert_eq!(SPECIALIZATION_DEFINITIONS.len(), 5);
         assert_eq!(SESSION_MODE_DEFINITIONS.len(), 4);
         assert_eq!(SESSION_INTENTION_DEFINITIONS.len(), 4);
-        assert!(ITEM_METADATA
-            .iter()
-            .all(|(_, _, description, _)| !description.is_empty()));
+        assert!(CATALOG.iter().all(|item| !item.description.is_empty()));
         assert_eq!(REWARD_METADATA.len(), 45);
         assert!(REWARD_METADATA
             .iter()

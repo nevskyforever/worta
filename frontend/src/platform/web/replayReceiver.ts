@@ -123,7 +123,8 @@ export async function withReceivedBrowserAccountHistory<T>(input: ReceiveInput, 
           let documentHead: DocumentEvent['header'] | undefined
           for (const item of page.items) {
             const event = item.event as V3Descriptor & { scope?: string }
-            if ('scope' in event && String(event.entity_type) !== 'account_game' || event.device_id === scope.deviceId && event.entity_type !== 'progress') fail('unsupported_history_family')
+            const accountGame = String(event.entity_type) === 'account_game'
+            if ('scope' in event && !accountGame || event.device_id === scope.deviceId && event.entity_type !== 'progress' && !accountGame) fail('unsupported_history_family')
             if (event.device_id === scope.deviceId) {
               const echo: BrowserReceivedInboxRecord = { record_version: 1, account_id: scope.accountId,
                 device_id: scope.deviceId, event_id: event.event_id, server_sequence: event.server_sequence,

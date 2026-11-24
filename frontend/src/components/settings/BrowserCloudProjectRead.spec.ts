@@ -5,6 +5,41 @@ import { expect, it, vi } from 'vitest'
 import { BrowserReplayError } from '@/platform/web/replayRecords'
 import type { BrowserCloudAccountSession } from '@/platform/web/cloudAccountSession'
 import BrowserCloudProjectRead from './BrowserCloudProjectRead.vue'
+import gameFixtures from '@/cloud/__fixtures__/gameCodecV1.json'
+
+it('shows only available game views and preserves the balance across them', async () => {
+  const pinia = createPinia(); setActivePinia(pinia)
+  const genesis = gameFixtures.examples.find(example => example.name === 'account-genesis')!.event
+  if (genesis.action.kind !== 'genesis') throw new Error('Expected an account genesis fixture')
+  const snapshot = {
+    project: { name: 'Project' }, stages: [], notes: [], games: [],
+    accountGame: genesis.action.base, accountGameHead: genesis.header.event_id,
+  }
+  const session = {
+    status: 'unlocked', onRevoked: () => () => {},
+    readCloudProject: vi.fn().mockRejectedValue(new BrowserReplayError('unsupported_history')),
+    readRecoveryProject: vi.fn().mockResolvedValue(snapshot),
+    gameWriteReady: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true),
+  } as unknown as BrowserCloudAccountSession
+  const view = mount(BrowserCloudProjectRead, {
+    props: { session, projectId: 'game-project', autoOpenRecovery: true, workspace: true, section: 'game' },
+    global: { plugins: [pinia], stubs: { IonIcon: true } },
+  })
+  const views = () => view.findAll('[data-game-view]').map(button => button.attributes('data-game-view'))
+  await flushPromises()
+  expect(views()).toEqual(['overview', 'inventory'])
+  const balance = view.get('[data-testid="cloud-game-coins"]').text()
+  await view.get('[data-game-view="inventory"]').trigger('click')
+  expect(view.find('[data-testid="cloud-game-inventory"]').exists()).toBe(true)
+  expect(view.get('[data-testid="cloud-game-inventory"]').find('button').exists()).toBe(false)
+  await view.get('[data-testid="cloud-project-refresh"]').trigger('click')
+  await flushPromises()
+  expect(views()).toEqual(['overview', 'inventory', 'shop'])
+  await view.get('[data-game-view="shop"]').trigger('click')
+  expect(view.get('[data-game-view="shop"]').attributes('aria-pressed')).toBe('true')
+  expect(view.find('[data-testid="cloud-game-inventory"]').exists()).toBe(false)
+  expect(view.get('[data-testid="cloud-game-coins"]').text()).toBe(balance)
+})
 
 it('clears earlier metadata and explains a safely refused recovery history', async () => {
   const pinia = createPinia(); setActivePinia(pinia)

@@ -88,6 +88,19 @@ function validateLoss(a: Record<string, unknown>) {
   if (String(a.writing_day) < lossDay || before.lost_day !== null && before.lost_day >= last) fail()
   if (canonical(after) !== canonical({...before, history:[], freezes:0, maximum:Math.max(before.maximum,before.history.length), lost_day:lossDay, lost_length:before.history.length})) fail()
 }
+
+export function globalFreezeAfter(before: StreakBase, writingDay: string): StreakBase {
+  streak(before)
+  const last = before.history.at(-1)?.day
+  if (!day(writingDay) || !last || !before.enabled
+    || Date.parse(writingDay + 'T00:00:00Z') - Date.parse(last + 'T00:00:00Z') !== 86_400_000) {
+    fail('game_invalid_rule')
+  }
+  const after = { ...before, history: [...before.history, { day: writingDay, frozen: true }],
+    freezes: before.history.filter(entry => entry.frozen).length + 1 }
+  streak(after)
+  return after
+}
 function streak(v: unknown) {
   const s = exact(v, ['history', 'maximum', 'freezes', 'enabled', 'last_reward_day', 'lost_day', 'lost_length'])
   if (!Array.isArray(s.history) || s.history.length > GAME_LIMITS.days) fail('game_resource_limit')

@@ -173,6 +173,28 @@ export const encryptedSyncV3Api = {
     if(typeof result.ready!=='boolean'||!safe(result.missing_devices,0))fail()
     return result
   }),
+  async webGameWriteReady(token: string, signal: AbortSignal): Promise<boolean> {
+    const value = await apiRequest<unknown>('/api/v3/sync/encrypted/game-reader-capabilities?web_game_version=1', {
+      headers: headers(token), signal,
+    })
+    if (!exact(value, ['ready', 'missing_devices', 'web_game_version'])) return false
+    const gate = value as {ready: unknown; missing_devices: unknown; web_game_version: unknown}
+    return gate.ready === true && gate.missing_devices === 0 && gate.web_game_version === 1
+  },
+  pushSealedAccountGame(token: string, eventId: string, rawBody: string, signal: AbortSignal,
+    pin: { cursor: number; epoch: number; parentId: string }): Promise<V3PushResponse> {
+    const body = JSON.parse(rawBody), item = body.items?.[0]
+    if (item?.event?.entity_type !== 'account_game' || item.event.event_id !== eventId || !item.object
+      || !safe(pin.cursor, 0) || !safe(pin.epoch, 0) || !UUID.test(pin.parentId)) fail()
+    const encoded = encodeAccountPush(body.device_id, [{
+      event: item.event, object: { ...item.object, nonce: decodeBase64Url(item.object.nonce), ciphertext: decodeBase64Url(item.object.ciphertext) },
+    }])
+    if (encoded !== rawBody) fail()
+    const query = new URLSearchParams({ web_game_version: '1', expected_cursor: String(pin.cursor),
+      expected_epoch: String(pin.epoch), game_parent: pin.parentId })
+    return apiRequest<unknown>('/api/v3/sync/encrypted/account/push?' + query,
+      { method: 'POST', headers: headers(token), rawBody, signal }).then(value => parsePush(value, [eventId]))
+  },
   pushGame:(token:string,deviceId:string,items:readonly V3MetadataPushItem[]):Promise<V3PushResponse>=>apiRequest<unknown>('/api/v3/sync/encrypted/push',{method:'POST',headers:headers(token),rawBody:encodeV3GamePush(deviceId,items)}).then(value=>parsePush(value,items.map(i=>i.event.event_id))),
   async webProgressWriteReady(token: string, signal: AbortSignal): Promise<boolean> {
     const value = await apiRequest<unknown>('/api/v3/sync/encrypted/progress-reader-capabilities?web_progress_version=1', {

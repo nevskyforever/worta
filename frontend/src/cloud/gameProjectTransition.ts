@@ -1,6 +1,10 @@
 import { canonical } from './projectMetadataCodec'
 import { progressMicros } from './progressCodec'
-import { validateGameEvent, type GameEvent, type ProjectGameEvent, type AccountGameBase, type StreakBase, type GameReward } from './gameCodec'
+import { globalFreezeAfter, validateGameEvent, type GameEvent, type ProjectGameEvent, type AccountGameAction,
+  type AccountGameBase, type StreakBase, type GameReward } from './gameCodec'
+import type { ProgressChain } from './progressTransition'
+import { UNIT_FACTORS } from '@/core/projects/units'
+import type { ProgressUnit } from '@/core/projects/types'
 export interface ProjectGameState { streak: StreakBase; completion_claimed: boolean }
 export type GameState = ProjectGameState | AccountGameBase
 function fail():never { throw new Error('game_invalid_rule') }
@@ -21,6 +25,58 @@ const decimal = (value:number):string => {
   return value.toFixed(6)
 }
 const tenth = (value:number) => Math.max(0,Math.ceil((value-1e-9)*10)/10)
+const utcDay = (day: string) => Date.parse(day + 'T00:00:00Z') / 86_400_000
+
+export interface StreakProgressSettings {
+  unit: ProgressUnit
+  goal: number | null
+  infinite: boolean
+  status: string
+  personal_goal: number
+  deadline: string | null
+  streak_enabled: boolean
+}
+
+/** Recompute Native growth from the exact writing revision and its plan. */
+export function verifyGlobalStreakGrowth(action: Extract<AccountGameAction, {kind:'global_streak'}>,
+  account: AccountGameBase, source: ProjectGameEvent, projectState: ProjectGameState, progress: ProgressChain,
+  project: StreakProgressSettings & {stages_enabled: boolean}, stage?: StreakProgressSettings): void {
+  const settings = stage ?? project
+  if (source.header.rule !== 'native-game-v1' || source.action.kind !== 'writing'
+    || source.action.fact.writing_day !== action.writing_day || !projectState.streak.enabled
+    || (source.header.stage_id !== null && (!project.stages_enabled || !stage))
+    || settings.infinite || settings.streak_enabled === false || !['active', 'активен'].includes(settings.status)
+    || !Object.hasOwn(UNIT_FACTORS, settings.unit) || progress.migration) fail()
+  const day = action.writing_day, days = utcDay(day), factor = UNIT_FACTORS[settings.unit]
+  const total = amount(progress.entries.at(-1)?.new_total ?? progress.base_total)
+  const added = Number(progress.entries.filter(entry => entry.writing_day === day)
+    .reduce((sum, entry) => sum + progressMicros(entry.delta), 0n)) / 1e6
+  const base = total - added, personal = settings.personal_goal * factor
+  const goal = (settings.goal ?? 0) * factor
+  const deadline = settings.deadline === null ? null : utcDay(settings.deadline)
+  if (stage && personal === 0 && deadline === null && (project.personal_goal > 0 || project.deadline !== null)) fail()
+  const target = deadline === null ? (personal > 0 ? base + personal : 0)
+    : days >= deadline ? goal : personal > 0 ? Math.min(base + personal, goal) : base + Math.max(0, goal - base) / (deadline - days + 1)
+  if (!(target > 0 && total >= target)) fail()
+  const after = structuredClone(account.global_streak)
+  if (!after.enabled || after.last_reward_day !== null && after.last_reward_day >= day) fail()
+  const projectLast = projectState.streak.history.at(-1)
+  if (projectLast && utcDay(projectLast.day) >= days - 1 && utcDay(projectLast.day) <= days
+    && projectState.streak.history.length > after.history.length) after.history = structuredClone(projectState.streak.history)
+  const last = after.history.at(-1)
+  if (last && (utcDay(last.day) > days || utcDay(last.day) < days - 1 || last.day === day && last.frozen)) fail()
+  if (last?.day !== day) after.history.push({day, frozen:false})
+  const length = after.history.length
+  after.maximum = Math.max(after.maximum, length)
+  after.last_reward_day = day
+  after.lost_day = null
+  after.lost_length = 0
+  const coins = length === 1 ? 50 * amount(account.coin_coefficient)
+    : 10 * length * amount(account.coin_coefficient) * (1 + (account.level - 1) * 0.15)
+  const experience = length === 1 ? 0 : 1000 * length * amount(account.experience_coefficient)
+  if (canonical(action.after) !== canonical(after)
+    || canonical(action.reward) !== canonical({coins:decimal(tenth(coins)),experience:decimal(tenth(experience))})) fail()
+}
 /** Frozen Native game_sync::writing_reward. No account balance is granted by a
  * project event: this merely verifies the immutable declared reward. */
 export function verifyProjectReward(e:ProjectGameEvent):void {
@@ -31,14 +87,17 @@ export function verifyProjectReward(e:ProjectGameEvent):void {
       experience:decimal(tenth(amount(a.fact.delta)/100*500*amount(a.experience_coefficient)*multiplier))}
     if(!['native-game-v1','python-game-v1'].includes(e.header.rule)||canonical(a.reward)!==canonical(expected))fail()
   }else if(a.kind==='completion'){
-    if(e.header.rule!=='native-game-v1')fail() // Python ties-even completion is not yet qualified.
-    const coins=Math.round(amount(a.total_symbols)/1000+0.5)*100*(e.header.stage_id===null?1:0.25)
+    if(!['native-game-v1','python-game-v1'].includes(e.header.rule))fail()
+    const input=amount(a.total_symbols)/1000+0.5
+    const lower=Math.floor(input)
+    const rounded=e.header.rule==='python-game-v1'&&input-lower===0.5&&lower%2===0?lower:Math.round(input)
+    const coins=rounded*100*(e.header.stage_id===null?1:0.25)
     if(canonical(a.reward)!==canonical({coins:decimal(coins),experience:decimal(coins*100)}))fail()
   }
 }
 /** Exact admitted Native causal transitions. Deferred Native actions still fail
  * closed; Web reading never runs the Game event consumer or reissues rewards. */
-export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGameEvent):GameState {
+export function transitionGame(e:GameEvent,parent?:GameState,source?:GameEvent):GameState {
   validateGameEvent(e)
   const a=e.action
   if(a.kind==='genesis'){
@@ -86,7 +145,8 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
   if (a.kind === 'freeze' && 'project_id' in a) {
     if(e.header.rule!=='native-game-v1'||a.project_id!==null||a.before===null||a.after===null)fail()
     const account=state as AccountGameBase
-    if(canonical(account.global_streak)!==canonical(a.before))fail()
+    if(canonical(account.global_streak)!==canonical(a.before)
+      ||canonical(globalFreezeAfter(a.before,a.writing_day))!==canonical(a.after))fail()
     const index=account.inventory.findIndex(item=>item.category==='Предметы'&&item.item_id==='Заморозка')
     if(index<0||account.inventory[index]!.count!==a.before_count)fail()
     if(a.after_count===0)account.inventory.splice(index,1);else account.inventory[index]!.count=a.after_count
@@ -110,10 +170,22 @@ export function transitionGame(e:GameEvent,parent?:GameState,source?:ProjectGame
     validateGameEvent({...e,version:1,header:{...e.header,parents:[],revision:1,rule:'legacy-game-v1'},action:{kind:'genesis',base:account}})
     return account
   }
+  if (a.kind === 'compensation') {
+    if (!source || source.header.scope !== 'account' || source.header.account_id !== e.header.account_id
+      || source.header.event_id !== a.target_action_id || source.action.kind !== 'reward') fail()
+    const account = state as AccountGameBase
+    for (const resource of ['coins', 'experience'] as const) {
+      const debit = progressMicros(a.reward[resource])
+      const remaining = progressMicros(account[resource]) + debit
+      if (debit !== -progressMicros(source.action.reward[resource]) || remaining < 0n) fail()
+      account[resource] = `${remaining / 1_000_000n}.${(remaining % 1_000_000n).toString().padStart(6, '0')}`
+    }
+    return account
+  }
   if(a.kind!=='reward'||!source||source.header.scope!=='project'||source.header.account_id!==e.header.account_id
     ||source.header.event_id!==a.project_action_id||source.header.project_id!==a.project_id||source.header.rule!==e.header.rule
     ||!('reward' in source.action)||canonical(source.action.reward)!==canonical(a.reward))fail()
-  verifyProjectReward(source)
+  verifyProjectReward(source as ProjectGameEvent)
   const account=state as AccountGameBase, reward=(a as {reward:GameReward}).reward
   const change=(key:'coins'|'experience',delta:bigint)=>{const n=progressMicros(account[key])+delta;if(n<0n||n>1000000000000000000n)fail();account[key]=`${n/1000000n}.${(n%1000000n).toString().padStart(6,'0')}`}
   if(source.action.kind==='writing'){

@@ -146,9 +146,15 @@ def test_native_project_game_http_read_update_restart(cloud_client, tmp_path, ac
             next_day = (today + timedelta(days=3)).isoformat()
             assert game(tmp_path,db,identity,user,'loss',writing_day=next_day,now=next_day+'T00:00:00.000000Z') is False
             latest=history();assert latest[:len(items)]==items
-            stdout,stderr=process.communicate(json.dumps({'items':latest,'expected':expected()})+'\n',timeout=180)
+            result = expected()
+            expected_before_trade = result['projections']['account']
+            stdout,stderr=process.communicate(json.dumps({'items':latest,'expected':result})+'\n',timeout=180)
             assert process.returncode==0,stdout+stderr
-            assert json.loads(stdout.strip().splitlines()[-1])['pass']
+            assert json.loads(stdout.strip().splitlines()[-1])['webTrade']
+            receive_mixed(client, tmp_path, token, db, identity, user, key)
+            account = dict(projections(db))['account']
+            assert float(account['coins']) == round(float(expected_before_trade['coins']) - 7.2, 1)
+            assert account['inventory'] == expected_before_trade['inventory']
         finally:
             if process.poll() is None:process.kill();process.communicate()
         from backend.app.cloud.models import SyncDevice

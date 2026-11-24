@@ -29,3 +29,23 @@ it('shows real account balances and canonical inventory in six languages, with n
  expect(wrapper.get('.count-badge').text()).toBe('×3')
  expect(value.inventory[0]!.count).toBe(2)
 })
+
+it('offers a sale only when the requested quantity maps exactly to a Desktop event', async () => {
+  const event = golden.examples.find(example => example.name === 'account-genesis')!.event
+  if (event.action.kind !== 'genesis' || !event.action.base || !('coins' in event.action.base)) throw new Error('Expected account genesis')
+  const value = structuredClone(event.action.base) as AccountGameBase
+  value.inventory = [{ category: 'Зелья', item_id: 'Микро зелье здоровья', count: 4 }]
+  const view = mount(BrowserAccountGameRead, {
+    props: { value, writable: true, view: 'inventory' },
+    global: { plugins: [createPinia()], stubs: { IonIcon: true } },
+  })
+  const sell = () => view.get('.button-row button:last-child')
+  await view.get('input[type="number"]').setValue(3)
+  expect(sell().attributes('disabled')).toBeDefined()
+  await view.get('input[type="number"]').setValue(2)
+  expect(sell().attributes('disabled')).toBeUndefined()
+  await sell().trigger('click')
+  expect(view.emitted('trade')).toEqual([[{
+    category: 'Зелья', item_id: 'Микро зелье здоровья', operation: 'sell', count: 2,
+  }]])
+})

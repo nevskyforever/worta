@@ -13,7 +13,11 @@ import vectors from '@/cloud/__fixtures__/projectMetadataV2.json'
 import type { BrowserReceivedInboxRecord } from './syncDurability'
 import { replayAnchor, validateReplayManifest, type ReplayAnchor } from './replayRecords'
 import type { ReplaySnapshot, ReplayStorage, openBrowserReplayStorage } from './replayStorage'
-import { receiveBrowserAccountHistory } from './replayReceiver'
+import { receiveBrowserAccountHistory, withReceivedBrowserAccountHistory } from './replayReceiver'
+import { sealAccountGame } from './gameOutbound'
+import { prepareGameShopAction } from '@/cloud/gameShop'
+import type { AccountGameEvent } from '@/cloud/gameCodec'
+import gameVectors from '@/cloud/__fixtures__/gameCodecV1.json'
 
 const base = vectors[0]!.event as ProjectMetadataEvent
 const scope = { accountId: '22222222-2222-4222-8222-222222222222', canonicalUserId: base.header.account_id, deviceId: base.header.device_id }
@@ -49,7 +53,7 @@ beforeEach(async () => {
   // Unit tests cover receiver orchestration only. Native IDB atomicity/schema
   // and restart are exercised by the real Chromium/PostgreSQL acceptance.
   store = {
-    publishProgress: vi.fn(), retryProgress: vi.fn(),
+    publishProgress: vi.fn(), retryProgress: vi.fn(), publishGameShop: vi.fn(),
     authenticateGames: vi.fn(), authenticateProgress: vi.fn(), authenticateMaps: vi.fn(), authenticateDocuments: vi.fn(), applyDocumentGenesis: vi.fn(), recoverV10: vi.fn(), importRecoveryProject: vi.fn(), stageRecoveryExtension: vi.fn(),
     contentAuthorOwner:vi.fn(),receiveContentAuthorEcho:vi.fn(),inspectNoteReaderReadiness: vi.fn(), applyContentUpdate: vi.fn(), applyOrderedContentUpdate: vi.fn(), applyMetadata: vi.fn(), applyStructure: vi.fn(), applyInitialNotes: vi.fn(), seedNoteSource: vi.fn(),
     start: vi.fn(async () => {
@@ -78,6 +82,43 @@ beforeEach(async () => {
 })
 
 describe('Online-Only ciphertext receiver, without apply proofs', () => {
+  it('stages a Game self-echo only after matching the retained accepted publication', async () => {
+    const parent = structuredClone(gameVectors.examples.find(value => value.name === 'account-genesis')!.event) as AccountGameEvent
+    if (parent.action.kind !== 'genesis') throw new Error('fixture')
+    parent.header.account_id = scope.canonicalUserId
+    const event = prepareGameShopAction(parent.action.base, parent, scope.deviceId, {
+      category: 'Зелья', item_id: 'Микро зелье здоровья', operation: 'buy', count: 1,
+    }, '2026-10-05T00:00:00Z', crypto.randomUUID())
+    const key = await generateAccountMasterKey()
+    try {
+      vi.mocked(lease.use).mockImplementation(action => action(key))
+      vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since, limit, cursor) => {
+        const next = Math.min(since + limit, rows.length)
+        return wirePage(rows.slice(since, next), next, next < cursor)
+      })
+      const input = { auth, lease, scope, signal: controller.signal, current: () => active, openStorage, delivery: 'recovery' as const }
+      await receiveBrowserAccountHistory(input)
+      Object.assign(state.manifest!, { applied_cursor: 3, record_version: 6, contract_version: 6 })
+      const raw = await sealAccountGame(scope, event, key), item = JSON.parse(raw).items[0]
+      rows.push({ ...item, event: { ...item.event, device_id: scope.deviceId, server_sequence: 4 } })
+      anchor = { ...anchor, registry: { ...anchor.registry, current_cursor: 4 } }
+      const identity = { record_version: 1, account_id: scope.accountId, device_id: scope.deviceId,
+        event_id: event.header.event_id, protocol_version: 3 }
+      state.author = { out: [{ ...identity, state: 'accepted', local_ordinal: 1, raw_body: raw }], receipts: [], intents: [] }
+      await expect(receiveBrowserAccountHistory(input)).rejects.toMatchObject({ code: 'corrupt_record' })
+      expect(store.stageRecoveryExtension).not.toHaveBeenCalled()
+      state.author.receipts = [{ ...identity, server_sequence: 4, duplicate: false }]
+      vi.mocked(store.stageRecoveryExtension).mockImplementation(async (_expected, next, rawPage, verifyServer) => {
+        await verifyServer()
+        state.manifest!.anchor = next
+        return store.commitPage(state, 3, rawPage)
+      })
+      const extended = await withReceivedBrowserAccountHistory(input, async (_storage, snapshot) => snapshot)
+      expect(extended.manifest).toMatchObject({ receive_cursor: 4, applied_cursor: 3 })
+      expect(state.rows[3]!.state).toBe('received')
+    } finally { key.fill(0) }
+  })
+
   it('uses the explicit recovery delivery with the pinned snapshot and no ordinary pull', async () => {
     const recovery = vi.spyOn(encryptedSyncV3Api, 'recoveryRaw').mockImplementation(async (_token, since, limit, cursor, epoch) => {
       expect(cursor).toBe(3); expect(epoch).toBe(2)

@@ -103,7 +103,7 @@ fn completion_header(
     );
     Ok(h)
 }
-fn capture_growth(db:&Connection,scope:&metadata::MetadataScope,source:&Value,before:&Value,now:&str)->Result<Option<Value>> {
+fn capture_growth(db:&Connection,scope:&metadata::MetadataScope,source:&Value,before:&Value,prior_payload:&str,now:&str)->Result<Option<Value>> {
     let parents=game_sync::tips(db,&scope.account_id,"account")?;
     if parents.len()!=1{return Err("game_noncommutative_conflict".into());}
     let base=game_sync::rebuild_chain(db,&scope.account_id,"account",&parents[0])?;
@@ -118,7 +118,9 @@ fn capture_growth(db:&Connection,scope:&metadata::MetadataScope,source:&Value,be
     db.execute("DELETE FROM cloud_game_tips WHERE account_id=?1 AND owner_key='account'",[&scope.account_id]).map_err(sql)?;
     db.execute("INSERT INTO cloud_game_tips VALUES(?1,'account',?2)",params![scope.account_id,id]).map_err(sql)?;
     db.execute("UPDATE cloud_game_projection SET head_event_id=?1,snapshot_json=?2,generation=?3 WHERE account_id=?4 AND owner_key='account'",params![id,canonical(&next),e["header"]["revision"].as_i64(),scope.account_id]).map_err(sql)?;
-    db.execute("INSERT INTO cloud_game_write_intents(account_id,event_id,payload_json,prior_payload_json) VALUES(?1,?2,?3,?4)",params![scope.account_id,id,out.to_string(),before.to_string()]).map_err(sql)?;
+    // Writing and streak growth share one game_state write. The final intent
+    // must bind the persisted pre-write payload and the final grown state.
+    db.execute("INSERT INTO cloud_game_write_intents(account_id,event_id,payload_json,prior_payload_json) VALUES(?1,?2,?3,?4)",params![scope.account_id,id,out.to_string(),prior_payload]).map_err(sql)?;
     Ok(Some(out))
 }
 
@@ -236,12 +238,17 @@ pub fn capture_inventory(
             return Err("game_invalid_rule".into());
         }
         let price = details["unit_price"].as_f64().ok_or("game_invalid_rule")?;
-        let price =
+        let mut price =
             progress_codec::micros(&format!("{price:.6}")).map_err(|_| "game_invalid_rule")?;
         let delta = progress_codec::micros(next["coins"].as_str().ok_or("game_invalid_rule")?)
             .map_err(|_| "game_invalid_rule")?
             - progress_codec::micros(base["coins"].as_str().ok_or("game_invalid_rule")?)
                 .map_err(|_| "game_invalid_rule")?;
+        // Ordinary sales round the total after multiplying by quantity. Keep
+        // the existing money result when an exact portable unit price exists.
+        if intent.operation == "sell" && delta >= 0 && delta % i128::from(intent.count) == 0 {
+            price = delta / i128::from(intent.count);
+        }
         let parents = game_sync::tips(db, a, "account")?;
         if parents.len() != 1 {
             return Err("game_noncommutative_conflict".into());
@@ -471,7 +478,7 @@ pub fn capture_domain(
             db.execute("INSERT INTO cloud_game_projection VALUES(?1,?2,?3,?4,?5) ON CONFLICT(account_id,owner_key) DO UPDATE SET head_event_id=excluded.head_event_id,snapshot_json=excluded.snapshot_json,generation=excluded.generation",params![a,owner,id,canonical(value),revision]).map_err(sql)?;
         }
         db.execute("INSERT INTO cloud_game_write_intents(account_id,event_id,payload_json,prior_payload_json) VALUES(?1,?2,?3,?4)",params![a,rid,after.to_string(),before_raw]).map_err(sql)?;
-        if kind=="ProgressAdded" {if let Some(grown)=capture_growth(db,&scope,&g,after,now)?{*after=grown;}}
+        if kind=="ProgressAdded" {if let Some(grown)=capture_growth(db,&scope,&g,after,before_raw,now)?{*after=grown;}}
         Ok(())
     })();
     if result.is_err() {

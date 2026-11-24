@@ -17,7 +17,7 @@ export function validateGameInbox(value:unknown,s:BrowserSyncScope):GameInbox{
  if(!r||Object.keys(r).sort().join(',')!=='account_id,device_id,event_id,game_proof,protocol_version,record_version,server_sequence,state,wire_item'||r.record_version!==14||r.state!=='game_proven')fail()
  const {game_proof:p,...base}=r;validateBrowserInboxRecord({...base,record_version:1,state:'received'},s)
  const e=JSON.parse(r.wire_item).event
- if(r.protocol_version!==3||!['project_game','account_game'].includes(e.entity_type)||(e.entity_type==='account_game'?e.scope!=='account'||e.canonical_user_id!==s.canonicalUserId||e.operation!=='upsert':e.scope!==undefined||e.operation!=='event')||!Number.isSafeInteger(e.revision)||e.revision<1||e.device_id===s.deviceId||e.deleted_at!==null
+ if(r.protocol_version!==3||!['project_game','account_game'].includes(e.entity_type)||(e.entity_type==='account_game'?e.scope!=='account'||e.canonical_user_id!==s.canonicalUserId||e.operation!=='upsert':e.scope!==undefined||e.operation!=='event'||e.device_id===s.deviceId)||!Number.isSafeInteger(e.revision)||e.revision<1||e.deleted_at!==null
   ||!p||Object.keys(p).sort().join(',')!=='ledger_digest,outcome,owner_kind,projection_digest,record_version'||p.record_version!==1||p.owner_kind!=='game'||p.outcome!=='applied'||![p.ledger_digest,p.projection_digest].every(x=>/^[a-f0-9]{64}$/.test(x)))fail()
  return structuredClone(r)
 }

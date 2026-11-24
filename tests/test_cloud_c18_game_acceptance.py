@@ -6,6 +6,7 @@ calls the ordinary native Progress/completion/inventory writers and Game command
 import json
 import os
 import sqlite3
+from collections import Counter
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -353,6 +354,7 @@ def test_game_real_postgresql_two_devices_reward_once_and_bidirectional(cloud_cl
     emit_game(client,tmp_path,token,a,ia,user,amk)
     for path,identity in ((a,ia),(b,ib)):
         receive_mixed(client,tmp_path,token,path,identity,user,amk,game_first=True)
+        assert all(owner['state']=='active' for owner in command(tmp_path,path,identity,user,'view')['owners'])
     completed = game(tmp_path,a,ia,user,'complete',stage_id='S1')
     assert 'error' not in completed,completed
     assert game(tmp_path,a,ia,user,'process')['processed']==1
@@ -441,13 +443,65 @@ def test_game_real_postgresql_two_devices_reward_once_and_bidirectional(cloud_cl
         rejected=progress(tmp_path,path,identity,user,'manual',stage_id='S1',expected=owner['tips'],total=60)
         assert rejected['error']=='stage_tombstone_child_manifest_incomplete',rejected
         assert command(tmp_path,path,identity,user,'pending',sealed=False)==[]
+    with sqlite3.connect(a) as db:
+        retained = db.execute("""
+            SELECT event_id, json_extract(CAST(substr(canonical_frame,21) AS TEXT),'$.action.kind')
+            FROM cloud_game_events
+        """).fetchall()
+    # Stage writing earns both its writing reward and a separate daily-goal
+    # streak event. Neither event may disappear when Stage completion follows.
+    assert Counter(kind for _, kind in retained) == {
+        'genesis': 3, 'writing': 4, 'reward': 6, 'global_streak': 2, 'completion': 2,
+        'inventory': 2, 'resolution': 1, 'compensation': 1, 'adopt_local': 3,
+    }
     with engine.connect() as db:
-        assert db.execute(text("SELECT count(*) FROM sync_events WHERE entity_type IN ('project_game','account_game')")).scalar() == 23
+        remote_ids = db.execute(text("SELECT event_id FROM sync_events WHERE entity_type IN ('project_game','account_game')")).scalars()
+        assert {str(event_id) for event_id in remote_ids} == {event_id for event_id, _ in retained}
         columns = {r[0] for r in db.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name='sync_events'"))}
         assert not columns.intersection({'coins','experience','inventory','reward_id','game_action','total_symbols'})
 
 
-def test_global_loss_without_progress_converges_on_two_devices(cloud_client,tmp_path):
+def verify_web_shop(client, engine, tmp_path, token, user, amk, native_devices):
+    headers = _headers(token)
+    browser = dict(accountId=str(uuid4()), deviceId=str(uuid4()), canonicalUserId=user)
+    endpoint = '/api/v3/sync/encrypted/account/push'
+    gate = client.get('/api/v3/sync/encrypted/game-reader-capabilities', headers=headers,
+                      params=dict(web_game_version=1))
+    assert gate.json() == dict(ready=True, missing_devices=0, web_game_version=1)
+    for operation, expected_coins, expected_count in (('buy', 71, 1), ('sell', 92.8, 0)):
+        path, _ = native_devices[0]
+        with sqlite3.connect(path) as db:
+            raw, snapshot = db.execute("""
+                SELECT e.canonical_frame, p.snapshot_json
+                FROM cloud_game_projection p JOIN cloud_game_events e
+                ON e.account_id=p.account_id AND e.event_id=p.head_event_id
+                WHERE p.owner_key='account'
+            """).fetchone()
+        head, base = json.loads(raw[20:]), json.loads(snapshot)
+        with engine.connect() as db:
+            cursor = db.execute(text('SELECT max(server_sequence) FROM sync_events')).scalar_one()
+        prepared = _crypto_bridge(tmp_path, dict(action='game_shop', amk=amk, scope=browser,
+            head=head, base=base, now=NOW, event_id=str(uuid4()), command=dict(
+                operation=operation, category='Зелья', item_id='Микро зелье здоровья', count=1)))
+        raw_body = prepared['raw_body']
+        params = dict(web_game_version=1, expected_cursor=cursor, expected_epoch=2, game_parent=head['header']['event_id'])
+        assert client.post(endpoint, headers=headers, content=raw_body).status_code == 409
+        rejected = client.post(endpoint, headers=headers, content=raw_body, params={**params, 'expected_cursor': cursor - 1})
+        assert rejected.status_code == 409 and rejected.json()['detail']['code'] == 'web_game_snapshot_changed'
+        response = client.post(endpoint, headers=headers, content=raw_body, params=params)
+        assert response.status_code == 200, response.text
+        repeat = client.post(endpoint, headers=headers, content=raw_body, params=params)
+        assert repeat.status_code == 200 and repeat.json()['results'][0]['duplicate']
+        for path, identity in native_devices:
+            receive_mixed(client, tmp_path, token, path, identity, user, amk)
+            state = game(tmp_path, path, identity, user, 'state')['gamer']
+            assert state['coins'] == expected_coins
+            assert state['items'].get('Зелья', {}).get('Микро зелье здоровья', 0) == expected_count
+    with engine.connect() as db:
+        assert db.execute(text('SELECT count(*) FROM sync_devices')).scalar_one() == len(native_devices)
+
+
+def test_global_loss_without_progress_and_web_shop_converge_on_two_devices(cloud_client,tmp_path):
     client, engine = cloud_client
     user = str(create_user(engine));token = login(client).json()['access_token'];headers = _headers(token)
     a, ia = provision(tmp_path, 'game-A', user, True);b, ib = provision(tmp_path, 'game-B', user, False)
@@ -486,6 +540,7 @@ def test_global_loss_without_progress_converges_on_two_devices(cloud_client,tmp_
     for path, identity in ((a, ia), (b, ib)):
         assert receive_progress(client, tmp_path, token, path, identity, user, amk) == ['applied']
     source = dict(gamer=json.loads((ROOT/'frontend/src/cloud/__fixtures__/gameLegacyDefaultsV1.json').read_text()))
+    source['gamer']['coins'] = 100
     source['global_streak'] = dict(global_streaks=['2026-10-01','2026-10-02','2026-10-03'],
                                    max_global_streak=3,global_streak_status='Go')
     assert game(tmp_path,a,ia,user,'init',source=source) is True
@@ -515,6 +570,7 @@ def test_global_loss_without_progress_converges_on_two_devices(cloud_client,tmp_
     for path,identity in ((a,ia),(b,ib)):
         receive_mixed(client,tmp_path,token,path,identity,user,amk)
         assert game(tmp_path,path,identity,user,'state')['gamer']['health']==85
+    verify_web_shop(client, engine, tmp_path, token, user, amk, ((a, ia), (b, ib)))
     heads=progress(tmp_path,a,ia,user,'view')['owners'][0]['tips']
     assert 'entry' in progress(tmp_path,a,ia,user,'manual',expected=heads,total=120)
     assert game(tmp_path,a,ia,user,'process')['processed']==1

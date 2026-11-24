@@ -92,6 +92,7 @@ const navigationItems = computed(() => props.cloudWorkspace ? [
   { to: '/cloud', home: '/cloud', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
   { to: '/cloud?section=texts', home: '/cloud?section=texts', label: 'Тексты', mobileLabel: 'Тексты', icon: documentTextOutline },
   { to: '/cloud?section=notes', home: '/cloud?section=notes', label: 'Заметки', mobileLabel: 'Заметки', icon: documentTextOutline },
+  { to: '/cloud?section=game', home: '/cloud?section=game', label: 'Игра', mobileLabel: 'Игра', icon: sparklesOutline },
 ] : [
   { to: lastProjectPath.value, home: '/projects', label: 'Проекты', mobileLabel: 'Проекты', icon: folderOpenOutline },
   { to: lastMapsPath.value, home: '/maps', label: 'Карты', mobileLabel: 'Карты', icon: gitBranchOutline },
@@ -525,7 +526,7 @@ watchEffect(() => {
 .app-shell--cloud .app-main { overflow: auto; }
 .app-shell--locked { display: block; }
 .app-shell--locked .app-main { height: 100dvh; }
-.app-shell--cloud .mobile-navigation { grid-template-columns: minmax(0, 1fr); }
+.app-shell--cloud .mobile-navigation { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .preference-error {
   margin: var(--nf-space-1) var(--nf-space-2) 0;
   color: var(--nf-color-danger);

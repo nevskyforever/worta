@@ -1,8 +1,9 @@
 import type { AccountMasterKey } from '@/crypto'
-import type { GameEvent, ProjectGameEvent } from '@/cloud/gameCodec'
+import type { AccountGameBase, GameEvent, ProjectGameEvent } from '@/cloud/gameCodec'
 import { canonical } from '@/cloud/projectMetadataCodec'
 import { progressMicros } from '@/cloud/progressCodec'
-import { gameOwner, transitionGame, gameActionId, type GameState } from '@/cloud/gameProjectTransition'
+import { gameOwner, transitionGame, gameActionId, verifyGlobalStreakGrowth,
+  type GameState, type ProjectGameState, type StreakProgressSettings } from '@/cloud/gameProjectTransition'
 import { decodeBase64Url } from '@/api/base64url'
 import { canonicalizeSyncTimestamp } from '@/cloud/syncTimestamp'
 import { openBrowserCanonicalObject } from './canonicalReaders'
@@ -15,13 +16,27 @@ import { prepareProgressEvent, inspectPreparedProgressEvent } from './progressPr
 import { BrowserPersistenceError } from './persistence'
 import { immutableWireIdentity, type BrowserSyncScope } from './syncDurability'
 import type { ReplaySnapshot } from './replayInventory'
+import { assertAccountGameEcho } from './gameOutbound'
 export interface GameInput { server_sequence:number; wire_item:string }
 interface GamePlan { event:GameEvent; projection:GameState; serverSequence:number; wireItem:string }
 export interface PreparedGameEvent { readonly gameToken: unique symbol }
 const prepared=new WeakMap<object,{scope:string;snapshot:string;current:()=>boolean;data:GamePlan}>()
 function reject():never{throw new BrowserPersistenceError('unsupported_local_source')}
-/** Native Game owner admission over the exact replay snapshot. Only complete
- * linear project genesis/writing/completion and account genesis/reward/inventory. */
+
+async function openGameSettings(scope:BrowserSyncScope,snapshot:ReplaySnapshot,amk:AccountMasterKey,id:string) {
+ const row=snapshot.rows.find(value=>value.event_id===id)
+ if(!row)reject()
+ const wire=JSON.parse(row.wire_item),event=wire.event
+ const nonce=decodeBase64Url(wire.object.nonce),ciphertext=decodeBase64Url(wire.object.ciphertext)
+ try {
+  return await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:event.project_id,
+   entityId:event.entity_id,entityType:event.entity_type,eventId:id},{...wire.object,nonce,ciphertext}) as {
+   metadata?:StreakProgressSettings & {stages_enabled:boolean}; stage?:StreakProgressSettings
+  }
+ } finally { nonce.fill(0);ciphertext.fill(0) }
+}
+
+/** Native Game owner admission over the exact replay snapshot. */
 export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,snapshot:ReplaySnapshot,amk:AccountMasterKey,current:()=>boolean,cache=new Map<number,PreparedGameEvent>(),active=new Set<number>(),atomic:ReadonlySet<number>=new Set()):Promise<PreparedGameEvent>{
  if(!current())throw new BrowserPersistenceError('closed')
  const cached=cache.get(input.server_sequence)
@@ -31,13 +46,15 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
  try {
  const identity=immutableWireIdentity(snapshot),scopeId=immutableWireIdentity(scope),wire=JSON.parse(input.wire_item),d=wire.event
  const account=d.entity_type==='account_game'
- if(!Number.isSafeInteger(input.server_sequence)||input.server_sequence<1||d.server_sequence!==input.server_sequence||d.device_id===scope.deviceId
+ if(!Number.isSafeInteger(input.server_sequence)||input.server_sequence<1||d.server_sequence!==input.server_sequence
    ||d.deleted_at!==null||d.operation!==(account?'upsert':'event')||!['account_game','project_game'].includes(d.entity_type))reject()
+ if(d.device_id===scope.deviceId)assertAccountGameEcho(scope,snapshot,input)
  const nonce=decodeBase64Url(wire.object.nonce),ciphertext=decodeBase64Url(wire.object.ciphertext)
  let event:GameEvent
  try{event=await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:account?null:d.project_id,entityId:d.entity_id,entityType:d.entity_type,eventId:d.event_id},{...wire.object,nonce,ciphertext}) as GameEvent}
  finally{nonce.fill(0);ciphertext.fill(0)}
  const h=event.header,a=event.action,key=gameOwner(event)
+ if(d.device_id===scope.deviceId&&(a.kind!=='inventory'||!['buy','sell'].includes(a.operation)))reject()
  if(h.account_id!==scope.canonicalUserId||h.device_id!==d.device_id||h.event_id!==d.event_id||h.entity_id!==d.entity_id||h.revision!==d.revision
    ||h.updated_at!==canonicalizeSyncTimestamp(d.updated_at)||(h.scope==='account')!==account||h.scope==='project'&&h.project_id!==d.project_id)reject()
  if(h.scope==='project'){
@@ -65,16 +82,13 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
     if(progressMicros(plan.projection.entries.at(-1)?.new_total??plan.projection.base_total)!==progressMicros(a.total_symbols)
       ||h.event_id!==await gameActionId(h.account_id,'completion',[h.project_id,h.stage_id,a.completion_id]))reject()
     const referenceId=h.stage_id===null?h.metadata_event_id:h.stage_event_ids.length===1?h.stage_event_ids[0]:undefined
-    const row=snapshot.rows.find(r=>r.event_id===referenceId)
-    if(!row)reject()
-    const w=JSON.parse(row.wire_item),n=decodeBase64Url(w.object.nonce),c=decodeBase64Url(w.object.ciphertext)
-    try{const p=await openBrowserCanonicalObject(amk,{accountId:scope.canonicalUserId,projectId:h.project_id,entityId:w.event.entity_id,entityType:w.event.entity_type,eventId:w.event.event_id},{...w.object,nonce:n,ciphertext:c}) as {metadata?:{status:string};stage?:{status:string}}
-      if((h.stage_id===null?p.metadata?.status:p.stage?.status)!=='завершен')reject()
-    }finally{n.fill(0);c.fill(0)}
+    if(!referenceId)reject()
+    const settings=await openGameSettings(scope,snapshot,amk,referenceId)
+    if((h.stage_id===null?settings.metadata?.status:settings.stage?.status)!=='завершен')reject()
    }
   }
- }else if(!['genesis','reward','inventory','global_streak','freeze'].includes(a.kind))reject()
- let previous:GamePlan|undefined,source:ProjectGameEvent|undefined
+ }else if(!['genesis','reward','inventory','global_streak','freeze','compensation'].includes(a.kind))reject()
+ let previous:GamePlan|undefined,source:GameEvent|undefined
  // Filter by durable owner key only to select candidates. Each candidate is
  // independently decrypted and its actual owner identity checked below.
  for(const row of snapshot.rows){if(row.server_sequence>=input.server_sequence)break
@@ -105,6 +119,20 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
   if(plan.event.header.scope!=='project'||h.event_id!==await gameActionId(h.account_id,'reward',a.project_action_id))reject()
   source=plan.event as ProjectGameEvent
  }
+ if (a.kind === 'compensation') {
+  if (!account || h.event_id !== await gameActionId(h.account_id, 'compensation', a.target_action_id)) reject()
+  let ancestor = previous
+  while (ancestor && ancestor.event.header.event_id !== a.target_action_id) {
+   const parent = ancestor.event.header.parents[0]
+   if (!parent) break
+   const row = snapshot.rows.find(row => row.event_id === parent && (row.state === 'game_proven' || atomic.has(row.server_sequence)))
+   if (!row) reject()
+   ancestor = inspectPreparedGameEvent(await prepareGameEvent(scope, row, snapshot, amk, current, cache, active, atomic), scope, snapshot)
+  }
+  if (ancestor?.event.header.event_id !== a.target_action_id || ancestor.event.header.scope !== 'account'
+   || ancestor.event.action.kind !== 'reward') reject()
+  source = ancestor.event
+ }
  if(a.kind==='global_streak'){
   if(event.version===2){
    if(h.event_id!==await gameActionId(h.account_id,'global_streak_loss',a.before))reject()
@@ -116,7 +144,17 @@ export async function prepareGameEvent(scope:BrowserSyncScope,input:GameInput,sn
    const plan=inspectPreparedGameEvent(await prepareGameEvent(scope,row,snapshot,amk,current,cache,active,atomic),scope,snapshot)
    if(plan.event.header.scope!=='project'||plan.event.action.kind!=='writing'||plan.event.action.fact.writing_day!==a.writing_day
      ||h.event_id!==await gameActionId(h.account_id,'global_streak',[a.writing_day,refs]))reject()
-   source=plan.event as ProjectGameEvent
+   const writing=plan.event as ProjectGameEvent
+   const progressRow=snapshot.rows.find(row=>row.state==='progress_proven'&&row.event_id===(writing.action as {progress_event_id:string}).progress_event_id)
+   if(!previous||!progressRow)reject()
+   const inventory=progressPreparationInventory(snapshot)
+   const progress=inspectPreparedProgressEvent(await prepareProgressEvent(scope,progressRow,inventory,amk,current),scope,inventory).projection
+   const project=(await openGameSettings(scope,snapshot,amk,writing.header.metadata_event_id)).metadata
+   if(!project||writing.header.stage_id!==null&&writing.header.stage_event_ids.length!==1)reject()
+   const stageId=writing.header.stage_event_ids[0]
+   const stage=stageId?(await openGameSettings(scope,snapshot,amk,stageId)).stage:undefined
+   verifyGlobalStreakGrowth(a,previous.projection as AccountGameBase,writing,plan.projection as ProjectGameState,progress,project,stage)
+   source=writing
   }else reject()
  }
  if (a.kind === 'freeze' && 'project_id' in a) {
